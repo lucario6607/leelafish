@@ -325,6 +325,36 @@ Move::Move(const std::string& str, bool black) {
   }
 }
 
+bool Move::ParseMove(Move* out, const std::string& str, bool black) {
+  if (str.size() < 4) return false;
+  out->SetFrom(BoardSquare(str.substr(0, 2), black));
+  out->SetTo(BoardSquare(str.substr(2, 2), black));
+  if (str.size() != 4) {
+    if (str.size() != 5) return false;
+    switch (str[4]) {
+      case 'q':
+      case 'Q':
+        out->SetPromotion(Promotion::Queen);
+        break;
+      case 'r':
+      case 'R':
+        out->SetPromotion(Promotion::Rook);
+        break;
+      case 'b':
+      case 'B':
+        out->SetPromotion(Promotion::Bishop);
+        break;
+      case 'n':
+      case 'N':
+        out->SetPromotion(Promotion::Knight);
+        break;
+      default:
+        return false;
+    }
+  }
+  return true;
+}
+
 uint16_t Move::as_packed_int() const {
   if (promotion() == Promotion::Knight) {
     return from().as_int() * 64 + to().as_int();

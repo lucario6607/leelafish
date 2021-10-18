@@ -151,6 +151,7 @@ files += [
   'src/chess/board.cc',
   'src/chess/position.cc',
   'src/chess/uciloop.cc',
+  'src/mcts/auxengine.cc',
   'src/mcts/node.cc',
   'src/mcts/params.cc',
   'src/mcts/search.cc',
@@ -204,6 +205,10 @@ if host_machine.system() == 'windows'
 else
   files += 'src/utils/filesystem.posix.cc'
 endif
+
+# I think boost::process is category system, so I need system?
+# Putting thread in also just in case.
+deps += [ dependency('boost', modules : ['thread', 'system' ], static : true) ]
 
 #############################################################################
 ## BACKENDS

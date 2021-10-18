@@ -249,6 +249,9 @@ class Node {
   // Debug information about the node.
   std::string DebugString() const;
 
+  uint16_t GetAuxEngineMove();
+  void SetAuxEngineMove(uint16_t move);
+
   // Reallocates this nodes children to be in a solid block, if possible and not
   // already done. Returns true if the transformation was performed.
   bool MakeSolid();
@@ -321,6 +324,9 @@ class Node {
   // 2 byte fields.
   // Index of this node is parent's edge list.
   uint16_t index_;
+
+  // TODO: magic value!
+  uint16_t auxengine_move_ = 0xffff;
 
   // 1 byte fields.
   // Number of edges in @edges_.

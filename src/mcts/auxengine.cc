@@ -121,10 +121,12 @@ void Search::AuxEngineWorker() {
   Node* n;
   while (!stop_.load(std::memory_order_acquire)) {
     {
+      LOGFILE << "AUX Trying to get a lock on auxengine_mutex_";
       std::unique_lock<std::mutex> lock(auxengine_mutex_);
-
+      LOGFILE << "AUX Got the lock on auxengine_mutex_";
       // Wait until there's some work to compute.
       auxengine_cv_.wait(lock, [&] { return stop_.load(std::memory_order_acquire) || !auxengine_queue_.empty(); });
+      LOGFILE << "AUX waiting ";
       if (stop_.load(std::memory_order_acquire)) break;
       n = auxengine_queue_.front();
       auxengine_queue_.pop();
@@ -235,6 +237,12 @@ void Search::DoAuxEngine(Node* n) {
 }
 
 void Search::AuxUpdateP(Node* n, std::vector<uint16_t> pv_moves, int ply) {
+  LOGFILE << "AuxUpdateP() called with ply=" << ply;
+  // if(n-solid_children_){
+  //   LOGFILE << "Aux this node is solid";
+  // } else {
+  //   LOGFILE << "Aux this node is not solid";
+  // }
   if (n->GetAuxEngineMove() < 0xfffe) {
     // This can happen because nodes are placed in the queue from
     // deepest node first during DoBackupSingeNode
@@ -246,6 +254,8 @@ void Search::AuxUpdateP(Node* n, std::vector<uint16_t> pv_moves, int ply) {
     return;
   }
   for (const auto& edge : n->Edges()) {
+    LOGFILE << "AUX trying to find the edge corresponding to this move: " << pv_moves[ply];
+    LOGFILE << "AUX got this edge " << edge.GetMove().as_packed_int() << " which represents this move " << n->DebugString();
     if (edge.GetMove().as_packed_int() == pv_moves[ply]) {
       auto new_p = edge.GetP() + params_.GetAuxEngineBoost()/100.0f;
       edge.edge()->SetP(std::min(new_p, 1.0f));
@@ -258,14 +268,42 @@ void Search::AuxUpdateP(Node* n, std::vector<uint16_t> pv_moves, int ply) {
       // or when e.g. ply=0, pv_moves.size()=1 (pv is exhasted)
       // of the edge does not have a node yet.
       // of the edge is a terminal.
+
+      if(edge.GetMove().as_packed_int() == pv_moves[ply]){
+	LOGFILE << "AuxUpdateP 1.";
+      }
+      if(ply+1 < params_.GetAuxEngineFollowPvDepth()){
+	LOGFILE << "AuxUpdateP 2.";
+      }
+      if((uint32_t) ply+1 < pv_moves.size()){
+	LOGFILE << "AuxUpdateP 3.";
+      }
+      if(edge.HasNode()){
+	LOGFILE << "AuxUpdateP 4.";
+      } else {
+	LOGFILE << "No node!";
+      }
+      if(!edge.IsTerminal()){
+	LOGFILE << "AuxUpdateP 5.";
+      }
+      if(edge.HasNode() && edge.node()->HasChildren()){
+	LOGFILE << "AuxUpdateP 6.";
+      } else {
+	LOGFILE << "No Children";
+      }
+      
       if (ply+1 < params_.GetAuxEngineFollowPvDepth() &&
-          (uint32_t) ply+1 < pv_moves.size() &&
+          // (uint32_t) ply+1 < pv_moves.size() &&
+          ply+1 < pv_moves.size() &&	  
           edge.HasNode() &&
           !edge.IsTerminal() &&
           edge.node()->HasChildren()) {
+	LOGFILE << "AUX about to update policy";
         AuxUpdateP(edge.node(), pv_moves, ply+1);
       }
+      LOGFILE << "AUX about to call SetAuxEngineMove()";      
       n->SetAuxEngineMove(pv_moves[ply]);
+      LOGFILE << "AUX SetAuxEngineMove() returned";
       return;
     }
   }

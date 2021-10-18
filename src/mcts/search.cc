@@ -802,6 +802,7 @@ EdgeAndNode Search::GetBestRootChildWithTemperature(float temperature) const {
 void Search::StartThreads(size_t how_many) {
   thread_count_.store(how_many, std::memory_order_release);
   Mutex::Lock lock(threads_mutex_);
+  OpenAuxEngine();
   // First thread is a watchdog thread.
   if (threads_.size() == 0) {
     threads_.emplace_back([this]() { WatchdogThread(); });
@@ -2261,6 +2262,7 @@ void SearchWorker::DoBackupUpdateSingleNode(
       search_->current_best_edge_ =
           search_->GetBestChildNoTemperature(search_->root_node_, 0);
     }
+    AuxMaybeEnqueueNode(n);
   }
   search_->total_playouts_ += node_to_process.multivisit;
   search_->cum_depth_ += node_to_process.depth * node_to_process.multivisit;

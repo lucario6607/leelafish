@@ -119,51 +119,44 @@ void Search::AuxEngineWorker() {
   LOGFILE << current_uci_;
 
   Node* n;
+
+  // TODO handle this: 1019 15:31:45.540938 140297824630528 ../../src/mcts/stoppers/stoppers.cc:195] Only one possible move. Moving immediately.
+  // Do not assume there will ever be a job.
   while (!stop_.load(std::memory_order_acquire)) {
     {
-      LOGFILE << "AUX Trying to get a lock on auxengine_mutex_";
       std::unique_lock<std::mutex> lock(auxengine_mutex_);
-      LOGFILE << "AUX Got the lock on auxengine_mutex_";
       // Wait until there's some work to compute.
       auxengine_cv_.wait(lock, [&] { return stop_.load(std::memory_order_acquire) || !auxengine_queue_.empty(); });
-      LOGFILE << "AUX waiting ";
       if (stop_.load(std::memory_order_acquire)) break;
-      LOGFILE << "AUX waiting 2 ";
       n = auxengine_queue_.front();
-      LOGFILE << "AUX waiting 3 ";      
       auxengine_queue_.pop();
     } // release lock
-    LOGFILE << "AUX waiting 4 ";
     DoAuxEngine(n);
-    LOGFILE << "AUX waiting 5 ";    
   }
   LOGFILE << "AuxEngineWorker done";
 }
 
 void Search::DoAuxEngine(Node* n) {
-  LOGFILE << "at DoAuxEngine";
   if (n->GetAuxEngineMove() < 0xfffe) {
-    LOGFILE << "at DoAuxEngine: strange node, returning now.";
     return;
   }
-  LOGFILE << "at DoAuxEngine: node is OK.";
   int depth = 0;
   if(n->GetParent() == nullptr){
+    if(root_node_ == n){
+      return;
+    }
     LOGFILE << "at DoAuxEngine: node is actually not OK.";
     return;
   }
   for (Node* n2 = n; n2 != root_node_; n2 = n2->GetParent()) {
     depth++;
   }
-  LOGFILE << "at DoAuxEngine: depth is OK.";  
   std::string s = "";
   bool flip = played_history_.IsBlackToMove() ^ (depth % 2 == 0);
-  LOGFILE << "at DoAuxEngine: flip is initiated.";    
   for (Node* n2 = n; n2 != root_node_; n2 = n2->GetParent()) {
     s = n2->GetOwnEdge()->GetMove(flip).as_string() + " " + s;
     flip = !flip;
   }
-  LOGFILE << "at DoAuxEngine: 3.";  
   if (params_.GetAuxEngineVerbosity() >= 1) {
     LOGFILE << "add pv=" << s;
   }
@@ -175,7 +168,6 @@ void Search::DoAuxEngine(Node* n) {
   std::string line;
   std::string token;
   bool stopping = false;
-  LOGFILE << "at DoAuxEngine: 4.";    
   while(std::getline(auxengine_is_, line)) {
     if (params_.GetAuxEngineVerbosity() >= 2) {
       LOGFILE << "auxe:" << line;
@@ -197,7 +189,6 @@ void Search::DoAuxEngine(Node* n) {
       }
     }
   }
-  LOGFILE << "at DoAuxEngine: 5.";      
   if (stopping) {
     // Don't use results of a search that was stopped.
     return;
@@ -230,7 +221,7 @@ void Search::DoAuxEngine(Node* n) {
           }
           break;
         }
-	LOGFILE << "pv: " << pv << " int: " << m.as_packed_int();
+	// LOGFILE << "pv: " << pv << " int: " << m.as_packed_int();
         pv_moves.push_back(m.as_packed_int());
         flip = !flip;
       }
@@ -255,7 +246,7 @@ void Search::DoAuxEngine(Node* n) {
 
 void Search::AuxUpdateP(Node* n, std::vector<uint16_t> pv_moves, int ply) {
   // GetParent(), GetOwnEdge()
-  LOGFILE << "AuxUpdateP() called with ply=" << ply << " to update policy in the branch starting with this node" << n->GetOwnEdge()->DebugString();
+  // LOGFILE << "AuxUpdateP() called with ply=" << ply << " to update policy in the branch starting with this node" << n->GetOwnEdge()->DebugString();
   // if(n-solid_children_){
   //   LOGFILE << "Aux this node is solid";
   // } else {
@@ -271,13 +262,13 @@ void Search::AuxUpdateP(Node* n, std::vector<uint16_t> pv_moves, int ply) {
     //}
     return;
   }
-  LOGFILE << "AUX trying to find the edge corresponding to this move: " << pv_moves[ply];
+  // LOGFILE << "AUX trying to find the edge corresponding to this move: " << pv_moves[ply];
   for (const auto& edge : n->Edges()) {
     
-    // Use the appropriate encoding of castling.
+    // TODO Use the appropriate encoding of castling.
     // If this is Chess960, then do nothing, the move from the helper engine should already be in modern encoding which is Leelas native encoding.
     // If this is standard chess, then translate Leelas native encoding to Legacy
-    LOGFILE << "AUX got this edge " << edge.GetMove().as_packed_int() << " which represents this move " << edge.DebugString();    
+    // LOGFILE << "AUX got this edge " << edge.GetMove().as_packed_int() << " which represents this move " << edge.DebugString();    
     // TODO get access to options_ from Search:: so we can test for options_.Get<bool>(kUciChess960)
     // For now, assume standard chess
     // if(!options_.Get<bool>(kUciChess960)){
@@ -286,8 +277,8 @@ void Search::AuxUpdateP(Node* n, std::vector<uint16_t> pv_moves, int ply) {
     // LOGFILE << "AUX got this edge " << m.as_packed_int() << " which represents this move " << edge.DebugString();
     if (edge.GetMove().as_packed_int() == pv_moves[ply]) {
       auto new_p = edge.GetP() + params_.GetAuxEngineBoost()/100.0f;
-      LOGFILE << "Not actually setting P, but would have set it to " << std::min(new_p, 1.0f);
-      // edge.edge()->SetP(std::min(new_p, 1.0f));
+      // LOGFILE << "Not actually setting P, but would have set it to " << std::min(new_p, 1.0f);
+      edge.edge()->SetP(std::min(new_p, 1.0f));
       // Obsolete code: START best_child_cached_ isn't used anymore
       // // Modifying P invalidates best child logic.
       // n->InvalidateBestChild();
@@ -298,44 +289,44 @@ void Search::AuxUpdateP(Node* n, std::vector<uint16_t> pv_moves, int ply) {
       // of the edge does not have a node yet.
       // of the edge is a terminal.
 
-      if(edge.GetMove().as_packed_int() == pv_moves[ply]){
-	LOGFILE << "AuxUpdateP 1.";
-      }
-      if(ply+1 < params_.GetAuxEngineFollowPvDepth()){
-	LOGFILE << "AuxUpdateP 2.";
-      }
-      if((uint32_t) ply+1 < pv_moves.size()){
-	LOGFILE << "AuxUpdateP 3.";
-      }
-      if(edge.HasNode()){
-	LOGFILE << "AuxUpdateP 4.";
-      } else {
-	LOGFILE << "No node!";
-      }
-      if(!edge.IsTerminal()){
-	LOGFILE << "AuxUpdateP 5.";
-      }
-      if(edge.HasNode() && edge.node()->HasChildren()){
-	LOGFILE << "AuxUpdateP 6.";
-      } else {
-	LOGFILE << "No Children";
-      }
+      // if(edge.GetMove().as_packed_int() == pv_moves[ply]){
+      // 	LOGFILE << "AuxUpdateP 1.";
+      // }
+      // if(ply+1 < params_.GetAuxEngineFollowPvDepth()){
+      // 	LOGFILE << "AuxUpdateP 2.";
+      // }
+      // if((uint32_t) ply+1 < pv_moves.size()){
+      // 	LOGFILE << "AuxUpdateP 3.";
+      // }
+      // if(edge.HasNode()){
+      // 	LOGFILE << "AuxUpdateP 4.";
+      // } else {
+      // 	LOGFILE << "No node!";
+      // }
+      // if(!edge.IsTerminal()){
+      // 	LOGFILE << "AuxUpdateP 5.";
+      // }
+      // if(edge.HasNode() && edge.node()->HasChildren()){
+      // 	LOGFILE << "AuxUpdateP 6.";
+      // } else {
+      // 	LOGFILE << "No Children";
+      // }
       
       if (ply+1 < params_.GetAuxEngineFollowPvDepth() &&
           (uint32_t) ply+1 < pv_moves.size() &&
           edge.HasNode() &&
           !edge.IsTerminal() &&
           edge.node()->HasChildren()) {
-	LOGFILE << "AUX about to update policy";
+	// LOGFILE << "AUX about to update policy";
         AuxUpdateP(edge.node(), pv_moves, ply+1);
       }
-      LOGFILE << "AUX about to call SetAuxEngineMove()";      
+      // LOGFILE << "AUX about to call SetAuxEngineMove()";      
       n->SetAuxEngineMove(pv_moves[ply]);
-      LOGFILE << "AUX SetAuxEngineMove() returned";
+      // LOGFILE << "AUX SetAuxEngineMove() returned";
       return;
     }
   }
-  LOGFILE << "AuxUpdateP: Move not found. ply:" << ply;
+  LOGFILE << "AuxUpdateP: Move not found. ply:" << ply << " FIX legacy castling!";
   // throw Exception("AuxUpdateP: Move not found");
 }
 
@@ -346,6 +337,7 @@ void Search::AuxWait() REQUIRES(threads_mutex_) {
     auxengine_threads_.back().join();
     auxengine_threads_.pop_back();
   }
+  LOGFILE << "Done waiting for auxengine_threads to shut down";
   // Threading/Locking:
   // - Search::Wait is holding threads_mutex_.
   // - SearchWorker threads are guaranteed done by Search::Wait
@@ -353,7 +345,7 @@ void Search::AuxWait() REQUIRES(threads_mutex_) {
   // - This is the only thread left that can modify auxengine_queue_
   // - Take the lock anyways to be safe.
   std::unique_lock<std::mutex> lock(auxengine_mutex_);
-  LOGFILE << "done waiting. auxengine_queue_ size " << auxengine_queue_.size()
+  LOGFILE << "AuxWait got a lock. auxengine_queue_ size " << auxengine_queue_.size()
       << " Average duration " << (auxengine_num_evals ? (auxengine_total_dur / auxengine_num_evals) : -1.0f) << "ms"
       << " Number of evals " << auxengine_num_evals
       << " Number of updates " << auxengine_num_updates;

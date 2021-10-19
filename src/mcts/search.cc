@@ -926,6 +926,7 @@ void Search::WatchdogThread() {
 void Search::FireStopInternal() {
   stop_.store(true, std::memory_order_release);
   watchdog_cv_.notify_all();
+  auxengine_cv_.notify_all();  
 }
 
 void Search::Stop() {

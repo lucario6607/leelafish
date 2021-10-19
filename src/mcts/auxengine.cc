@@ -120,19 +120,21 @@ void Search::AuxEngineWorker() {
 
   Node* n;
 
-  // TODO handle this: 1019 15:31:45.540938 140297824630528 ../../src/mcts/stoppers/stoppers.cc:195] Only one possible move. Moving immediately.
-  // Do not assume there will ever be a job.
-  while (!stop_.load(std::memory_order_acquire)) {
-    {
-      std::unique_lock<std::mutex> lock(auxengine_mutex_);
-      // Wait until there's some work to compute.
-      auxengine_cv_.wait(lock, [&] { return stop_.load(std::memory_order_acquire) || !auxengine_queue_.empty(); });
-      if (stop_.load(std::memory_order_acquire)) break;
-      n = auxengine_queue_.front();
-      auxengine_queue_.pop();
-    } // release lock
-    DoAuxEngine(n);
-  }
+  // TODO handle this: 1019 15:31:45.540938 140297824630528 ../../src/mcts/stoppers/stoppers.cc:195] Only one possible move. Moving immediately. DONE with if(root_node_->GetNumEdges() > 1){
+  // TODO handle this: 1019 16:53:49.746308 139657706731264 ../../src/mcts/stoppers/stoppers.cc:199] At most one non losing move, stopping search.  
+  // if(root_node_->GetNumEdges() > 1){
+    while (!stop_.load(std::memory_order_acquire)) {
+      {
+	std::unique_lock<std::mutex> lock(auxengine_mutex_);
+	// Wait until there's some work to compute.
+	auxengine_cv_.wait(lock, [&] { return stop_.load(std::memory_order_acquire) || !auxengine_queue_.empty(); });
+	if (stop_.load(std::memory_order_acquire)) break;
+	n = auxengine_queue_.front();
+	auxengine_queue_.pop();
+      } // release lock
+      DoAuxEngine(n);
+    }
+  // }
   LOGFILE << "AuxEngineWorker done";
 }
 
@@ -198,6 +200,7 @@ void Search::DoAuxEngine(Node* n) {
     LOGFILE << "bestanswer:" << token;
   }
   if (!auxengine_c_.running()) {
+    LOGFILE << "AuxEngine died!";
     throw Exception("AuxEngine died!");
   }
   auto auxengine_dur =
@@ -241,10 +244,14 @@ void Search::DoAuxEngine(Node* n) {
   }
   // Take the lock and update the P value of the bestmove
   SharedMutex::Lock lock(nodes_mutex_);
+  LOGFILE << "DoAuxEngine: About to call AuxUpdateP()";
   AuxUpdateP(n, pv_moves, 0);
 }
 
 void Search::AuxUpdateP(Node* n, std::vector<uint16_t> pv_moves, int ply) {
+  if(ply == 0){
+    LOGFILE << "AuxUpdateP() called with ply=" << ply << " to update policy in the branch starting with this node" << n->GetOwnEdge()->DebugString();
+  }
   // GetParent(), GetOwnEdge()
   // LOGFILE << "AuxUpdateP() called with ply=" << ply << " to update policy in the branch starting with this node" << n->GetOwnEdge()->DebugString();
   // if(n-solid_children_){

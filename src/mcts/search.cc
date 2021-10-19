@@ -951,6 +951,7 @@ void Search::Wait() {
     threads_.back().join();
     threads_.pop_back();
   }
+  AuxWait();  
 }
 
 void Search::CancelSharedCollisions() REQUIRES(nodes_mutex_) {

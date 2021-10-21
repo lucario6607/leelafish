@@ -952,7 +952,6 @@ void Search::Wait() {
     threads_.back().join();
     threads_.pop_back();
   }
-  AuxWait();  
 }
 
 void Search::CancelSharedCollisions() REQUIRES(nodes_mutex_) {
@@ -967,6 +966,7 @@ void Search::CancelSharedCollisions() REQUIRES(nodes_mutex_) {
 }
 
 Search::~Search() {
+  AuxWait();  // This can take some time during which we are not ready to respond readyok, so for now increase timemargin.
   Abort();
   Wait();
   {

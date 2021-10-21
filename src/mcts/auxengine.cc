@@ -153,7 +153,8 @@ void Search::DoAuxEngine(Node* n) {
   } else {
     LOGFILE << "at DoAuxEngine: called with a non-root node";
     if(n2 == nullptr){
-      LOGFILE << "at DoAuxEngine: called with a null pointer";      
+      LOGFILE << "at DoAuxEngine: called with a null pointer";
+      return;
     }
     while(n2 != nullptr && n2 != root_node_){
       n2 = n2->GetParent();

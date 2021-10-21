@@ -304,8 +304,8 @@ void Search::DoAuxEngine(Node* n) {
     pv_moves.clear();
     pv_moves.push_back(bestmove_packed_int);
   }
-  // Take the lock and update the P value of the bestmove
-  SharedMutex::Lock lock(nodes_mutex_);
+  /* // Take the lock and update the P value of the bestmove */
+  /* SharedMutex::Lock lock(nodes_mutex_); */
   // LOGFILE << "DoAuxEngine: About to call AuxUpdateP()";
   AuxUpdateP(n, pv_moves, 0, my_board);
   // LOGFILE << "DoAuxEngine: AuxUpdateP() finished.";  
@@ -386,10 +386,15 @@ void Search::AuxUpdateP(Node* n, std::vector<uint16_t> pv_moves, int ply, ChessB
       if(move.as_packed_int() == 263 && pv_moves[ply] == 262){
 	LOGFILE << "GetLegacyMove() appear to have failed, falling back to a manual hack.";
       }
-      auto new_p = edge.GetP() + params_.GetAuxEngineBoost()/100.0f;
-      LOGFILE << "Changing P from " << edge.GetP() << " to " << std::min(new_p, 1.0f);
-      edge.edge()->SetP(std::min(new_p, 1.0f));
-      auxengine_num_updates++;
+      // Only change Policy if it is rather low, and don't make it absurdly high.
+      if(edge.GetP() < 0.3) {
+	auto new_p = edge.GetP() + params_.GetAuxEngineBoost()/100.0f;
+	LOGFILE << "Changing P from " << edge.GetP() << " to " << std::min(new_p, 0.5f);
+	nodes_mutex_.lock();
+	edge.edge()->SetP(std::min(new_p, 0.5f));
+	nodes_mutex_.unlock();	
+	auxengine_num_updates++;
+      }
       if (ply+1 < params_.GetAuxEngineFollowPvDepth() &&
           (uint32_t) ply+1 < pv_moves.size() &&
           edge.HasNode() &&
@@ -410,7 +415,8 @@ void Search::AuxUpdateP(Node* n, std::vector<uint16_t> pv_moves, int ply, ChessB
 
   // Leela might have made the node terminal due to repetition, but the AUX engine might not. Only die if there actually are edges.
   if(n->HasChildren()){
-    throw Exception("AuxUpdateP: Move not found");
+    // throw Exception("AuxUpdateP: Move not found");
+    LOGFILE << "AuxUpdateP: Move not found.";
   }
 }
 

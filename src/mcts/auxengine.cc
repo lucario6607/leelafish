@@ -108,7 +108,7 @@ void Search::AuxEngineWorker() {
     auxengine_ready_ = true;
   }
   if (current_position_fen_ == "") {
-    current_position_fen_ = ChessBoard::kStartposFen; // TODO
+    current_position_fen_ = ChessBoard::kStartposFen; // TODO [HE: what is there todo?]
   }
   if (current_position_moves_.size()) {
     for (auto i = current_position_moves_.size(); i-- > 0;) {
@@ -136,7 +136,6 @@ void Search::AuxEngineWorker() {
       DoAuxEngine(n);
       LOGFILE << "AuxEngineWorker: DoAuxEngine() returned";
     }
-  // }
   LOGFILE << "AuxEngineWorker done";
 }
 
@@ -152,8 +151,11 @@ void Search::DoAuxEngine(Node* n) {
   if(n2 == root_node_){
     LOGFILE << "at DoAuxEngine: called with root node";
   } else {
-    LOGFILE << "at DoAuxEngine: called with a non-root node";    
-    while(n2 != root_node_ && n2 != nullptr){
+    LOGFILE << "at DoAuxEngine: called with a non-root node";
+    if(n2 == nullptr){
+      LOGFILE << "at DoAuxEngine: called with a null pointer";      
+    }
+    while(n2 != nullptr && n2 != root_node_){
       n2 = n2->GetParent();
       depth++;
     }
@@ -167,7 +169,7 @@ void Search::DoAuxEngine(Node* n) {
   std::string st = "";
   bool flip = played_history_.IsBlackToMove() ^ (depth % 2 == 0);
 
-  // To get the moves in UCI format, we have to construct a board with them, starting from root.
+  // To get the moves in UCI format, we have to construct a board, starting from root and then apply the moves.
   // Traverse up to root, and store the moves in a vector.
   // Apply the moves in reversed order to get the proper board state from which we can then make moves in legacy format.
   std::vector<lczero::Move> my_moves;
@@ -214,7 +216,11 @@ void Search::DoAuxEngine(Node* n) {
   std::string line;
   std::string token;
   bool stopping = false;
-  // while waiting for getline() we do not listen for the stop signal, so shutting down search will be delayed by at most the time between the info lines of the A/B helper. Since we will not use that result anyway, it would be cleaner to return fast and stop the A/B helper when we have time to do so.
+  // TODO: while waiting for getline() we do not listen for the stop
+  // signal, so shutting down search will be delayed by at most the
+  // time between the info lines of the A/B helper. Since we will not
+  // use that result anyway, it would be cleaner to return fast and
+  // stop the A/B helper when we have time to do so.
   while(std::getline(auxengine_is_, line)) {
     if (params_.GetAuxEngineVerbosity() >= 2) {
       LOGFILE << "auxe:" << line;
@@ -232,7 +238,8 @@ void Search::DoAuxEngine(Node* n) {
       stopping = stop_.load(std::memory_order_acquire);
       if (stopping) {
 	LOGFILE << "DoAuxEngine caught a stop signal";	
-        // Send stop, stay in loop to get best response, otherwise it will disturb the next iteration.
+        // Send stop, stay in loop to get best response, otherwise it
+        // will disturb the next iteration.
         LOGFILE << "Stopping";
         auxengine_os_ << "stop" << std::endl;
       }
@@ -261,7 +268,10 @@ void Search::DoAuxEngine(Node* n) {
   std::string pv;
   std::vector<uint16_t> pv_moves;
 
-  // reset flip needed? Not sure but should not hurt. TODO only store the moves from the white side here.
+  // TODO only store the moves from the white side here, since it
+  // appears the value in edge.GetMove() is from the white side.
+  
+  // reset flip needed? Not sure but should not hurt.
   flip = played_history_.IsBlackToMove() ^ (depth % 2 == 0);
   /* // For some reason the flip is wrong if PV is empty and black is to move (that is if n = root_node_) */
   /* if(n == root_node_ && played_history_.IsBlackToMove()){ */
@@ -280,7 +290,6 @@ void Search::DoAuxEngine(Node* n) {
           }
           break;
         }
-	// LOGFILE << "pv: " << pv << " int: " << m.as_packed_int();
         pv_moves.push_back(m.as_packed_int());
         flip = !flip;
       }

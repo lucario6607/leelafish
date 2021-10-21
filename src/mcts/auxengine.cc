@@ -116,7 +116,9 @@ void Search::AuxEngineWorker() {
     }
   }
   current_uci_ = "position fen " + current_position_fen_ + " moves " + current_uci_;
-  LOGFILE << current_uci_;
+  if(params_.GetAuxEngineVerbosity() >= 10){
+    LOGFILE << current_uci_;
+  }
 
   Node* n;
 
@@ -187,7 +189,7 @@ void Search::DoAuxEngine(Node* n) {
     move = my_board.GetLegacyMove(move);
     my_board.ApplyMove(move);
     if (my_board.flipped()) move.Mirror();
-    /* LOGFILE << "Move as UCI: " << move.as_string(); */
+    // LOGFILE << "Move as UCI: " << move.as_string();
     s = s + move.as_string() + " ";
     my_board.Mirror();
   }
@@ -244,7 +246,7 @@ void Search::DoAuxEngine(Node* n) {
   }
   if (stopping) {
     // Don't use results of a search that was stopped.
-    /* LOGFILE << "AUX Search was interrupted, the results will not be used"; */
+    // LOGFILE << "AUX Search was interrupted, the results will not be used";
     return;
   }
   if (params_.GetAuxEngineVerbosity() >= 1) {
@@ -304,18 +306,16 @@ void Search::DoAuxEngine(Node* n) {
     pv_moves.clear();
     pv_moves.push_back(bestmove_packed_int);
   }
-  /* // Take the lock and update the P value of the bestmove */
-  /* SharedMutex::Lock lock(nodes_mutex_); */
-  // LOGFILE << "DoAuxEngine: About to call AuxUpdateP()";
   AuxUpdateP(n, pv_moves, 0, my_board);
-  // LOGFILE << "DoAuxEngine: AuxUpdateP() finished.";  
 }
 
 void Search::AuxUpdateP(Node* n, std::vector<uint16_t> pv_moves, int ply, ChessBoard my_board) {
   // my_board is the position where the node n is.
 
   if (n->GetAuxEngineMove() < 0xfffe) {
-    LOGFILE << "Returning early from AuxUpdateP()";
+    if (params_.GetAuxEngineVerbosity() >= 1) {    
+      LOGFILE << "Returning early from AuxUpdateP(). This node already taken care of.";
+    }
     // This can happen because nodes are placed in the queue from
     // deepest node first during DoBackupSingeNode
     //if (n->GetAuxEngineMove() != pv_moves[ply]) {
@@ -326,37 +326,32 @@ void Search::AuxUpdateP(Node* n, std::vector<uint16_t> pv_moves, int ply, ChessB
     return;
   }
   
-  /* LOGFILE << "At AuxUpdateP() with node:" << n->DebugString(); */
-  /* if(my_board.flipped()){ */
-  /*   LOGFILE << "my_board is flipped"; */
+
+  // This appears not to be needed with the lock and solidtree turned off.
+  /* // get depth */
+  /* int depth = 0; */
+  /* Node* n3 = n; */
+
+  /* // This appears to be safe. */
+  /* if(n3 == root_node_){ */
+  /*   /\* LOGFILE << "at AuxUpdateP: called with root node"; *\/ */
   /* } else { */
-  /*   LOGFILE << "my_board is not flipped"; */
+  /*   while(n3 != root_node_ && n3 != nullptr){ */
+  /*     n3 = n3->GetParent(); */
+  /*     depth++; */
+  /*   } */
+  /*   if(n3 == nullptr){ */
+  /*     if (params_.GetAuxEngineVerbosity() >= 2) { */
+  /* 	LOGFILE << "at AuxUpdateP: not able to reach root: old node?"; */
+  /*     } */
+  /*     return; */
+  /*   } */
   /* } */
-  // unwrap the full set of moves
-  std::string s = "";
-
-  // get depth
-  int depth = 0;
-  Node* n3 = n;
-
-  // This appears to be safe.
-  if(n3 == root_node_){
-    /* LOGFILE << "at AuxUpdateP: called with root node"; */
-  } else {
-    while(n3 != root_node_ && n3 != nullptr){
-      n3 = n3->GetParent();
-      depth++;
-    }
-    if(n3 == nullptr){
-      if (params_.GetAuxEngineVerbosity() >= 2) {
-	LOGFILE << "at AuxUpdateP: not able to reach root: old node?";
-      }
-      return;
-    }
-  }
 
   // flip and s are only used to get debugging info.
+  // unwrap the full set of moves
   // Debugging START
+  std::string s = "";
   if(params_.GetAuxEngineVerbosity() >= 2) {
     bool flip = my_board.flipped();  
     for (Node* n2 = n; n2 != root_node_; n2 = n2->GetParent()) {
@@ -389,7 +384,9 @@ void Search::AuxUpdateP(Node* n, std::vector<uint16_t> pv_moves, int ply, ChessB
       // Only change Policy if it is rather low, and don't make it absurdly high.
       if(edge.GetP() < 0.3) {
 	auto new_p = edge.GetP() + params_.GetAuxEngineBoost()/100.0f;
-	LOGFILE << "Changing P from " << edge.GetP() << " to " << std::min(new_p, 0.5f);
+	if(params_.GetAuxEngineVerbosity() >= 2) {	
+	  LOGFILE << "Changing P from " << edge.GetP() << " to " << std::min(new_p, 0.5f);
+	}
 	nodes_mutex_.lock();
 	edge.edge()->SetP(std::min(new_p, 0.5f));
 	nodes_mutex_.unlock();	
@@ -416,18 +413,16 @@ void Search::AuxUpdateP(Node* n, std::vector<uint16_t> pv_moves, int ply, ChessB
   // Leela might have made the node terminal due to repetition, but the AUX engine might not. Only die if there actually are edges.
   if(n->HasChildren()){
     // throw Exception("AuxUpdateP: Move not found");
-    LOGFILE << "AuxUpdateP: Move not found.";
+    LOGFILE << "AuxUpdateP: Move not found: " << pv_moves[ply];;
   }
 }
 
 void Search::AuxWait() REQUIRES(threads_mutex_) {
   LOGFILE << "AuxWait start";
   while (!auxengine_threads_.empty()) {
-    LOGFILE << "Wait for auxengine_threads";
     auxengine_threads_.back().join();
     auxengine_threads_.pop_back();
   }
-  LOGFILE << "Done waiting for auxengine_threads to shut down";
   // Threading/Locking:
   // - Search::Wait is holding threads_mutex_.
   // - SearchWorker threads are guaranteed done by Search::Wait
@@ -435,7 +430,7 @@ void Search::AuxWait() REQUIRES(threads_mutex_) {
   // - This is the only thread left that can modify auxengine_queue_
   // - Take the lock anyways to be safe.
   std::unique_lock<std::mutex> lock(auxengine_mutex_);
-  LOGFILE << "AuxWait got a lock. auxengine_queue_ size " << auxengine_queue_.size()
+  LOGFILE << "Summaries per move: auxengine_queue_ size " << auxengine_queue_.size()
       << " Average duration " << (auxengine_num_evals ? (auxengine_total_dur / auxengine_num_evals) : -1.0f) << "ms"
       << " Number of evals " << auxengine_num_evals
       << " Number of updates " << auxengine_num_updates;

@@ -132,42 +132,39 @@ void Search::AuxEngineWorker() {
 	n = auxengine_queue_.front();
 	auxengine_queue_.pop();
       } // release lock
-      LOGFILE << "AuxEngineWorker: DoAuxEngine() called";
+      /* LOGFILE << "AuxEngineWorker: DoAuxEngine() called"; */
       DoAuxEngine(n);
-      LOGFILE << "AuxEngineWorker: DoAuxEngine() returned";
+      /* LOGFILE << "AuxEngineWorker: DoAuxEngine() returned"; */
     }
   LOGFILE << "AuxEngineWorker done";
 }
 
 void Search::DoAuxEngine(Node* n) {
+  if (n == nullptr){
+    LOGFILE << "at DoAuxEngine: called with null pointer.";
+    return;
+  }
+  
   if (n->GetAuxEngineMove() < 0xfffe) {
     LOGFILE << "at DoAuxEngine: called with magic node.";
     return;
   }
 
-  LOGFILE << "at DoAuxEngine: calculating depth.";
+  // Calculate depth in a safe way. Return early if root cannot be
+  // reached from n.
+  nodes_mutex_.lock();
   int depth = 0;
-  Node* n2 = n;
-  if(n2 == root_node_){
-    LOGFILE << "at DoAuxEngine: called with root node";
-  } else {
-    LOGFILE << "at DoAuxEngine: called with a non-root node";
+  for (Node* n2 = n; n2 != root_node_; n2 = n2->GetParent()) {
+    depth++;
     if(n2 == nullptr){
-      LOGFILE << "at DoAuxEngine: called with a null pointer";
+      LOGFILE << "1. Could not reach root";
+      nodes_mutex_.unlock();
       return;
-    }
-    while(n2 != nullptr && n2 != root_node_){
-      n2 = n2->GetParent();
-      depth++;
-    }
-    if(n2 == nullptr){
-      LOGFILE << "at DoAuxEngine: not able to reach root: ";
-      return;
-    }
+    } 
   }
-  LOGFILE << "at DoAuxEngine: depth: " << depth;
+  nodes_mutex_.unlock();
+
   std::string s = "";
-  std::string st = "";
   bool flip = played_history_.IsBlackToMove() ^ (depth % 2 == 0);
 
   // To get the moves in UCI format, we have to construct a board, starting from root and then apply the moves.
@@ -176,8 +173,6 @@ void Search::DoAuxEngine(Node* n) {
   std::vector<lczero::Move> my_moves;
     
   for (Node* n2 = n; n2 != root_node_; n2 = n2->GetParent()) {
-      s = n2->GetOwnEdge()->GetMove(flip).as_string() + " " + s;
-      /* LOGFILE << "Storing " << n2->GetOwnEdge()->GetMove(flip).as_string() << " in my_moves"; */
       my_moves.push_back(n2->GetOwnEdge()->GetMove(flip));
       flip = !flip;
   }
@@ -193,25 +188,25 @@ void Search::DoAuxEngine(Node* n) {
     my_board.ApplyMove(move);
     if (my_board.flipped()) move.Mirror();
     /* LOGFILE << "Move as UCI: " << move.as_string(); */
-    st = st + move.as_string() + " ";
+    s = s + move.as_string() + " ";
     my_board.Mirror();
   }
     
   if (params_.GetAuxEngineVerbosity() >= 1) {
-    LOGFILE << "add pv=" << st;
+    LOGFILE << "add pv=" << s;
   }
-  st = current_uci_ + " " + st;
-
-  LOGFILE << "All moves: " << st;
+  s = current_uci_ + " " + s;
 
   // Before starting, test if stop_ is set
   if (stop_.load(std::memory_order_acquire)) {
-    LOGFILE << "DoAuxEngine caught a stop signal";
+    if (params_.GetAuxEngineVerbosity() >= 5) {    
+      LOGFILE << "DoAuxEngine caught a stop signal";
+    }
     return;
   }
 
   auto auxengine_start_time = std::chrono::steady_clock::now();
-  auxengine_os_ << st << std::endl;
+  auxengine_os_ << s << std::endl;
   auxengine_os_ << "go depth " << params_.GetAuxEngineDepth() << std::endl;
   std::string prev_line;
   std::string line;
@@ -238,17 +233,18 @@ void Search::DoAuxEngine(Node* n) {
     if (!stopping) {
       stopping = stop_.load(std::memory_order_acquire);
       if (stopping) {
-	LOGFILE << "DoAuxEngine caught a stop signal";	
+	if (params_.GetAuxEngineVerbosity() >= 5) {
+	  LOGFILE << "DoAuxEngine caught a stop signal";	
+	}
         // Send stop, stay in loop to get best response, otherwise it
         // will disturb the next iteration.
-        LOGFILE << "Stopping";
         auxengine_os_ << "stop" << std::endl;
       }
     }
   }
   if (stopping) {
     // Don't use results of a search that was stopped.
-    LOGFILE << "AUX Search was interrupted, the results will not be used";
+    /* LOGFILE << "AUX Search was interrupted, the results will not be used"; */
     return;
   }
   if (params_.GetAuxEngineVerbosity() >= 1) {
@@ -310,63 +306,14 @@ void Search::DoAuxEngine(Node* n) {
   }
   // Take the lock and update the P value of the bestmove
   SharedMutex::Lock lock(nodes_mutex_);
-  LOGFILE << "DoAuxEngine: About to call AuxUpdateP()";
+  // LOGFILE << "DoAuxEngine: About to call AuxUpdateP()";
   AuxUpdateP(n, pv_moves, 0, my_board);
-  LOGFILE << "DoAuxEngine: AuxUpdateP() finished.";  
+  // LOGFILE << "DoAuxEngine: AuxUpdateP() finished.";  
 }
 
 void Search::AuxUpdateP(Node* n, std::vector<uint16_t> pv_moves, int ply, ChessBoard my_board) {
   // my_board is the position where the node n is.
-  LOGFILE << "At AuxUpdateP() with node:" << n->DebugString();
-  if(my_board.flipped()){
-    LOGFILE << "my_board is flipped";
-  } else {
-    LOGFILE << "my_board is not flipped";
-  }
-  // unwrap the full set of moves
-  std::string s = "";
 
-  // get depth
-  int depth = 0;
-  Node* n3 = n;
-
-  if(n3 == root_node_){
-    LOGFILE << "at AuxUpdateP: called with root node";
-  } else {
-    while(n3 != root_node_ && n3 != nullptr){
-      n3 = n3->GetParent();
-      depth++;
-    }
-    if(n3 == nullptr){
-      LOGFILE << "at AuxUpdateP: not able to reach root: ";
-      return;
-    }
-  }
-
-  bool flip = my_board.flipped();  
-  if(flip){
-    LOGFILE << "flip is true";
-  } else {
-    LOGFILE << "flip is false";    
-  }
-  if(depth % 2 == 0){
-    LOGFILE << "flip based on depth is true";
-  } else {
-    LOGFILE << "flip based on depth is false";        
-  }
-  
-  for (Node* n2 = n; n2 != root_node_; n2 = n2->GetParent()) {
-    s = n2->GetOwnEdge()->GetMove(!flip).as_string() + " " + s;
-    flip = !flip;
-  }
-
-  if(n == root_node_){
-    LOGFILE << "AuxUpdateP() called with ply=" << ply << " to update policy at root and the suggested move here is: " << pv_moves[ply];
-  } else {
-    LOGFILE << "AuxUpdateP() called with ply=" << ply << " to update policy at a node which can be reached from root via this path: " << s << "and the suggested move (in packed int form) here is: " << pv_moves[ply];
-  }
-  // Debugging STOP
-    
   if (n->GetAuxEngineMove() < 0xfffe) {
     LOGFILE << "Returning early from AuxUpdateP()";
     // This can happen because nodes are placed in the queue from
@@ -378,21 +325,60 @@ void Search::AuxUpdateP(Node* n, std::vector<uint16_t> pv_moves, int ply, ChessB
     //}
     return;
   }
+  
+  /* LOGFILE << "At AuxUpdateP() with node:" << n->DebugString(); */
+  /* if(my_board.flipped()){ */
+  /*   LOGFILE << "my_board is flipped"; */
+  /* } else { */
+  /*   LOGFILE << "my_board is not flipped"; */
+  /* } */
+  // unwrap the full set of moves
+  std::string s = "";
 
+  // get depth
+  int depth = 0;
+  Node* n3 = n;
+
+  // This appears to be safe.
+  if(n3 == root_node_){
+    /* LOGFILE << "at AuxUpdateP: called with root node"; */
+  } else {
+    while(n3 != root_node_ && n3 != nullptr){
+      n3 = n3->GetParent();
+      depth++;
+    }
+    if(n3 == nullptr){
+      if (params_.GetAuxEngineVerbosity() >= 2) {
+	LOGFILE << "at AuxUpdateP: not able to reach root: old node?";
+      }
+      return;
+    }
+  }
+
+  // flip and s are only used to get debugging info.
+  // Debugging START
+  if(params_.GetAuxEngineVerbosity() >= 2) {
+    bool flip = my_board.flipped();  
+    for (Node* n2 = n; n2 != root_node_; n2 = n2->GetParent()) {
+      s = n2->GetOwnEdge()->GetMove(!flip).as_string() + " " + s;
+      flip = !flip;
+    }
+
+    if(n == root_node_){
+      LOGFILE << "AuxUpdateP() called with ply=" << ply << " to update policy at root and the suggested move here is: " << pv_moves[ply];
+    } else {
+      LOGFILE << "AuxUpdateP() called with ply=" << ply << " to update policy at a node which can be reached from root via this path: " << s << "and the suggested move (in packed int form) here is: " << pv_moves[ply];
+    }
+  } // Debugging STOP
+    
   for (const auto& edge : n->Edges()) {
-    // TODO: translate to edge.GetMove(!flip).as_packed_int() to UCI moves and then back to as_packed_int
     Move move = edge.GetMove();
-    /* LOGFILE << "move before mirroring: " << move.as_string() << ", " << move.as_packed_int();     */
-    /* if (my_board.flipped()) move.Mirror(); */
-    LOGFILE << "move before converting to legacy castling format: " << move.as_string() << ", " << move.as_packed_int();
+    /* LOGFILE << "move before converting to legacy castling format: " << move.as_string() << ", " << move.as_packed_int(); */
     move = my_board.GetLegacyMove(move);
-    LOGFILE << "move after converting to legacy castling format: " << move.as_string() << ", " << move.as_packed_int();
+    /* LOGFILE << "move after converting to legacy castling format: " << move.as_string() << ", " << move.as_packed_int(); */
     // Delay the application of the move until the right edge is found.
-    /* my_board.ApplyMove(move); */ 
-    /* if (my_board.flipped()) move.Mirror(); */
-    /* my_board.Mirror(); */
-    // Compare with pv_moves[ply]
-    LOGFILE << "move as packed int after converting to uci and back: " << move.as_packed_int();
+    /* LOGFILE << "move as packed int after converting to uci and back: " << move.as_packed_int(); */
+
     // Sometimes GetLegacyMove() returns the modern move anyway
     if(move.as_packed_int() == pv_moves[ply] ||
        (move.as_packed_int() == 263 && pv_moves[ply] == 262)
@@ -400,7 +386,6 @@ void Search::AuxUpdateP(Node* n, std::vector<uint16_t> pv_moves, int ply, ChessB
       if(move.as_packed_int() == 263 && pv_moves[ply] == 262){
 	LOGFILE << "GetLegacyMove() appear to have failed, falling back to a manual hack.";
       }
-    /* if (edge.GetMove(!flip).as_packed_int() == pv_moves[ply]) { */
       auto new_p = edge.GetP() + params_.GetAuxEngineBoost()/100.0f;
       LOGFILE << "Changing P from " << edge.GetP() << " to " << std::min(new_p, 1.0f);
       edge.edge()->SetP(std::min(new_p, 1.0f));
@@ -410,7 +395,6 @@ void Search::AuxUpdateP(Node* n, std::vector<uint16_t> pv_moves, int ply, ChessB
           edge.HasNode() &&
           !edge.IsTerminal() &&
           edge.node()->HasChildren()) {
-	// LOGFILE << "AUX about to update policy";
 
 	// update the board, now that we have found the correct edge
 	if (my_board.flipped()) move.Mirror();
@@ -419,9 +403,7 @@ void Search::AuxUpdateP(Node* n, std::vector<uint16_t> pv_moves, int ply, ChessB
 	
         AuxUpdateP(edge.node(), pv_moves, ply+1, my_board);
       }
-      // LOGFILE << "AUX about to call SetAuxEngineMove()";      
       n->SetAuxEngineMove(pv_moves[ply]);
-      // LOGFILE << "AUX SetAuxEngineMove() returned";
       return;
     }
   }

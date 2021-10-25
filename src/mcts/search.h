@@ -219,6 +219,8 @@ class Search {
   static boost::process::child auxengine_c_;
   static bool auxengine_ready_;
   std::queue<Node*> auxengine_queue_;
+  std::queue<MoveList*> fast_track_extend_and_evaluate_queue_; // for now only used by aux-engine, but could be used by a UCI extension: searchline eg. `go nodes 1000 searchline e2e4 c7c5 g1f3`
+  std::mutex fast_track_extend_and_evaluate_queue_mutex_;
   std::mutex auxengine_mutex_;
   std::condition_variable auxengine_cv_;
   std::vector<std::thread> auxengine_threads_;
@@ -293,6 +295,10 @@ class SearchWorker {
   // @computation is the computation to use on this iteration.
   void InitializeIteration(std::unique_ptr<NetworkComputation> computation);
 
+  // 1.5 Extend tree with nodes using PV of a/b helper, and add all new
+  // nodes to the minibatch
+  void PreExtendTreeAndFastTrackForNNEvaluation();
+  
   // 2. Gather minibatch.
   void GatherMinibatch();
   // Variant for multigather path.

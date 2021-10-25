@@ -154,6 +154,7 @@ void Search::DoAuxEngine(Node* n) {
 
   // Calculate depth in a safe way. Return early if root cannot be
   // reached from n.
+  // Todo test if this lock is unnecessary when solidtree is disabled.
   nodes_mutex_.lock();
   int depth = 0;
   for (Node* n2 = n; n2 != root_node_; n2 = n2->GetParent()) {
@@ -267,16 +268,8 @@ void Search::DoAuxEngine(Node* n) {
   std::string pv;
   std::vector<uint16_t> pv_moves;
 
-  // TODO only store the moves from the white side here, since it
-  // appears the value in edge.GetMove() is from the white side.
-  
   // reset flip needed? Not sure but should not hurt.
   flip = played_history_.IsBlackToMove() ^ (depth % 2 == 0);
-  /* // For some reason the flip is wrong if PV is empty and black is to move (that is if n = root_node_) */
-  /* if(n == root_node_ && played_history_.IsBlackToMove()){ */
-  /*   flip = !flip; */
-  /* } */
-  // flip has the current state up to the point where teh PV from aux engine starts, so no reason to set it again.
   
   auto bestmove_packed_int = Move(token, !flip).as_packed_int();
   while(iss >> pv >> std::ws) {
@@ -289,6 +282,7 @@ void Search::DoAuxEngine(Node* n) {
           }
           break;
         }
+	my_moves.push_back(m); // Add the PV to the queue
         pv_moves.push_back(m.as_packed_int());
         flip = !flip;
       }
@@ -306,6 +300,9 @@ void Search::DoAuxEngine(Node* n) {
     pv_moves.clear();
     pv_moves.push_back(bestmove_packed_int);
   }
+  fast_track_extend_and_evaluate_queue_mutex_.lock();
+  fast_track_extend_and_evaluate_queue_.push(my_moves); // push() since it is a queue.
+  fast_track_extend_and_evaluate_queue_mutex_.unlock()  
   AuxUpdateP(n, pv_moves, 0, my_board);
 }
 

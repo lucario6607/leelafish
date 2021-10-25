@@ -1139,6 +1139,32 @@ void SearchWorker::InitializeIteration(
   minibatch_.reserve(2 * params_.GetMiniBatchSize());
 }
 
+// 1.5 Extend tree with nodes using PV of a/b helper, and add the new nodes to the minibatch. A single movelist per minibatch should be enough.
+void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation() {
+  // input: a PV starting from root in form of a vector of Moves (read the vector from the `global private` queue of MoveLists called fast_track_extend_and_evaluate_queue_
+  // start at root.
+  // pop out a move from the PV, follow that edge (when a leave is reached, extend that node, and add it to the minibatch).
+  // Repeat until the PV is finished.
+  LOGFILE << "In PreExtendTreeAndFastTrackForNNEvaluation()";
+  LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: size of minibatch_ is" << minibatch_.size();
+  LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: size of fast_track_extend_and_evaluate_queue_ is" << search_->fast_track_extend_and_evaluate_queue_.size();
+  if(search_->fast_track_extend_and_evaluate_queue_.size() > 0){
+    // lock the queue
+    search_->fast_track_extend_and_evaluate_queue_mutex_.lock();
+    std::vector<lczero::Move>* my_moves = search_->fast_track_extend_and_evaluate_queue_.front(); // read the element
+    search_->fast_track_extend_and_evaluate_queue_.pop(); // remove it from the queue.
+    search_->fast_track_extend_and_evaluate_queue_mutex_.unlock();
+    // unlock the queue.
+  }
+  // loop through the MoveList
+  Node * my_node = search_->root_node_;
+  for(auto& m: my_moves&) {
+    // find the edge of my_node that corresponds to move m
+    LOGFILE << "Searching for the edge in node " << my_node.DebugString() << " that corresponds to move " << m.as_string();
+    
+  }
+}
+  
 // 2. Gather minibatch.
 // ~~~~~~~~~~~~~~~~~~~~
 namespace {

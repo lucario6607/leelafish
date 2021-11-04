@@ -142,6 +142,9 @@ void Search::AuxEngineWorker() {
 }
 
 void Search::DoAuxEngine(Node* n) {
+  // Debug info
+  // length of PV given to helper
+  // black to move at root
   if (n == nullptr){
     LOGFILE << "at DoAuxEngine: called with null pointer.";
     return;
@@ -172,16 +175,20 @@ void Search::DoAuxEngine(Node* n) {
 
   // To get the moves in UCI format, we have to construct a board, starting from root and then apply the moves.
   // Traverse up to root, and store the moves in a vector.
+  // When we internally use the moves to extend nodes in the search tree, always use move as seen from the white side.
   // Apply the moves in reversed order to get the proper board state from which we can then make moves in legacy format.
   std::vector<lczero::Move> my_moves;
+  std::vector<lczero::Move> my_moves_from_the_white_side;  
     
   for (Node* n2 = n; n2 != root_node_; n2 = n2->GetParent()) {
       my_moves.push_back(n2->GetOwnEdge()->GetMove(flip));
+      my_moves_from_the_white_side.push_back(n2->GetOwnEdge()->GetMove());
       flip = !flip;
   }
 
   // Reverse the order
   std::reverse(my_moves.begin(), my_moves.end());
+  std::reverse(my_moves_from_the_white_side.begin(), my_moves_from_the_white_side.end());
     
   ChessBoard my_board = played_history_.Last().GetBoard();
 
@@ -203,7 +210,7 @@ void Search::DoAuxEngine(Node* n) {
   // Before starting, test if stop_ is set
   if (stop_.load(std::memory_order_acquire)) {
     if (params_.GetAuxEngineVerbosity() >= 5) {    
-      LOGFILE << "DoAuxEngine caught a stop signal";
+      LOGFILE << "DoAuxEngine caught a stop signal 1.";
     }
     return;
   }
@@ -237,7 +244,7 @@ void Search::DoAuxEngine(Node* n) {
       stopping = stop_.load(std::memory_order_acquire);
       if (stopping) {
 	if (params_.GetAuxEngineVerbosity() >= 5) {
-	  LOGFILE << "DoAuxEngine caught a stop signal";	
+	  LOGFILE << "DoAuxEngine caught a stop signal 2.";	
 	}
         // Send stop, stay in loop to get best response, otherwise it
         // will disturb the next iteration.
@@ -268,8 +275,12 @@ void Search::DoAuxEngine(Node* n) {
   std::string pv;
   std::vector<uint16_t> pv_moves;
 
-  // reset flip needed? Not sure but should not hurt.
+  // // reset flip needed? Not sure but should not hurt.
+  // flip = played_history_.IsBlackToMove() ^ (depth % 2 == 0);
   flip = played_history_.IsBlackToMove() ^ (depth % 2 == 0);
+  
+  // TODO: When parsing a move from UCI, translate it to modern notation for castling, if the moved piece is a king!
+  // e1g1 -> e1h1; e1c1 -> e1a1
   
   auto bestmove_packed_int = Move(token, !flip).as_packed_int();
   while(iss >> pv >> std::ws) {
@@ -282,7 +293,8 @@ void Search::DoAuxEngine(Node* n) {
           }
           break;
         }
-	my_moves.push_back(m); // Add the PV to the queue
+	// my_moves.push_back(m); // Add the PV to the queue
+	my_moves_from_the_white_side.push_back(m); // Add the PV to the queue	
         pv_moves.push_back(m.as_packed_int());
         flip = !flip;
       }
@@ -299,11 +311,35 @@ void Search::DoAuxEngine(Node* n) {
     LOGFILE << "error: pv doesn't match bestmove:" << pv_moves[0] << " " << "bm" << bestmove_packed_int;
     pv_moves.clear();
     pv_moves.push_back(bestmove_packed_int);
+    // stop here.
+    return;
   }
+
+  
+  std::string debug_string;
+  for(int i = 0; i < (int) my_moves_from_the_white_side.size(); i++){
+    debug_string = debug_string + my_moves_from_the_white_side[i].as_string() + " ";
+  }
+  if(played_history_.IsBlackToMove()){
+    LOGFILE << "debug info: length of PV given to helper engine: " << depth << " position given to helper: " << s << " black to move at root, length of my_moves_from_the_white_side " << my_moves_from_the_white_side.size() << " my_moves_from_the_white_side: " << debug_string;
+  } else {
+    LOGFILE << "debug info: length of PV given to helper engine: " << depth << " position given to helper: " << s << " white to move at root, length of my_moves_from_the_white_side " << my_moves_from_the_white_side.size() << " my_moves_from_the_white_side: " << debug_string;    
+  }
+  
   fast_track_extend_and_evaluate_queue_mutex_.lock();
-  fast_track_extend_and_evaluate_queue_.push(my_moves); // push() since it is a queue.
-  fast_track_extend_and_evaluate_queue_mutex_.unlock()  
-  AuxUpdateP(n, pv_moves, 0, my_board);
+  fast_track_extend_and_evaluate_queue_.push(my_moves_from_the_white_side); // push() since it is a queue.
+  fast_track_extend_and_evaluate_queue_mutex_.unlock();
+  // std::string pv_moves_debug;
+  // std::string my_moves_debug;
+  // for (Node* n2 = n; n2 != root_node_; n2 = n2->GetParent()) {
+  //   pv_moves_debug = n2->GetOwnEdge()->GetMove(!flip).as_string() + " " + s;
+  //   flip = !flip;
+  // }
+
+  //     LOGFILE << "AuxUpdateP() called with ply=" << ply << " to update policy at a node which can be reached from root via this path: " << s << "and the suggested move (in packed int form) here is: " << pv_moves[ply];
+  //   }
+
+  // AuxUpdateP(n, pv_moves, 0, my_board);
 }
 
 void Search::AuxUpdateP(Node* n, std::vector<uint16_t> pv_moves, int ply, ChessBoard my_board) {
@@ -442,6 +478,13 @@ void Search::AuxWait() REQUIRES(threads_mutex_) {
     }
     auxengine_queue_.pop();
   }
+  // Empty the other queue.
+  fast_track_extend_and_evaluate_queue_mutex_.lock();
+  while (!fast_track_extend_and_evaluate_queue_.empty()){
+    LOGFILE << "Removing obsolete PV from queue";
+    fast_track_extend_and_evaluate_queue_.pop();
+  }
+  fast_track_extend_and_evaluate_queue_mutex_.unlock();  
   LOGFILE << "AuxWait done";
 }
 

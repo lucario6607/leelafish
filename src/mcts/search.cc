@@ -966,7 +966,9 @@ void Search::CancelSharedCollisions() REQUIRES(nodes_mutex_) {
 }
 
 Search::~Search() {
+  LOGFILE << "About to enter AuxWait()";
   AuxWait();  // This can take some time during which we are not ready to respond readyok, so for now increase timemargin.
+  LOGFILE << "AuxWait() returned";  
   Abort();
   Wait();
   {
@@ -1079,6 +1081,10 @@ void SearchWorker::ExecuteOneIteration() {
     }
   }
 
+  // 1.5 Extend tree with nodes using PV of a/b helper, and add the new
+  // // nodes to the minibatch
+  PreExtendTreeAndFastTrackForNNEvaluation();
+
   // 2. Gather minibatch.
   GatherMinibatch2();
   task_count_.store(-1, std::memory_order_release);
@@ -1139,30 +1145,107 @@ void SearchWorker::InitializeIteration(
   minibatch_.reserve(2 * params_.GetMiniBatchSize());
 }
 
-// 1.5 Extend tree with nodes using PV of a/b helper, and add the new nodes to the minibatch. A single movelist per minibatch should be enough.
+void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node, std::vector<lczero::Move> my_moves, int ply) {
+  // Black to move?
+  bool black_to_move = ! search_->played_history_.IsBlackToMove() ^ (ply % 2 == 0);
+  if(black_to_move){
+    LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation_inner called with node" << my_node->DebugString() << " white to edge/move _to_ this node: " << my_node->GetOwnEdge()->GetMove(black_to_move).as_string() << " and this move from the a/b-helper: " << my_moves[ply].as_string() << "(seen from whites perspective) is really made by black,  ply=" << ply;
+  } else {
+    LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation_inner called with node" << my_node->DebugString() << " black to edge/move _to_ this node: " << my_node->GetOwnEdge()->GetMove(black_to_move).as_string() << " and this move from the a/b-helper: " << my_moves[ply].as_string() << "is made by white, ply=" << ply;
+  }
+  // 1. Find the edge
+  bool edge_found = false;
+  if(my_node->IsTerminal()){
+    LOGFILE << "Node is terminal, nothing to do.";
+    return;
+  }
+  for (auto& edge : my_node->Edges()) {
+    if(edge.GetMove() == my_moves[ply] ){
+      edge_found = true;
+      // If the edge is already extended, then just recursively call PreExtendTreeAndFastTrackForNNEvaluation_inner() with this node and ply increased by one.
+      if(edge.HasNode()){
+	// if((int) my_moves.size() > ply+1 && ply < 10){	
+	if((int) my_moves.size() > ply+1){
+	  if(black_to_move){
+	    LOGFILE << "Blacks move " << edge.GetMove(black_to_move).as_string() << " (from white: " << edge.GetMove().as_string() << ") is expanded and has policy " << edge.GetP() << ". Go deeper.";
+	  } else {
+	    LOGFILE << "Whites move " << edge.GetMove(black_to_move).as_string() << " is expanded and has policy " << edge.GetP() << ". Go deeper.";	    
+	  }
+	  PreExtendTreeAndFastTrackForNNEvaluation_inner(edge.node(), my_moves, ply+1);
+	} else {
+	  LOGFILE << "All moves already expanded nothing to do.";
+	  return;
+	}
+      } else {
+	if(black_to_move){	
+	  LOGFILE << "Blacks move (edge) " << edge.GetMove(black_to_move).as_string() << " (from white: " << edge.GetMove().as_string() << ") is not expanded. Will expand it, and add the resulting node to the minibatch_, and then use it as parent";
+	} else {
+	  LOGFILE << "Whites move (edge) " << edge.GetMove(black_to_move).as_string() << " is not expanded. Will expand it, and add the resulting node to the minibatch_, and then use it as parent.";	  
+	}
+	Node* child_node = edge.GetOrSpawnNode(my_node, nullptr);
+	ExtendNode(child_node, ply+2); // edge from root is my_moves[0] but at depth 1. 
+	// queue for NN evaluation.
+	minibatch_.push_back(NodeToProcess::Visit(child_node, static_cast<uint16_t>(ply+1)));
+	if((int) my_moves.size() > ply+1){
+	  PreExtendTreeAndFastTrackForNNEvaluation_inner(child_node, my_moves, ply+1);
+	} else {
+	  LOGFILE << "Successfully added a full PV 2.";
+	  return;
+	}
+      }
+    }
+  }
+  if(!edge_found){
+    // TODO debug why some edges are not found.
+    // show full my_moves
+    std::string s;
+    for(int i = 0; i < (int) my_moves.size(); i++){
+      s = s + my_moves[i].as_string() + " ";
+    }
+    LOGFILE << "Debugging: ply=" << ply << " my_moves: " << s;
+    // ply is depth from root, so could be used to determine side to move.
+    bool black_to_move = ! search_->played_history_.IsBlackToMove() ^ (ply % 2 == 0);
+    Move m;
+    if (!Move::ParseMove(&m, my_moves[ply].as_string(), black_to_move)) {
+      LOGFILE << "Bad move: " << my_moves[ply].as_string() << black_to_move;
+    } else {
+      LOGFILE << "edge not found! from white side:" << my_moves[ply].as_string() << " absolute: " << m.as_string(); // This should never happen, must be an error in some encoding of moves.
+      for (auto& edge : my_node->Edges()) {
+      	LOGFILE << "Edge " << edge.GetMove().as_string() << " does not match the move from the A/B helper: " << my_moves[ply].as_string() ;
+      }
+    }
+    // Don't panic if it is a castling move.
+    if(my_moves[ply].as_string() != "e1g1" && my_moves[ply].as_string() != "e1c1"){
+      LOGFILE << "Edge not found!";
+      throw Exception("Edge not found!");
+    }
+  }
+}
+
+// 1.5 Extend tree with nodes using PV of a/b helper, and add the new nodes to the minibatch.
 void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation() {
-  // input: a PV starting from root in form of a vector of Moves (read the vector from the `global private` queue of MoveLists called fast_track_extend_and_evaluate_queue_
-  // start at root.
-  // pop out a move from the PV, follow that edge (when a leave is reached, extend that node, and add it to the minibatch).
-  // Repeat until the PV is finished.
-  LOGFILE << "In PreExtendTreeAndFastTrackForNNEvaluation()";
-  LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: size of minibatch_ is" << minibatch_.size();
-  LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: size of fast_track_extend_and_evaluate_queue_ is" << search_->fast_track_extend_and_evaluate_queue_.size();
-  if(search_->fast_track_extend_and_evaluate_queue_.size() > 0){
-    // lock the queue
-    search_->fast_track_extend_and_evaluate_queue_mutex_.lock();
-    std::vector<lczero::Move>* my_moves = search_->fast_track_extend_and_evaluate_queue_.front(); // read the element
+  // input: a PV starting from root in form of a vector of Moves (the vectors are stored in a global queue called fast_track_extend_and_evaluate_queue_)
+  // lock the queue
+  search_->fast_track_extend_and_evaluate_queue_mutex_.lock();
+  while(search_->fast_track_extend_and_evaluate_queue_.size() > 0){
+    LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: size of minibatch_ is " << minibatch_.size();
+    LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: size of fast_track_extend_and_evaluate_queue_ is " << search_->fast_track_extend_and_evaluate_queue_.size();
+    std::vector<lczero::Move> my_moves = search_->fast_track_extend_and_evaluate_queue_.front(); // read the element
     search_->fast_track_extend_and_evaluate_queue_.pop(); // remove it from the queue.
-    search_->fast_track_extend_and_evaluate_queue_mutex_.unlock();
-    // unlock the queue.
+    search_->fast_track_extend_and_evaluate_queue_mutex_.unlock(); // unlock the queue.
+    // show full my_moves
+    std::string s;
+    for(int i = 0; i < (int) my_moves.size(); i++){
+      s = s + my_moves[i].as_string() + " ";
+    }
+    LOGFILE << "Length of PV to add: " << my_moves.size() << " my_moves: " << s;
+    PreExtendTreeAndFastTrackForNNEvaluation_inner(search_->root_node_, my_moves, 0);
+    LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: finished one iteration, size of minibatch_ is " << minibatch_.size();
+    LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: finished one iteration, size of fast_track_extend_and_evaluate_queue_ is " << search_->fast_track_extend_and_evaluate_queue_.size();
+    // lock the queue before reading it again.
+    search_->fast_track_extend_and_evaluate_queue_mutex_.lock();
   }
-  // loop through the MoveList
-  Node * my_node = search_->root_node_;
-  for(auto& m: my_moves&) {
-    // find the edge of my_node that corresponds to move m
-    LOGFILE << "Searching for the edge in node " << my_node.DebugString() << " that corresponds to move " << m.as_string();
-    
-  }
+  search_->fast_track_extend_and_evaluate_queue_mutex_.unlock(); // unlock the queue.  
 }
   
 // 2. Gather minibatch.
@@ -1841,6 +1924,7 @@ void SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 void SearchWorker::ExtendNode(Node* node, int depth,
                               const std::vector<Move>& moves_to_node,
                               PositionHistory* history) {
+
   // Initialize position sequence with pre-move position.
   history->Trim(search_->played_history_.GetLength());
   for (size_t i = 0; i < moves_to_node.size(); i++) {

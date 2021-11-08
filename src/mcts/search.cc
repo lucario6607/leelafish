@@ -1152,7 +1152,10 @@ void SearchWorker::InitializeIteration(
 void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node, std::vector<lczero::Move> my_moves, int ply) {
   // increase the visit count. assume no terminal move in my_moves except for possibly the last move in my_moves
   search_->nodes_mutex_.lock();
-  my_node->IncrementNInFlight(my_moves.size()-ply);
+  // if this node is already extended, then add to its NInFlight.
+  if(my_node->GetN() > 0){
+    my_node->IncrementNInFlight(my_moves.size()-ply);
+  }
   search_->nodes_mutex_.unlock();  
   // Black to move?
   bool black_to_move = ! search_->played_history_.IsBlackToMove() ^ (ply % 2 == 0);
@@ -1180,7 +1183,7 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	  }
 	  PreExtendTreeAndFastTrackForNNEvaluation_inner(edge.node(), my_moves, ply+1);
 	} else {
-	  LOGFILE << "All moves already expanded nothing to do.";
+	  LOGFILE << "All moves in the PV already expanded nothing to do.";
 	  return;
 	}
       } else {
@@ -1209,9 +1212,9 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	}
 
 	// put this node into a queue for debugging
-	search_->debug_nodes_added_by_aux_queue_mutex_.lock();
-	debug_nodes_added_by_aux_queue_.push_back(child_node);
-	search_->debug_nodes_added_by_aux_queue_mutex_.unlock();
+	/* search_->debug_nodes_added_by_aux_queue_mutex_.lock(); */
+	/* search_->debug_nodes_added_by_aux_queue_.push(child_node); */ // Push to a vector, and add the vector to the queue when completed.
+	/* search_->debug_nodes_added_by_aux_queue_mutex_.unlock(); */
 	
 	// queue for NN evaluation.
 	minibatch_.push_back(NodeToProcess::Visit(child_node, static_cast<uint16_t>(ply+1)));

@@ -1155,6 +1155,10 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
   // if this node is already extended, then add to its NInFlight.
   if(my_node->GetN() > 0){
     my_node->IncrementNInFlight(my_moves.size()-ply);
+  } else {
+    if(my_node->GetNInFlight() == 0){
+      my_node->IncrementNInFlight(1); // newly extended node.
+    }
   }
   search_->nodes_mutex_.unlock();  
   // Black to move?
@@ -1271,10 +1275,11 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
       LOGFILE << "No edges found, repetition?";
       // Revert visits in flight for nodes in this branch with the remaining depth, which is the current value of ply, so my_moves.size() - ply
       int counter = my_moves.size() - ply;
-      for(Node * n = my_node; my_node != search_->root_node_; n = n->GetParent()){
-	search_->nodes_mutex_.lock();
+      for(Node * n = my_node; n != search_->root_node_; n = n->GetParent()){
+	LOGFILE << "N in flights before reverting: " << n->GetNInFlight() << " counter: " << counter;
+	/* search_->nodes_mutex_.lock(); */
 	n->CancelScoreUpdate(counter);
-	search_->nodes_mutex_.unlock();
+	/* search_->nodes_mutex_.unlock(); */
 	counter++;
       }
     }

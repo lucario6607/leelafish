@@ -61,7 +61,9 @@ void SearchWorker::AuxMaybeEnqueueNode(Node* n) {
       n->GetAuxEngineMove() == 0xffff &&
       !n->IsTerminal() &&
       n->HasChildren()) {
+
     n->SetAuxEngineMove(0xfffe); // TODO: magic for pending
+    
     std::lock_guard<std::mutex> lock(search_->auxengine_mutex_);
     search_->auxengine_queue_.push(n);
     search_->auxengine_cv_.notify_one();
@@ -107,24 +109,16 @@ void Search::AuxEngineWorker() {
     }
     auxengine_ready_ = true;
   }
-  if (current_position_fen_ == "") {
-    current_position_fen_ = ChessBoard::kStartposFen; // TODO [HE: what is there todo?]
-  }
-  if (current_position_moves_.size()) {
-    for (auto i = current_position_moves_.size(); i-- > 0;) {
-      current_uci_ = current_position_moves_[i] + " " + current_uci_;
-    }
-  }
-  current_uci_ = "position fen " + current_position_fen_ + " moves " + current_uci_;
-  if(params_.GetAuxEngineVerbosity() >= 10){
-    LOGFILE << current_uci_;
-  }
+
+  // kickstart with the root node, no need to wait for it to get visits.
+  root_node_->SetAuxEngineMove(0xfffe); // mark root as pending.
+  auxengine_mutex_.lock();  
+  auxengine_queue_.push(root_node_);
+  auxengine_cv_.notify_one();
+  auxengine_mutex_.unlock();
 
   Node* n;
 
-  // TODO handle this: 1019 15:31:45.540938 140297824630528 ../../src/mcts/stoppers/stoppers.cc:195] Only one possible move. Moving immediately. DONE with if(root_node_->GetNumEdges() > 1){
-  // TODO handle this: 1019 16:53:49.746308 139657706731264 ../../src/mcts/stoppers/stoppers.cc:199] At most one non losing move, stopping search.  
-  // if(root_node_->GetNumEdges() > 1){
     while (!stop_.load(std::memory_order_acquire)) {
       {
 	std::unique_lock<std::mutex> lock(auxengine_mutex_);
@@ -134,27 +128,12 @@ void Search::AuxEngineWorker() {
 	n = auxengine_queue_.front();
 	auxengine_queue_.pop();
       } // release lock
-      /* LOGFILE << "AuxEngineWorker: DoAuxEngine() called"; */
       DoAuxEngine(n);
-      /* LOGFILE << "AuxEngineWorker: DoAuxEngine() returned"; */
     }
   LOGFILE << "AuxEngineWorker done";
 }
 
 void Search::DoAuxEngine(Node* n) {
-  // Debug info
-  // length of PV given to helper
-  // black to move at root
-  if (n == nullptr){
-    LOGFILE << "at DoAuxEngine: called with null pointer.";
-    return;
-  }
-  
-  if (n->GetAuxEngineMove() < 0xfffe) {
-    LOGFILE << "at DoAuxEngine: called with magic node.";
-    return;
-  }
-
   // Calculate depth in a safe way. Return early if root cannot be
   // reached from n.
   // Todo test if this lock is unnecessary when solidtree is disabled.
@@ -191,22 +170,43 @@ void Search::DoAuxEngine(Node* n) {
   std::reverse(my_moves_from_the_white_side.begin(), my_moves_from_the_white_side.end());
     
   ChessBoard my_board = played_history_.Last().GetBoard();
+  Position my_position = played_history_.Last();
 
+  // Try exporting a fen instead of messing with individual moves,
+  // that way there is no need to convert moves from modern to legacy
+  // encoding
+
+  // // old code, use legacy moves      
+  // for(auto& move: my_moves) {
+  //   if (my_board.flipped()) move.Mirror();
+  //   move = my_board.GetLegacyMove(move);
+  //   my_board.ApplyMove(move);
+  //   my_position = Position(my_position, move);
+  //   if (my_board.flipped()) move.Mirror();
+  //   // not necessary now that we use GetFen().    
+  //   s = s + move.as_string() + " "; 
+  //   my_board.Mirror();
+  // }
+
+  // modern encoding
   for(auto& move: my_moves) {
     if (my_board.flipped()) move.Mirror();
-    move = my_board.GetLegacyMove(move);
     my_board.ApplyMove(move);
+    my_position = Position(my_position, move);
     if (my_board.flipped()) move.Mirror();
-    // LOGFILE << "Move as UCI: " << move.as_string();
-    s = s + move.as_string() + " ";
+    s = s + move.as_string() + " ";  // only for debugging
     my_board.Mirror();
   }
-    
-  if (params_.GetAuxEngineVerbosity() >= 1) {
-    LOGFILE << "add pv=" << s;
-  }
-  s = current_uci_ + " " + s;
 
+  if (params_.GetAuxEngineVerbosity() >= 1) {
+    LOGFILE << "add pv=" << s << " from root position: " << GetFen(played_history_.Last());
+  }
+  // s = current_uci_ + " " + s;
+  LOGFILE << "trying to get a FEN from my_position";
+  s = "position fen " + GetFen(my_position);
+  LOGFILE << "got a FEN from my_position";  
+  LOGFILE << "input to helper: " << s;
+  
   // Before starting, test if stop_ is set
   if (stop_.load(std::memory_order_acquire)) {
     if (params_.GetAuxEngineVerbosity() >= 5) {    
@@ -253,8 +253,11 @@ void Search::DoAuxEngine(Node* n) {
     }
   }
   if (stopping) {
-    // Don't use results of a search that was stopped.
-    // LOGFILE << "AUX Search was interrupted, the results will not be used";
+    // TODO: actually do use the result, if the depth achieved was the
+    // requested depth and the line is actually played.
+
+    // Don't use results of a search that was stopped. LOGFILE << "AUX
+    // Search was interrupted, the results will not be used";
     return;
   }
   if (params_.GetAuxEngineVerbosity() >= 1) {
@@ -275,15 +278,17 @@ void Search::DoAuxEngine(Node* n) {
   std::string pv;
   std::vector<uint16_t> pv_moves;
 
-  // // reset flip needed? Not sure but should not hurt.
-  // flip = played_history_.IsBlackToMove() ^ (depth % 2 == 0);
   flip = played_history_.IsBlackToMove() ^ (depth % 2 == 0);
-  
-  // TODO: When parsing a move from UCI, translate it to modern notation for castling, if the moved piece is a king!
-  // e1g1 -> e1h1; e1c1 -> e1a1
-  
+
   auto bestmove_packed_int = Move(token, !flip).as_packed_int();
-  while(iss >> pv >> std::ws) {
+  int pv_length = 1;
+  // depth is distance between root and the starting point for the auxengine
+  // params_.GetAuxEngineDepth() is the depth of the requested search
+  // The actual PV is often times longer, but don't trust the extra plies. 
+  LOGFILE << "capping PV at length: " << depth + params_.GetAuxEngineDepth() << ", sum of depth = " << depth << " and AuxEngineDepth = " << params_.GetAuxEngineDepth();
+  while(iss >> pv >> std::ws && pv_length < depth + params_.GetAuxEngineDepth()) {
+  // while(iss >> pv >> std::ws) {  
+
     if (pv == "pv") {
       while(iss >> pv >> std::ws) {
         Move m;
@@ -293,10 +298,25 @@ void Search::DoAuxEngine(Node* n) {
           }
           break;
         }
+	// convert to Modern encoding, update the board and the position
+	// For the conversion never flip the board. Only flip the board when you need to apply the move!
+	Move m_in_modern_encoding = my_board.GetModernMove(m);
+
+	if (my_board.flipped()) m_in_modern_encoding.Mirror();
+	// Should the move applied be modern or legacy, or does it not matter?
+	m_in_modern_encoding = my_board.GetModernMove(m_in_modern_encoding);
+	// my_board.ApplyMove(m_in_modern_encoding); // Todo verify the correctness here, e.g. by printing a FEN.
+	my_board.ApplyMove(m); // Todo verify the correctness here, e.g. by printing a FEN.	
+	my_position = Position(my_position, m_in_modern_encoding);
+
+	if (my_board.flipped()) m_in_modern_encoding.Mirror();
+	my_board.Mirror();
+
 	// my_moves.push_back(m); // Add the PV to the queue
-	my_moves_from_the_white_side.push_back(m); // Add the PV to the queue	
-        pv_moves.push_back(m.as_packed_int());
+	my_moves_from_the_white_side.push_back(m_in_modern_encoding); // Add the PV to the queue	
+        pv_moves.push_back(m_in_modern_encoding.as_packed_int());
         flip = !flip;
+	pv_length++;
       }
     }
   }
@@ -306,13 +326,17 @@ void Search::DoAuxEngine(Node* n) {
       LOGFILE << "Warning: the helper did not give a PV, will only use bestmove:" << bestmove_packed_int;
     }
     pv_moves.push_back(bestmove_packed_int);
-  } else if (pv_moves[0] != bestmove_packed_int) {
-    // TODO: Is it possible for PV to not match bestmove?
-    LOGFILE << "error: pv doesn't match bestmove:" << pv_moves[0] << " " << "bm" << bestmove_packed_int;
-    pv_moves.clear();
-    pv_moves.push_back(bestmove_packed_int);
-    // stop here.
-    return;
+
+    // This test will fail whenever the first move in the PV is castle, since pv_moves[0] is in modern encoding while
+    // bestmove_packed_int is on legacy encoding
+    
+  // } else if (pv_moves[0] != bestmove_packed_int) {
+  //   // TODO: Is it possible for PV to not match bestmove?
+  //   LOGFILE << "error: pv doesn't match bestmove:" << pv_moves[0] << " " << "bm" << bestmove_packed_int;
+  //   pv_moves.clear();
+  //   pv_moves.push_back(bestmove_packed_int);
+  //   // stop here.
+  //   return;
   }
 
   
@@ -329,125 +353,6 @@ void Search::DoAuxEngine(Node* n) {
   fast_track_extend_and_evaluate_queue_mutex_.lock();
   fast_track_extend_and_evaluate_queue_.push(my_moves_from_the_white_side); // push() since it is a queue.
   fast_track_extend_and_evaluate_queue_mutex_.unlock();
-  // std::string pv_moves_debug;
-  // std::string my_moves_debug;
-  // for (Node* n2 = n; n2 != root_node_; n2 = n2->GetParent()) {
-  //   pv_moves_debug = n2->GetOwnEdge()->GetMove(!flip).as_string() + " " + s;
-  //   flip = !flip;
-  // }
-
-  //     LOGFILE << "AuxUpdateP() called with ply=" << ply << " to update policy at a node which can be reached from root via this path: " << s << "and the suggested move (in packed int form) here is: " << pv_moves[ply];
-  //   }
-
-  // AuxUpdateP(n, pv_moves, 0, my_board);
-}
-
-void Search::AuxUpdateP(Node* n, std::vector<uint16_t> pv_moves, int ply, ChessBoard my_board) {
-  // my_board is the position where the node n is.
-
-  if (n->GetAuxEngineMove() < 0xfffe) {
-    if (params_.GetAuxEngineVerbosity() >= 1) {    
-      LOGFILE << "Returning early from AuxUpdateP(). This node already taken care of.";
-    }
-    // This can happen because nodes are placed in the queue from
-    // deepest node first during DoBackupSingeNode
-    //if (n->GetAuxEngineMove() != pv_moves[ply]) {
-    //  LOGFILE << "already done: curr:" << n->GetAuxEngineMove() << " new:" << pv_moves[ply] << " (error? mismatch)";
-    //} else {
-    //  LOGFILE << "already done";
-    //}
-    return;
-  }
-  
-
-  // This appears not to be needed with the lock and solidtree turned off.
-  /* // get depth */
-  /* int depth = 0; */
-  /* Node* n3 = n; */
-
-  /* // This appears to be safe. */
-  /* if(n3 == root_node_){ */
-  /*   /\* LOGFILE << "at AuxUpdateP: called with root node"; *\/ */
-  /* } else { */
-  /*   while(n3 != root_node_ && n3 != nullptr){ */
-  /*     n3 = n3->GetParent(); */
-  /*     depth++; */
-  /*   } */
-  /*   if(n3 == nullptr){ */
-  /*     if (params_.GetAuxEngineVerbosity() >= 2) { */
-  /* 	LOGFILE << "at AuxUpdateP: not able to reach root: old node?"; */
-  /*     } */
-  /*     return; */
-  /*   } */
-  /* } */
-
-  // flip and s are only used to get debugging info.
-  // unwrap the full set of moves
-  // Debugging START
-  std::string s = "";
-  if(params_.GetAuxEngineVerbosity() >= 2) {
-    bool flip = my_board.flipped();  
-    for (Node* n2 = n; n2 != root_node_; n2 = n2->GetParent()) {
-      s = n2->GetOwnEdge()->GetMove(!flip).as_string() + " " + s;
-      flip = !flip;
-    }
-
-    if(n == root_node_){
-      LOGFILE << "AuxUpdateP() called with ply=" << ply << " to update policy at root and the suggested move here is: " << pv_moves[ply];
-    } else {
-      LOGFILE << "AuxUpdateP() called with ply=" << ply << " to update policy at a node which can be reached from root via this path: " << s << "and the suggested move (in packed int form) here is: " << pv_moves[ply];
-    }
-  } // Debugging STOP
-    
-  for (const auto& edge : n->Edges()) {
-    Move move = edge.GetMove();
-    /* LOGFILE << "move before converting to legacy castling format: " << move.as_string() << ", " << move.as_packed_int(); */
-    move = my_board.GetLegacyMove(move);
-    /* LOGFILE << "move after converting to legacy castling format: " << move.as_string() << ", " << move.as_packed_int(); */
-    // Delay the application of the move until the right edge is found.
-    /* LOGFILE << "move as packed int after converting to uci and back: " << move.as_packed_int(); */
-
-    // Sometimes GetLegacyMove() returns the modern move anyway
-    if(move.as_packed_int() == pv_moves[ply] ||
-       (move.as_packed_int() == 263 && pv_moves[ply] == 262)
-       ) {
-      if(move.as_packed_int() == 263 && pv_moves[ply] == 262){
-	LOGFILE << "GetLegacyMove() appear to have failed, falling back to a manual hack.";
-      }
-      // Only change Policy if it is rather low, and don't make it absurdly high.
-      if(edge.GetP() < 0.3) {
-	auto new_p = edge.GetP() + params_.GetAuxEngineBoost()/100.0f;
-	if(params_.GetAuxEngineVerbosity() >= 2) {	
-	  LOGFILE << "Changing P from " << edge.GetP() << " to " << std::min(new_p, 0.5f);
-	}
-	nodes_mutex_.lock();
-	edge.edge()->SetP(std::min(new_p, 0.5f));
-	nodes_mutex_.unlock();	
-	auxengine_num_updates++;
-      }
-      if (ply+1 < params_.GetAuxEngineFollowPvDepth() &&
-          (uint32_t) ply+1 < pv_moves.size() &&
-          edge.HasNode() &&
-          !edge.IsTerminal() &&
-          edge.node()->HasChildren()) {
-
-	// update the board, now that we have found the correct edge
-	if (my_board.flipped()) move.Mirror();
-	my_board.ApplyMove(move);
-	my_board.Mirror();
-	
-        AuxUpdateP(edge.node(), pv_moves, ply+1, my_board);
-      }
-      n->SetAuxEngineMove(pv_moves[ply]);
-      return;
-    }
-  }
-
-  // Leela might have made the node terminal due to repetition, but the AUX engine might not. Only die if there actually are edges.
-  if(n->HasChildren()){
-    // throw Exception("AuxUpdateP: Move not found");
-    LOGFILE << "AuxUpdateP: Move not found: " << pv_moves[ply];;
-  }
 }
 
 void Search::AuxWait() REQUIRES(threads_mutex_) {
@@ -463,10 +368,10 @@ void Search::AuxWait() REQUIRES(threads_mutex_) {
   // - This is the only thread left that can modify auxengine_queue_
   // - Take the lock anyways to be safe.
   std::unique_lock<std::mutex> lock(auxengine_mutex_);
-  LOGFILE << "Summaries per move: auxengine_queue_ size " << auxengine_queue_.size()
+  LOGFILE << "Summaries per move: auxengine_queue_ size at the end of search: " << auxengine_queue_.size()
       << " Average duration " << (auxengine_num_evals ? (auxengine_total_dur / auxengine_num_evals) : -1.0f) << "ms"
       << " Number of evals " << auxengine_num_evals
-      << " Number of updates " << auxengine_num_updates;
+      << " Number of added nodes " << auxengine_num_updates;
   // TODO: For now with this simple queue method,
   // mark unfinished nodes not done again, and delete the queue.
   // Next search iteration will fill it again.
@@ -480,6 +385,9 @@ void Search::AuxWait() REQUIRES(threads_mutex_) {
   }
   // Empty the other queue.
   fast_track_extend_and_evaluate_queue_mutex_.lock();
+  if(fast_track_extend_and_evaluate_queue_.empty()){
+    LOGFILE << "No PVs in the fast_track_extend_and_evaluate_queue";
+  }
   while (!fast_track_extend_and_evaluate_queue_.empty()){
     LOGFILE << "Removing obsolete PV from queue";
     fast_track_extend_and_evaluate_queue_.pop();

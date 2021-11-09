@@ -1108,6 +1108,8 @@ void SearchWorker::ExecuteOneIteration() {
   RunNNComputation();
   search_->backend_waiting_counter_.fetch_add(-1, std::memory_order_relaxed);
 
+  LOGFILE << "NN computation finished";
+
   // 5. Retrieve NN computations (and terminal values) into nodes.
   FetchMinibatchResults();
 
@@ -1150,6 +1152,14 @@ void SearchWorker::InitializeIteration(
 }
 
 void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node, std::vector<lczero::Move> my_moves, int ply) {
+  // Black to move?
+  bool black_to_move = ! search_->played_history_.IsBlackToMove() ^ (ply % 2 == 0);
+  if(black_to_move){
+    LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation_inner called with node" << my_node->DebugString() << " white to edge/move _to_ this node: " << my_node->GetOwnEdge()->GetMove(black_to_move).as_string() << " and this move from the a/b-helper: " << my_moves[ply].as_string() << "(seen from whites perspective) is really made by black, ply=" << ply;
+  } else {
+    LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation_inner called with node" << my_node->DebugString() << " black to edge/move _to_ this node: " << my_node->GetOwnEdge()->GetMove(black_to_move).as_string() << " and this move from the a/b-helper: " << my_moves[ply].as_string() << " is made by white, ply=" << ply;
+  }
+
   // increase the visit count. assume no terminal move in my_moves except for possibly the last move in my_moves
   search_->nodes_mutex_.lock();
   // if this node is already extended, then add to its NInFlight.
@@ -1161,13 +1171,6 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
     }
   }
   search_->nodes_mutex_.unlock();  
-  // Black to move?
-  bool black_to_move = ! search_->played_history_.IsBlackToMove() ^ (ply % 2 == 0);
-  if(black_to_move){
-    LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation_inner called with node" << my_node->DebugString() << " white to edge/move _to_ this node: " << my_node->GetOwnEdge()->GetMove(black_to_move).as_string() << " and this move from the a/b-helper: " << my_moves[ply].as_string() << "(seen from whites perspective) is really made by black, ply=" << ply;
-  } else {
-    LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation_inner called with node" << my_node->DebugString() << " black to edge/move _to_ this node: " << my_node->GetOwnEdge()->GetMove(black_to_move).as_string() << " and this move from the a/b-helper: " << my_moves[ply].as_string() << " is made by white, ply=" << ply;
-  }
   // 1. Find the edge
   bool edge_found = false;
   if(my_node->IsTerminal()){
@@ -1192,7 +1195,7 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	}
       } else {
 	if(black_to_move){	
-	  LOGFILE << "Blacks move (edge) " << edge.GetMove(black_to_move).as_string() << " (from white: " << edge.GetMove().as_string() << ") is not expanded. Will expand it, and add the resulting node to the minibatch_, and then use it as parent";
+	  LOGFILE << "Blacks move (edge) " << edge.GetMove(black_to_move).as_string() << " (from white: " << edge.GetMove().as_string() << ") is not expanded. It has policy " << edge.GetP() << ". Will expand it, and add the resulting node to the minibatch_, and then use it as parent";
 	} else {
 	  LOGFILE << "Whites move (edge) " << edge.GetMove(black_to_move).as_string() << " is not expanded. Will expand it, and add the resulting node to the minibatch_, and then use it as parent.";	  
 	}
@@ -1210,9 +1213,9 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	// Verify that the newly created node has the edge to it that we intended
 	if(child_node->GetOwnEdge()->GetMove() == edge.GetMove()){
 	  LOGFILE << "Expected: " << edge.GetMove().as_string() << " got: " << child_node->GetOwnEdge()->GetMove().as_string();
-	  LOGFILE << "node has correct ownedge move";
+	  LOGFILE << "node has correct OwnEdge move";
 	} else {
-	  throw Exception("node has incorrect ownedge move!");
+	  throw Exception("node has incorrect OwnEdge move!");
 	}
 
 	// put this node into a queue for debugging
@@ -1231,6 +1234,8 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	  Node* should_become_root = child_node;
 	  while(depth >= 0){
 	    should_become_root = should_become_root->GetParent();
+	    // Print the updated visits stats
+	    LOGFILE << "visit stats after update" << should_become_root->DebugString();
 	    depth--;
 	  }
 	  if(should_become_root == search_->root_node_){
@@ -1269,17 +1274,22 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
       }
     }
     if(edges_found){
-      throw Exception("Leelas node has edges, but the recommended move was not found among them!");
+      /* throw Exception("Leelas node has edges, but the recommended move was not found among them!"); */
       LOGFILE << "Leelas node has edges, but the recommended move was not found among them!";
     } else {
       LOGFILE << "No edges found, repetition?";
       // Revert visits in flight for nodes in this branch with the remaining depth, which is the current value of ply, so my_moves.size() - ply
       int counter = my_moves.size() - ply;
       for(Node * n = my_node; n != search_->root_node_; n = n->GetParent()){
-	LOGFILE << "N in flights before reverting: " << n->GetNInFlight() << " counter: " << counter;
-	/* search_->nodes_mutex_.lock(); */
-	n->CancelScoreUpdate(counter);
-	/* search_->nodes_mutex_.unlock(); */
+	if(n->GetN() > 0){
+	  n->CancelScoreUpdate(counter);
+	  LOGFILE << "Reverting N in flights value before reverting: " << n->GetNInFlight() << " will decrease by " << counter;
+	} else {
+	  if(n->GetNInFlight() == 1){
+	    n->CancelScoreUpdate(1); // newly extended node.
+	    LOGFILE << "Reverting N in flights for a newly extended node";
+	  }
+	}
 	counter++;
       }
     }

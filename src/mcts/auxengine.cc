@@ -62,6 +62,9 @@ void SearchWorker::AuxMaybeEnqueueNode(Node* n) {
       !n->IsTerminal() &&
       n->HasChildren()) {
 
+    // debug only put a node in the queue if the it is empty.
+    if(search_->auxengine_queue_.size() > 0) return;
+
     n->SetAuxEngineMove(0xfffe); // TODO: magic for pending
     
     std::lock_guard<std::mutex> lock(search_->auxengine_mutex_);
@@ -285,9 +288,9 @@ void Search::DoAuxEngine(Node* n) {
   // depth is distance between root and the starting point for the auxengine
   // params_.GetAuxEngineDepth() is the depth of the requested search
   // The actual PV is often times longer, but don't trust the extra plies. 
-  LOGFILE << "capping PV at length: " << depth + params_.GetAuxEngineDepth() << ", sum of depth = " << depth << " and AuxEngineDepth = " << params_.GetAuxEngineDepth();
-  while(iss >> pv >> std::ws && pv_length < depth + params_.GetAuxEngineDepth()) {
-  // while(iss >> pv >> std::ws) {  
+  // LOGFILE << "capping PV at length: " << depth + params_.GetAuxEngineDepth() << ", sum of depth = " << depth << " and AuxEngineDepth = " << params_.GetAuxEngineDepth();
+  // while(iss >> pv >> std::ws && pv_length < depth + params_.GetAuxEngineDepth()) {
+  while(iss >> pv >> std::ws) {  
 
     if (pv == "pv") {
       while(iss >> pv >> std::ws) {

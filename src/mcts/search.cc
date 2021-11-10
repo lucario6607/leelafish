@@ -1162,14 +1162,17 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 
   // increase the visit count. assume no terminal move in my_moves except for possibly the last move in my_moves
   search_->nodes_mutex_.lock();
+
   // if this node is already extended, then add to its NInFlight.
   if(my_node->GetN() > 0){
     my_node->IncrementNInFlight(my_moves.size()-ply);
   } else {
+    // otherwise make sure it is not picked by PickNodesToExtend
     if(my_node->GetNInFlight() == 0){
       my_node->IncrementNInFlight(1); // newly extended node.
     }
   }
+
   search_->nodes_mutex_.unlock();  
   // 1. Find the edge
   bool edge_found = false;
@@ -1197,7 +1200,7 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	if(black_to_move){	
 	  LOGFILE << "Blacks move (edge) " << edge.GetMove(black_to_move).as_string() << " (from white: " << edge.GetMove().as_string() << ") is not expanded. It has policy " << edge.GetP() << ". Will expand it, and add the resulting node to the minibatch_, and then use it as parent";
 	} else {
-	  LOGFILE << "Whites move (edge) " << edge.GetMove(black_to_move).as_string() << " is not expanded. Will expand it, and add the resulting node to the minibatch_, and then use it as parent.";	  
+	  LOGFILE << "Whites move (edge) " << edge.GetMove(black_to_move).as_string() << " is not expanded. It has policy " << edge.GetP() << " Will expand it, and add the resulting node to the minibatch_, and then use it as parent.";	  
 	}
 	// most likely an unecessary lock
 	search_->nodes_mutex_.lock();
@@ -1206,10 +1209,6 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 
 	// ExtendNode() implements locking.
 	ExtendNode(child_node, ply+2); // edge from root is my_moves[0] but at depth 1. But not sure if +2 is correct here.
-	/* ExtendNode(child_node, ply+1); // edge from root is my_moves[0] but at depth 1. But not sure if +2 is correct here. */
-	/* ExtendNode(child_node, ply+1); // edge from root is my_moves[0] but at depth 1. 		 Illegal move */ 
-	/* ExtendNode(child_node, ply); // edge from root is my_moves[0] but at depth 1. 	 */
-
 	// Verify that the newly created node has the edge to it that we intended
 	if(child_node->GetOwnEdge()->GetMove() == edge.GetMove()){
 	  LOGFILE << "Expected: " << edge.GetMove().as_string() << " got: " << child_node->GetOwnEdge()->GetMove().as_string();
@@ -1217,17 +1216,16 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	} else {
 	  throw Exception("node has incorrect OwnEdge move!");
 	}
-
-	// put this node into a queue for debugging
-	/* search_->debug_nodes_added_by_aux_queue_mutex_.lock(); */
-	/* search_->debug_nodes_added_by_aux_queue_.push(child_node); */ // Push to a vector, and add the vector to the queue when completed.
-	/* search_->debug_nodes_added_by_aux_queue_mutex_.unlock(); */
 	
 	// queue for NN evaluation.
 	minibatch_.push_back(NodeToProcess::Visit(child_node, static_cast<uint16_t>(ply+1)));
+	minibatch_[minibatch_.size()-1].nn_queried = true;
+	minibatch_[minibatch_.size()-1].multivisit = static_cast<uint16_t>(my_moves.size()-ply+1);
+	
 	if((int) my_moves.size() > ply+1){
 	  PreExtendTreeAndFastTrackForNNEvaluation_inner(child_node, my_moves, ply+1);
 	} else {
+	  child_node->IncrementNInFlight(1); // newly extended node.	  
 	  LOGFILE << "Successfully added a full PV 2.";
 	  // 1. Verify that all added nodes are connected to root.
 	  int depth = ply;
@@ -1517,6 +1515,7 @@ void SearchWorker::ProcessPickedTask(int start_idx, int end_idx,
                                      TaskWorkspace* workspace) {
   auto& history = workspace->history;
   history = search_->played_history_;
+  LOGFILE << "ProcessPickedTask starting at node " << start_idx;
 
   for (int i = start_idx; i < end_idx; i++) {
     auto& picked_node = minibatch_[i];
@@ -1526,6 +1525,8 @@ void SearchWorker::ProcessPickedTask(int start_idx, int end_idx,
     // If node is already known as terminal (win/loss/draw according to rules
     // of the game), it means that we already visited this node before.
     if (picked_node.IsExtendable()) {
+      LOGFILE << "ProcessPickedTask at node " << i << " " << node->DebugString() << " is extendable";
+      
       // Node was never visited, extend it.
       ExtendNode(node, picked_node.depth, picked_node.moves_to_visit, &history);
       if (!node->IsTerminal()) {
@@ -1552,6 +1553,8 @@ void SearchWorker::ProcessPickedTask(int start_idx, int end_idx,
               search_->network_->GetCapabilities().input_format, history);
         }
       }
+    } else {
+      LOGFILE << "ProcessPickedTask at node " << i << " " << node->DebugString() << " is NOT extendable";      
     }
     if (params_.GetOutOfOrderEval() && picked_node.CanEvalOutOfOrder()) {
       // Perform out of order eval for the last entry in minibatch_.
@@ -2302,7 +2305,21 @@ template <typename Computation>
 void SearchWorker::FetchSingleNodeResult(NodeToProcess* node_to_process,
                                          const Computation& computation,
                                          int idx_in_computation) {
-  if (node_to_process->IsCollision()) return;
+  // if (node_to_process->IsCollision()) return;
+
+  if (node_to_process->IsCollision()) {
+    // Collisions are handled via shared_collisions instead.
+    // with PreExtendTreeAndFastTrackForNNEvaluation(); collisions can occur before the NN evaluation, so determine if this node is such a node.
+    // if(node_to_process->node->GetN() == 0 && node_to_process->node->GetNInFlight() == 1){
+    //   LOGFILE << "NOT returning early because of collision: node " << node_to_process->node->DebugString();
+    // } else {
+    //   LOGFILE << "returning early because of collision: node " << node_to_process->node->DebugString();
+    //   return;
+    // }
+    return;
+  }
+
+  
   Node* node = node_to_process->node;
   if (!node_to_process->nn_queried) {
     // Terminal nodes don't involve the neural NetworkComputation, nor do
@@ -2310,6 +2327,7 @@ void SearchWorker::FetchSingleNodeResult(NodeToProcess* node_to_process,
     node_to_process->v = node->GetWL();
     node_to_process->d = node->GetD();
     node_to_process->m = node->GetM();
+    // LOGFILE << "not setting policy because of nn_queried not true: node " << node->DebugString();
     return;
   }
   // For NN results, we need to populate policy as well as value.
@@ -2352,6 +2370,9 @@ void SearchWorker::FetchSingleNodeResult(NodeToProcess* node_to_process,
                         params_.GetNoiseAlpha());
   }
   node->SortEdges();
+
+  LOGFILE << "FetchSingleNodeResult: node" << node->DebugString();
+  
 }
 
 // 6. Propagate the new nodes' information to all their parents in the tree.
@@ -2377,7 +2398,20 @@ void SearchWorker::DoBackupUpdateSingleNode(
   Node* node = node_to_process.node;
   if (node_to_process.IsCollision()) {
     // Collisions are handled via shared_collisions instead.
+
+
+    LOGFILE << "returning early because of collision: node " << node->DebugString();
     return;
+
+    // if(node->GetN() == 0 && node->GetNInFlight() == 1){
+    //   LOGFILE << "NOT returning early because of collision: node " << node->DebugString();
+    // } else {
+    //   LOGFILE << "returning early because of collision: node " << node->DebugString();
+    //   return;
+    // }
+    
+  } else {
+      LOGFILE << "collision not true in node " << node->DebugString();    
   }
 
   // For the first visit to a terminal, maybe update parent bounds too.

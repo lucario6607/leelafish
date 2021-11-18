@@ -300,7 +300,8 @@ class SearchWorker {
   // 1.5 Extend tree with nodes using PV of a/b helper, and add the new
   // nodes to the minibatch
   void PreExtendTreeAndFastTrackForNNEvaluation();
-  void PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node, std::vector<lczero::Move> my_moves, int ply);
+  void PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node,
+	     std::vector<lczero::Move> my_moves, int ply, int nodes_added);
   
   // 2. Gather minibatch.
   void GatherMinibatch();
@@ -327,7 +328,8 @@ class SearchWorker {
 
  private:
   struct NodeToProcess {
-    bool IsExtendable() const { return !is_collision && !node->IsTerminal(); }
+    // bool IsExtendable() const { return !is_collision && !node->IsTerminal() && !node->HasChildren(); }
+    bool IsExtendable() const { return !is_collision && !node->IsTerminal(); }    
     bool IsCollision() const { return is_collision; }
     bool CanEvalOutOfOrder() const {
       return is_cache_hit || node->IsTerminal();

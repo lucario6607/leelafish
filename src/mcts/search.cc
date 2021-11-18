@@ -1093,9 +1093,11 @@ void SearchWorker::ExecuteOneIteration() {
   GatherMinibatch2();
   task_count_.store(-1, std::memory_order_release);
   search_->backend_waiting_counter_.fetch_add(1, std::memory_order_relaxed);
+  LOGFILE << "GatherMinibatch2() finished";  
 
   // 2b. Collect collisions.
   CollectCollisions();
+  LOGFILE << "CollectCollisions() finished";  
 
   // 3. Prefetch into cache.
   MaybePrefetchIntoCache();
@@ -1103,6 +1105,7 @@ void SearchWorker::ExecuteOneIteration() {
   if (params_.GetMaxConcurrentSearchers() != 0) {
     search_->pending_searchers_.fetch_add(1, std::memory_order_acq_rel);
   }
+  LOGFILE << "MaybePrefetchIntoCache() finished";
 
   // 4. Run NN computation.
   RunNNComputation();
@@ -1151,35 +1154,57 @@ void SearchWorker::InitializeIteration(
   minibatch_.reserve(2 * params_.GetMiniBatchSize());
 }
 
-void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node, std::vector<lczero::Move> my_moves, int ply) {
-  // Black to move?
+void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node, std::vector<lczero::Move> my_moves, int ply, int nodes_added) {
+  // keep track of how many nodes we actually add and adjust the visit count afterwards
+
+  // LOGFILE << "Trying to lock nodes for writing";
+  // search_->nodes_mutex_.lock();
+  // LOGFILE << "Got a lock on nodes for writing";
+  // // my_node->IncrementNInFlight(my_moves.size()-ply);
+  // my_node->IncrementNInFlight(my_moves.size()-ply+1);  
+  // LOGFILE << "Incremented NInFlight.";
+  // search_->nodes_mutex_.unlock();
+  // LOGFILE << "Released the lock on nodes for writing";    
+
   bool black_to_move = ! search_->played_history_.IsBlackToMove() ^ (ply % 2 == 0);
+  bool edge_found = false;
+
+  search_->nodes_mutex_.lock_shared();
+
+  LOGFILE << "Got a lock on nodes reading.";  
+
+  // std::string s_1 = "";
+  // std::string s_2 = "";  
+  // // if my_node is not the root node
+  // if(my_node != search_->root_node_){
+  //   // Verify that the moves from root to my_node are the same as the moves in my_moves up to ply.
+  //   std::vector<Move> my_path;
+  //   my_path.reserve(ply);
+  //   Node* cur = my_node;
+  //   while (cur != search_->root_node_) {
+  //     Node* prev = cur->GetParent();
+  //     my_path.push_back(prev->GetEdgeToNode(cur)->GetMove());
+  //     cur = prev;
+  //   }
+  //   std::reverse(my_path.begin(), my_path.end());
+  //   for(int i = 0; i < ply; i++){
+  //     s_1 = s_1 + " " + my_path[i].as_string();
+  //     s_2 = s_2 + " " + my_moves[i].as_string();    
+  //   }
+  //   if(s_1 != s_2){
+  //     LOGFILE << "Paths not identical: s_1=" << s_1 << " s_2=" << s_2;    
+  //     throw Exception("paths not identical!");
+  //   } else {
+  //     LOGFILE << "Paths identical: s_1=" << s_1 << " s_2=" << s_2;
+  //   }
+  // }
+      
   if(black_to_move){
-    LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation_inner called with node" << my_node->DebugString() << " white to edge/move _to_ this node: " << my_node->GetOwnEdge()->GetMove(black_to_move).as_string() << " and this move from the a/b-helper: " << my_moves[ply].as_string() << "(seen from whites perspective) is really made by black, ply=" << ply;
+    LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation_inner called with node" << my_node->DebugString() << " white to edge/move _to_ this node: " << my_node->GetOwnEdge()->GetMove(black_to_move).as_string() << " (debugging info for the edge: " << my_node->GetOwnEdge()->DebugString() << ") and this move from the a/b-helper: " << my_moves[ply].as_string() << "(seen from whites perspective) is really made by black, ply=" << ply;
   } else {
     LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation_inner called with node" << my_node->DebugString() << " black to edge/move _to_ this node: " << my_node->GetOwnEdge()->GetMove(black_to_move).as_string() << " and this move from the a/b-helper: " << my_moves[ply].as_string() << " is made by white, ply=" << ply;
   }
-
-  // increase the visit count. assume no terminal move in my_moves except for possibly the last move in my_moves
-  search_->nodes_mutex_.lock();
-
-  // if this node is already extended, then add to its NInFlight.
-  if(my_node->GetN() > 0){
-    my_node->IncrementNInFlight(my_moves.size()-ply);
-  } else {
-    // otherwise make sure it is not picked by PickNodesToExtend
-    if(my_node->GetNInFlight() == 0){
-      my_node->IncrementNInFlight(1); // newly extended node.
-    }
-  }
-
-  search_->nodes_mutex_.unlock();  
-  // 1. Find the edge
-  bool edge_found = false;
-  if(my_node->IsTerminal()){
-    LOGFILE << "Node is terminal, nothing to do.";
-    return;
-  }
+  // Find the edge
   for (auto& edge : my_node->Edges()) {
     if(edge.GetMove() == my_moves[ply] ){
       edge_found = true;
@@ -1191,58 +1216,147 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	  } else {
 	    LOGFILE << "Whites move " << edge.GetMove(black_to_move).as_string() << " is expanded and has policy " << edge.GetP() << ". Go deeper.";	    
 	  }
-	  PreExtendTreeAndFastTrackForNNEvaluation_inner(edge.node(), my_moves, ply+1);
+	  // unlock nodes so that the next level can write stuff.
+	  search_->nodes_mutex_.unlock_shared();
+	  PreExtendTreeAndFastTrackForNNEvaluation_inner(edge.node(), my_moves, ply+1, nodes_added);
 	} else {
-	  LOGFILE << "All moves in the PV already expanded nothing to do.";
+	  LOGFILE << "All moves in the PV already expanded, nothing to do.";
+	  // unlock nodes before returning.
+	  search_->nodes_mutex_.unlock_shared();
 	  return;
 	}
       } else {
 	if(black_to_move){	
 	  LOGFILE << "Blacks move (edge) " << edge.GetMove(black_to_move).as_string() << " (from white: " << edge.GetMove().as_string() << ") is not expanded. It has policy " << edge.GetP() << ". Will expand it, and add the resulting node to the minibatch_, and then use it as parent";
 	} else {
-	  LOGFILE << "Whites move (edge) " << edge.GetMove(black_to_move).as_string() << " is not expanded. It has policy " << edge.GetP() << " Will expand it, and add the resulting node to the minibatch_, and then use it as parent.";	  
+	  LOGFILE << "Whites move (edge) " << edge.GetMove(black_to_move).as_string() << " is not expanded. It has policy " << edge.GetP() << " Will expand it, and add the resulting node to the minibatch_, and then use it as parent.";
 	}
-	// most likely an unecessary lock
-	search_->nodes_mutex_.lock();
+	
+	// GetOrSpawnNode() does work with the lock on since it does not modify the tree.
 	Node* child_node = edge.GetOrSpawnNode(my_node, nullptr);
-	search_->nodes_mutex_.unlock();
+	nodes_added++;
 
-	// ExtendNode() implements locking.
-	ExtendNode(child_node, ply+2); // edge from root is my_moves[0] but at depth 1. But not sure if +2 is correct here.
-	// Verify that the newly created node has the edge to it that we intended
-	if(child_node->GetOwnEdge()->GetMove() == edge.GetMove()){
-	  LOGFILE << "Expected: " << edge.GetMove().as_string() << " got: " << child_node->GetOwnEdge()->GetMove().as_string();
-	  LOGFILE << "node has correct OwnEdge move";
-	} else {
-	  throw Exception("node has incorrect OwnEdge move!");
-	}
+	// Create a history variable that will be filled by the four argument version of ExtendNode().
+	lczero::PositionHistory history = search_->played_history_;
+	// copy the part of my_moves that makes up the history of this node
+	std::vector<lczero::Move> moves_to_this_node;
+	std::copy_n(my_moves.begin(), ply+1, std::back_inserter(moves_to_this_node));
+	// check that copy_n() works like this, might be a one-off error. Checked: it was fine.
+	// for(int i=0; i < ply+1; i++){
+	//   LOGFILE << "moves_to_this_node[" << i << "]=" << (my_moves.begin()+i)->as_string() << " my_moves[" << i << "]=" << my_moves[i].as_string();
+	// }
+	
+	// unlock the read lock on nodes so that ExtendNode() can get a write lock.
+	search_->nodes_mutex_.unlock_shared();
+	// ExtendNode(child_node, ply+2);	
+	ExtendNode(child_node, ply+2, moves_to_this_node, &history); // This will modify history which will be re-used later here.
+	// Get a read lock again
+	search_->nodes_mutex_.lock_shared();
+
+	// // Verify that the newly created node has the edge to it that we intended
+	// if(child_node->GetOwnEdge()->GetMove() == edge.GetMove()){
+	//   LOGFILE << "Expected: " << edge.GetMove().as_string() << " got: " << child_node->GetOwnEdge()->GetMove().as_string();
+	//   LOGFILE << "node has correct OwnEdge move";
+	// } else {
+	//   throw Exception("node has incorrect OwnEdge move!");
+	// }
 	
 	// queue for NN evaluation.
-	minibatch_.push_back(NodeToProcess::Visit(child_node, static_cast<uint16_t>(ply+1)));
-	minibatch_[minibatch_.size()-1].nn_queried = true;
-	minibatch_[minibatch_.size()-1].multivisit = static_cast<uint16_t>(my_moves.size()-ply+1);
-	
-	if((int) my_moves.size() > ply+1){
-	  PreExtendTreeAndFastTrackForNNEvaluation_inner(child_node, my_moves, ply+1);
+	LOGFILE << "Adding newly extended node: " << child_node->DebugString() << " to the minibatch_";
+
+	// Visit() only returns stuff for the minibatch_ it does not modify the node, so the read lock is sufficient here.
+
+	bool is_terminal=child_node->IsTerminal(); // while we have the read lock.
+
+	// This part mostly copy/pasted from ProcessPickedTask
+	if (!child_node->IsTerminal()) {
+	  minibatch_.push_back(NodeToProcess::Visit(child_node, static_cast<uint16_t>(ply+1)));
+	  minibatch_[minibatch_.size()-1].nn_queried = true;
+	  // We adjust visit_in_flight in the node manually later when we know the actual number of new nodes added.
+	  // FinalizeScoreUpdate() adds multivisit + n_in_flight, so having a non-zero multivisit would result in doubled N after backup.
+	  minibatch_[minibatch_.size()-1].multivisit = 1;
+	  // For now, do not re-implement the full cache-machinery in GatherMinibatch2() here.
+	  // Accept a small inefficiency by not using the NNCache.
+	  // For NN evaluation three things are needed: hash, input_planes and probabilities_to_cache.
+	  const auto hash = history.HashLast(params_.GetCacheHistoryLength() + 1);
+	  minibatch_[minibatch_.size()-1].hash = hash;
+	  int transform;
+	  minibatch_[minibatch_.size()-1].input_planes = EncodePositionForNN(
+		   search_->network_->GetCapabilities().input_format, history, 8,
+		   params_.GetHistoryFill(), &transform);
+	  minibatch_[minibatch_.size()-1].probability_transform = transform;
+	  std::vector<uint16_t>& moves = minibatch_[minibatch_.size()-1].probabilities_to_cache;
+	  // Legal moves are known, use them.
+	  moves.reserve(child_node->GetNumEdges());
+	  for (const auto& edge : child_node->Edges()) {
+	    moves.emplace_back(edge.GetMove().as_nn_index(transform));
+	  }
+	  // Add the data to computation too, since GatherMinibatch2() will not touch our NodesToProcess
+	  computation_->AddInput(minibatch_[minibatch_.size()-1].hash,
+				 std::move(minibatch_[minibatch_.size()-1].input_planes),
+				 std::move(minibatch_[minibatch_.size()-1].probabilities_to_cache));
+
 	} else {
-	  child_node->IncrementNInFlight(1); // newly extended node.	  
-	  LOGFILE << "Successfully added a full PV 2.";
-	  // 1. Verify that all added nodes are connected to root.
-	  int depth = ply;
-	  Node* should_become_root = child_node;
-	  while(depth >= 0){
-	    should_become_root = should_become_root->GetParent();
-	    // Print the updated visits stats
-	    LOGFILE << "visit stats after update" << should_become_root->DebugString();
-	    depth--;
-	  }
-	  if(should_become_root == search_->root_node_){
-	    LOGFILE << "All nodes in the extended branch are connected to root.";
-	  } else {
-	    throw Exception("Branch not connected to root!");
-	  }
-	  return;
+	  LOGFILE << "Houston, we got a terminal node: " << child_node->DebugString();
+	  minibatch_.push_back(NodeToProcess::Visit(child_node, 1)); // Only one visit, since this is a terminal
+	  minibatch_[minibatch_.size()-1].nn_queried = false;
+	  minibatch_[minibatch_.size()-1].ooo_completed = false;
 	}
+
+	// unlock the readlock.
+	search_->nodes_mutex_.unlock_shared();
+	if (!is_terminal){
+	  if((int) my_moves.size() > ply+1){
+	    // Go deeper.
+	    PreExtendTreeAndFastTrackForNNEvaluation_inner(child_node, my_moves, ply+1, nodes_added);
+	    return; // someone further down has already added visits_in_flight;
+	  }
+	}
+	
+	// Not going deeper now, either because the PV is finished, or because we hit a terminal node.
+	// Aquire a write lock to adjust visits_in_flight.
+	search_->nodes_mutex_.lock();
+	LOGFILE << "Successfully added a full PV, depth = " << ply << ", number of nodes added = " << nodes_added;
+	// Adjust the visits_in_flight now that we know how many nodes where actually added.
+	// Each node shall have as many visits_in_flight as there are added nodes beneath it.
+	// Increase the number of visits_in_flight to add for each generational step, until the
+	// number is equal to nodes_added.
+	// Start at 0 because every evaluated node get 1 visit from minibatch_.multivisit=1.
+	int visits_to_add = 0;
+	for(Node * n = child_node; n != search_->root_node_; n = n->GetParent()){
+	  n->IncrementNInFlight(visits_to_add);  
+	  LOGFILE << "Added visits_in_flight=" << visits_to_add << " to node " << n->DebugString();
+	  if(visits_to_add < nodes_added){
+	    visits_to_add++;
+	  }
+	}
+	search_->nodes_mutex_.unlock();
+
+	// std::vector<Move> my_path_final;
+	// my_path_final.reserve(ply+1);
+	// Node* cur = child_node;
+	// while (cur != search_->root_node_) {
+	//   Node* prev = cur->GetParent();
+	//   my_path_final.push_back(prev->GetEdgeToNode(cur)->GetMove());
+	//   cur = prev;
+	// }
+	// std::reverse(my_path_final.begin(), my_path_final.end());
+	// s_1 = "";
+	// s_2 = "";  
+	// for(int i = 0; i <= ply; i++){
+	//   s_1 = s_1 + " " + my_path_final[i].as_string();
+	//   s_2 = s_2 + " " + my_moves[i].as_string();    
+	// }
+	// if(s_1 != s_2){
+	//   throw Exception("Final paths not identical!");
+	// } else {
+	//   LOGFILE << "Final paths identical: s_1=" << s_1 << " s_2=" << s_2;
+	// }
+	
+	// Release the read lock before returning
+	// search_->nodes_mutex_.unlock_shared();
+	  
+	return;
       }
     }
   }
@@ -1272,12 +1386,12 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
       }
     }
     if(edges_found){
-      /* throw Exception("Leelas node has edges, but the recommended move was not found among them!"); */
+      throw Exception("Leelas node has edges, but the recommended move was not found among them!");
       LOGFILE << "Leelas node has edges, but the recommended move was not found among them!";
     } else {
       LOGFILE << "No edges found, repetition?";
       // Revert visits in flight for nodes in this branch with the remaining depth, which is the current value of ply, so my_moves.size() - ply
-      int counter = my_moves.size() - ply;
+      int counter = my_moves.size() - ply + 1;
       for(Node * n = my_node; n != search_->root_node_; n = n->GetParent()){
 	if(n->GetN() > 0){
 	  n->CancelScoreUpdate(counter);
@@ -1291,33 +1405,35 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	counter++;
       }
     }
+    // Release the read lock before returning
+    search_->nodes_mutex_.unlock_shared();
   }
 }
 
 // 1.5 Extend tree with nodes using PV of a/b helper, and add the new nodes to the minibatch.
+
 void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation() {
   // input: a PV starting from root in form of a vector of Moves (the vectors are stored in a global queue called fast_track_extend_and_evaluate_queue_)
-  // lock the queue
-  search_->fast_track_extend_and_evaluate_queue_mutex_.lock();
-  while(search_->fast_track_extend_and_evaluate_queue_.size() > 0){
-    LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: size of minibatch_ is " << minibatch_.size();
-    LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: size of fast_track_extend_and_evaluate_queue_ is " << search_->fast_track_extend_and_evaluate_queue_.size();
-    std::vector<lczero::Move> my_moves = search_->fast_track_extend_and_evaluate_queue_.front(); // read the element
-    search_->fast_track_extend_and_evaluate_queue_.pop(); // remove it from the queue.
-    /* search_->fast_track_extend_and_evaluate_queue_mutex_.unlock(); // unlock the queue. */
-    // show full my_moves
-    std::string s;
-    for(int i = 0; i < (int) my_moves.size(); i++){
-      s = s + my_moves[i].as_string() + " ";
+  LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation()";
+  // lock the queue before reading from it
+  std::lock_guard<std::mutex> lock(search_->fast_track_extend_and_evaluate_queue_mutex_);
+  if(search_->fast_track_extend_and_evaluate_queue_.size() > 0){
+    while(search_->fast_track_extend_and_evaluate_queue_.size() > 0){
+      LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: size of minibatch_ is " << minibatch_.size();
+      LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: size of fast_track_extend_and_evaluate_queue_ is " << search_->fast_track_extend_and_evaluate_queue_.size();
+      std::vector<lczero::Move> my_moves = search_->fast_track_extend_and_evaluate_queue_.front(); // read the element
+      search_->fast_track_extend_and_evaluate_queue_.pop(); // remove it from the queue.
+      // show full my_moves
+      std::string s;
+      for(int i = 0; i < (int) my_moves.size(); i++){
+	s = s + my_moves[i].as_string() + " ";
+      }
+      LOGFILE << "Length of PV to add: " << my_moves.size() << " my_moves: " << s;
+      PreExtendTreeAndFastTrackForNNEvaluation_inner(search_->root_node_, my_moves, 0, 0);
+      LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: finished one iteration, size of minibatch_ is " << minibatch_.size();
+      LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: finished one iteration, size of fast_track_extend_and_evaluate_queue_ is " << search_->fast_track_extend_and_evaluate_queue_.size();
     }
-    LOGFILE << "Length of PV to add: " << my_moves.size() << " my_moves: " << s;
-    PreExtendTreeAndFastTrackForNNEvaluation_inner(search_->root_node_, my_moves, 0);
-    LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: finished one iteration, size of minibatch_ is " << minibatch_.size();
-    LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: finished one iteration, size of fast_track_extend_and_evaluate_queue_ is " << search_->fast_track_extend_and_evaluate_queue_.size();
-    // lock the queue before reading it again.
-    /* search_->fast_track_extend_and_evaluate_queue_mutex_.lock(); */
   }
-  search_->fast_track_extend_and_evaluate_queue_mutex_.unlock(); // unlock the queue.  
 }
   
 // 2. Gather minibatch.
@@ -1371,6 +1487,9 @@ void SearchWorker::GatherMinibatch2() {
   while (minibatch_size < params_.GetMiniBatchSize() &&
          number_out_of_order_ < params_.GetMaxOutOfOrderEvals()) {
     // If there's something to process without touching slow neural net, do it.
+    if(minibatch_size > 0 && computation_->GetCacheMisses() == 0){
+      LOGFILE << "There's something to process without touching slow neural net, do it.";
+    }
     if (minibatch_size > 0 && computation_->GetCacheMisses() == 0) return;
 
     // If there is backend work to be done, and the backend is idle - exit
@@ -1379,6 +1498,14 @@ void SearchWorker::GatherMinibatch2() {
     // early exit from every batch since there is never another search thread to
     // be keeping the backend busy. Which would mean that threads=1 has a
     // massive nps drop.
+    if(thread_count > 1 && minibatch_size > 0 &&
+        computation_->GetCacheMisses() > params_.GetIdlingMinimumWork() &&
+        thread_count - search_->backend_waiting_counter_.load(
+                           std::memory_order_relaxed) >
+            params_.GetThreadIdlingThreshold()){
+      LOGFILE << "There is backend work to be done, and the backend is idle, do it.";
+    }
+    
     if (thread_count > 1 && minibatch_size > 0 &&
         computation_->GetCacheMisses() > params_.GetIdlingMinimumWork() &&
         thread_count - search_->backend_waiting_counter_.load(
@@ -1586,6 +1713,12 @@ int SearchWorker::WaitForTasks() {
 }
 
 void SearchWorker::PickNodesToExtend(int collision_limit) {
+  {
+    LOGFILE << "PickNodesToExtend() tries to lock nodes_mutex_";
+    SharedMutex::Lock lock(search_->nodes_mutex_);
+    LOGFILE << "PickNodesToExtend() got the lock on nodes_mutex_";
+  }
+  
   ResetTasks();
   {
     // While nothing is ready yet - wake the task runners so they are ready to
@@ -1597,7 +1730,9 @@ void SearchWorker::PickNodesToExtend(int collision_limit) {
   // This lock must be held until after the task_completed_ wait succeeds below.
   // Since the tasks perform work which assumes they have the lock, even though
   // actually this thread does.
+  LOGFILE << "PickNodesToExtend() tries to lock nodes_mutex_";
   SharedMutex::Lock lock(search_->nodes_mutex_);
+  LOGFILE << "PickNodesToExtend() got the lock on nodes_mutex_";
   PickNodesToExtendTask(search_->root_node_, 0, collision_limit, empty_movelist,
                         &minibatch_, &main_workspace_);
 
@@ -1656,6 +1791,8 @@ void SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
                                          const std::vector<Move>& moves_to_base,
                                          std::vector<NodeToProcess>* receiver,
                                          TaskWorkspace* workspace) {
+
+  LOGFILE << "At PickNodesToExtendTask(), size of minibatch_" << minibatch_.size();
   // TODO: Bring back pre-cached nodes created outside locks in a way that works
   // with tasks.
   // TODO: pre-reserve visits_to_perform for expected depth and likely maximum
@@ -1805,7 +1942,7 @@ void SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
         int best_idx = -1;
         float best_without_u = std::numeric_limits<float>::lowest();
         float second_best = std::numeric_limits<float>::lowest();
-        bool can_exit = false;
+        // bool can_exit = false;
         best_edge.Reset();
         for (int idx = 0; idx < max_needed; ++idx) {
           if (idx > cache_filled_idx) {
@@ -1855,13 +1992,13 @@ void SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
             second_best = score;
             second_best_edge = cur_iters[idx];
           }
-          if (can_exit) break;
-          if (nstarted == 0) {
-            // One more loop will get 2 unvisited nodes, which is sufficient to
-            // ensure second best is correct. This relies upon the fact that
-            // edges are sorted in policy decreasing order.
-            can_exit = true;
-          }
+          // if (can_exit) break;
+          // if (nstarted == 0) {
+          //   // One more loop will get 2 unvisited nodes, which is sufficient to
+          //   // ensure second best is correct. This relies upon the fact that
+          //   // edges are sorted in policy decreasing order.
+          //   can_exit = true;
+          // }
         }
         int new_visits = 0;
         if (second_best_edge) {
@@ -2299,26 +2436,28 @@ void SearchWorker::FetchMinibatchResults() {
     FetchSingleNodeResult(&node_to_process, *computation_, idx_in_computation);
     if (node_to_process.nn_queried) ++idx_in_computation;
   }
+  LOGFILE << "SearchWorker::FetchMinibatchResults() finished";
 }
 
 template <typename Computation>
 void SearchWorker::FetchSingleNodeResult(NodeToProcess* node_to_process,
                                          const Computation& computation,
                                          int idx_in_computation) {
+
+  LOGFILE << "FetchSingleNodeResult: called for node" << node_to_process->node->DebugString() << "idx_in_computation is" << idx_in_computation;
+  // Nodes mutex for doing node updates.
+  SharedMutex::Lock lock(search_->nodes_mutex_);
+  LOGFILE << "FetchSingleNodeResult: got a lock";
+  
   // if (node_to_process->IsCollision()) return;
 
   if (node_to_process->IsCollision()) {
+    LOGFILE << "FetchSingleNodeResult: collision found on node " << node_to_process->node->DebugString();
     // Collisions are handled via shared_collisions instead.
-    // with PreExtendTreeAndFastTrackForNNEvaluation(); collisions can occur before the NN evaluation, so determine if this node is such a node.
-    // if(node_to_process->node->GetN() == 0 && node_to_process->node->GetNInFlight() == 1){
-    //   LOGFILE << "NOT returning early because of collision: node " << node_to_process->node->DebugString();
-    // } else {
-    //   LOGFILE << "returning early because of collision: node " << node_to_process->node->DebugString();
-    //   return;
-    // }
     return;
+  } else {
+    LOGFILE << "FetchSingleNodeResult: no collision found on node " << node_to_process->node->DebugString();    
   }
-
   
   Node* node = node_to_process->node;
   if (!node_to_process->nn_queried) {
@@ -2335,6 +2474,7 @@ void SearchWorker::FetchSingleNodeResult(NodeToProcess* node_to_process,
   node_to_process->v = -computation.GetQVal(idx_in_computation);
   node_to_process->d = computation.GetDVal(idx_in_computation);
   node_to_process->m = computation.GetMVal(idx_in_computation);
+  LOGFILE << "v for node: " << node_to_process->node->DebugString() << " is " << node_to_process->v;
   // ...and secondly, the policy data.
   // Calculate maximum first.
   float max_p = -std::numeric_limits<float>::infinity();
@@ -2342,6 +2482,9 @@ void SearchWorker::FetchSingleNodeResult(NodeToProcess* node_to_process,
   // There are never more than 256 valid legal moves in any legal position.
   std::array<float, 256> intermediate;
   int counter = 0;
+
+  LOGFILE << "FetchSingleNodeResult: about to read edges from node:" << node->DebugString();
+  
   for (auto& edge : node->Edges()) {
     float p = computation.GetPVal(
         idx_in_computation,
@@ -2358,6 +2501,8 @@ void SearchWorker::FetchSingleNodeResult(NodeToProcess* node_to_process,
     intermediate[i] = p;
     total += p;
   }
+  LOGFILE << "FetchSingleNodeResult: about to set policy for edges from node:" << node->DebugString();
+
   counter = 0;
   // Normalize P values to add up to 1.0.
   const float scale = total > 0.0f ? 1.0f / total : 1.0f;
@@ -2369,17 +2514,19 @@ void SearchWorker::FetchSingleNodeResult(NodeToProcess* node_to_process,
     ApplyDirichletNoise(node, params_.GetNoiseEpsilon(),
                         params_.GetNoiseAlpha());
   }
-  node->SortEdges();
 
-  LOGFILE << "FetchSingleNodeResult: node" << node->DebugString();
-  
+  // LOGFILE << "FetchSingleNodeResult: about to sort edges from node:" << node->DebugString();  
+  // node->SortEdges();
+ 
 }
 
 // 6. Propagate the new nodes' information to all their parents in the tree.
 // ~~~~~~~~~~~~~~
 void SearchWorker::DoBackupUpdate() {
+  LOGFILE << "At SearchWorker::DoBackupUpdate(), trying to get a lock";
   // Nodes mutex for doing node updates.
   SharedMutex::Lock lock(search_->nodes_mutex_);
+  LOGFILE << "At SearchWorker::DoBackupUpdate(), got a lock";  
 
   bool work_done = number_out_of_order_ > 0;
   for (const NodeToProcess& node_to_process : minibatch_) {
@@ -2388,6 +2535,7 @@ void SearchWorker::DoBackupUpdate() {
       work_done = true;
     }
   }
+  LOGFILE << "At SearchWorker::DoBackupUpdate(), ready backpropagating";  
   if (!work_done) return;
   search_->CancelSharedCollisions();
   search_->total_batches_ += 1;
@@ -2403,13 +2551,6 @@ void SearchWorker::DoBackupUpdateSingleNode(
     LOGFILE << "returning early because of collision: node " << node->DebugString();
     return;
 
-    // if(node->GetN() == 0 && node->GetNInFlight() == 1){
-    //   LOGFILE << "NOT returning early because of collision: node " << node->DebugString();
-    // } else {
-    //   LOGFILE << "returning early because of collision: node " << node->DebugString();
-    //   return;
-    // }
-    
   } else {
       LOGFILE << "collision not true in node " << node->DebugString();    
   }
@@ -2487,6 +2628,9 @@ void SearchWorker::DoBackupUpdateSingleNode(
   search_->total_playouts_ += node_to_process.multivisit;
   search_->cum_depth_ += node_to_process.depth * node_to_process.multivisit;
   search_->max_depth_ = std::max(search_->max_depth_, node_to_process.depth);
+
+  LOGFILE << "DoBackupUpdateSingleNode: node" << node->DebugString();
+  
 }
 
 bool SearchWorker::MaybeSetBounds(Node* p, float m, int* n_to_fix,

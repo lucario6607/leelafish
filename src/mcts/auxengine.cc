@@ -62,8 +62,8 @@ void SearchWorker::AuxMaybeEnqueueNode(Node* n) {
       !n->IsTerminal() &&
       n->HasChildren()) {
 
-    // debug only put a node in the queue if the it is empty.
-    if(search_->auxengine_queue_.size() > 0) return;
+    // // debug only put a node in the queue if the it is empty.
+    // if(search_->auxengine_queue_.size() > 0) return;
 
     n->SetAuxEngineMove(0xfffe); // TODO: magic for pending
     
@@ -354,7 +354,7 @@ void Search::DoAuxEngine(Node* n) {
   }
   
   fast_track_extend_and_evaluate_queue_mutex_.lock();
-  fast_track_extend_and_evaluate_queue_.push(my_moves_from_the_white_side); // push() since it is a queue.
+  fast_track_extend_and_evaluate_queue_.push(my_moves_from_the_white_side); // I think push() means push_back for queues.
   fast_track_extend_and_evaluate_queue_mutex_.unlock();
 }
 

@@ -299,7 +299,7 @@ void EngineController::Go(const GoParams& params) {
       *move_start_time_, std::move(stopper), params.infinite || params.ponder,
       options_, &cache_, syzygy_tb_.get());
   // AuxEngine needs the UCI string of the position.
-  assert(current_position_);
+  // assert(current_position_);
   search_->current_position_fen_ = current_position_.fen;
   search_->current_position_moves_ = current_position_.moves;
   if (params.ponder && !current_position_.moves.empty()) {

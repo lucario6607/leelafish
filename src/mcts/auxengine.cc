@@ -62,8 +62,8 @@ void SearchWorker::AuxMaybeEnqueueNode(Node* n) {
       !n->IsTerminal() &&
       n->HasChildren()) {
 
-    // debug only put a node in the queue if the it is empty.
-    if(search_->auxengine_queue_.size() > 0) return;
+    // // debug only put a node in the queue if the it is empty.
+    // if(search_->auxengine_queue_.size() > 0) return;
 
     n->SetAuxEngineMove(0xfffe); // TODO: magic for pending
     
@@ -74,6 +74,7 @@ void SearchWorker::AuxMaybeEnqueueNode(Node* n) {
 }
 
 void Search::AuxEngineWorker() {
+  int number_of_pvs_delivered = 0;
   if (!auxengine_ready_) {
     auxengine_c_ = boost::process::child(params_.GetAuxEngineFile(), boost::process::std_in < auxengine_os_, boost::process::std_out > auxengine_is_);
     {
@@ -132,8 +133,9 @@ void Search::AuxEngineWorker() {
 	auxengine_queue_.pop();
       } // release lock
       DoAuxEngine(n);
+      ++number_of_pvs_delivered;
     }
-  LOGFILE << "AuxEngineWorker done";
+    LOGFILE << "AuxEngineWorker done, delivered " << number_of_pvs_delivered << " PVs.";
 }
 
 void Search::DoAuxEngine(Node* n) {
@@ -287,11 +289,10 @@ void Search::DoAuxEngine(Node* n) {
   int pv_length = 1;
   // depth is distance between root and the starting point for the auxengine
   // params_.GetAuxEngineDepth() is the depth of the requested search
-  // The actual PV is often times longer, but don't trust the extra plies. 
-  // LOGFILE << "capping PV at length: " << depth + params_.GetAuxEngineDepth() << ", sum of depth = " << depth << " and AuxEngineDepth = " << params_.GetAuxEngineDepth();
-  // while(iss >> pv >> std::ws && pv_length < depth + params_.GetAuxEngineDepth()) {
-  while(iss >> pv >> std::ws) {  
-
+  // The actual PV is often times longer, but don't trust the extra plies.
+  LOGFILE << "capping PV at length: " << depth + params_.GetAuxEngineDepth() << ", sum of depth = " << depth << " and AuxEngineDepth = " << params_.GetAuxEngineDepth();
+  while(iss >> pv >> std::ws && pv_length < depth + params_.GetAuxEngineDepth()) {
+  // while(iss >> pv >> std::ws) {  
     if (pv == "pv") {
       while(iss >> pv >> std::ws) {
         Move m;
@@ -348,9 +349,9 @@ void Search::DoAuxEngine(Node* n) {
     debug_string = debug_string + my_moves_from_the_white_side[i].as_string() + " ";
   }
   if(played_history_.IsBlackToMove()){
-    LOGFILE << "debug info: length of PV given to helper engine: " << depth << " position given to helper: " << s << " black to move at root, length of my_moves_from_the_white_side " << my_moves_from_the_white_side.size() << " my_moves_from_the_white_side: " << debug_string;
+    LOGFILE << "debug info: pv_length=" << pv_length << ", length of PV given to helper engine: " << depth << " position given to helper: " << s << " black to move at root, length of my_moves_from_the_white_side " << my_moves_from_the_white_side.size() << " my_moves_from_the_white_side: " << debug_string;
   } else {
-    LOGFILE << "debug info: length of PV given to helper engine: " << depth << " position given to helper: " << s << " white to move at root, length of my_moves_from_the_white_side " << my_moves_from_the_white_side.size() << " my_moves_from_the_white_side: " << debug_string;    
+    LOGFILE << "debug info: pv_length=" << pv_length << ", length of PV given to helper engine: " << depth << " position given to helper: " << s << " white to move at root, length of my_moves_from_the_white_side " << my_moves_from_the_white_side.size() << " my_moves_from_the_white_side: " << debug_string;    
   }
   
   fast_track_extend_and_evaluate_queue_mutex_.lock();
@@ -378,14 +379,22 @@ void Search::AuxWait() REQUIRES(threads_mutex_) {
   // TODO: For now with this simple queue method,
   // mark unfinished nodes not done again, and delete the queue.
   // Next search iteration will fill it again.
+
+  // aquire a lock before reading the data from the node
+  nodes_mutex_.lock();
+  
   while (!auxengine_queue_.empty()) {
     auto n = auxengine_queue_.front();
-    assert(n->GetAuxEngineMove() != 0xffff);
+    assert(n->GetAuxEngineMove() != 0xffff); // TODO find out why this is here!
     if (n->GetAuxEngineMove() == 0xfffe) {
       n->SetAuxEngineMove(0xffff);
+      LOGFILE << "Changed GetAuxEngineMove() for a node while shutting down search.";
     }
     auxengine_queue_.pop();
   }
+  nodes_mutex_.unlock(); // release the lock.
+  auxengine_mutex_.unlock();
+  
   // Empty the other queue.
   fast_track_extend_and_evaluate_queue_mutex_.lock();
   if(fast_track_extend_and_evaluate_queue_.empty()){

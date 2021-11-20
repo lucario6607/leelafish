@@ -255,15 +255,19 @@ class SearchWorker {
   }
 
   ~SearchWorker() {
+    LOGFILE << "Trying to destruct the searchworker threads";
     {
       task_count_.store(-1, std::memory_order_release);
       Mutex::Lock lock(picking_tasks_mutex_);
       exiting_ = true;
       task_added_.notify_all();
     }
+    LOGFILE << "Destructing the searchworker threads 1";    
     for (size_t i = 0; i < task_threads_.size(); i++) {
+      LOGFILE << "Destructing the searchworker threads i=" << i;          
       task_threads_[i].join();
     }
+    LOGFILE << "All searchworker threads destroyed.";
   }
 
   // Runs iterations while needed.

@@ -973,15 +973,16 @@ void Search::CancelSharedCollisions() REQUIRES(nodes_mutex_) {
 }
 
 Search::~Search() {
-  LOGFILE << "About to enter AuxWait()";
-  AuxWait();  // This can take some time during which we are not ready to respond readyok, so for now increase timemargin.
-  LOGFILE << "AuxWait() returned";  
+  LOGFILE << "Entered the Search() destructor";
   Abort();
   Wait();
   {
     SharedMutex::Lock lock(nodes_mutex_);
     CancelSharedCollisions();
   }
+  LOGFILE << "About to enter AuxWait()";
+  AuxWait();  // This can take some time during which we are not ready to respond readyok, so for now increase timemargin.
+  LOGFILE << "AuxWait() returned";  
   LOGFILE << "Search destroyed.";
 }
 
@@ -1399,19 +1400,19 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
     } else {
       LOGFILE << "No edges found, repetition?";
       // Revert visits in flight for nodes in this branch with the remaining depth, which is the current value of ply, so my_moves.size() - ply
-      int counter = my_moves.size() - ply + 1;
-      for(Node * n = my_node; n != search_->root_node_; n = n->GetParent()){
-	if(n->GetN() > 0){
-	  n->CancelScoreUpdate(counter);
-	  LOGFILE << "Reverting N in flights value before reverting: " << n->GetNInFlight() << " will decrease by " << counter;
-	} else {
-	  if(n->GetNInFlight() == 1){
-	    n->CancelScoreUpdate(1); // newly extended node.
-	    LOGFILE << "Reverting N in flights for a newly extended node";
-	  }
-	}
-	counter++;
-      }
+      // int counter = my_moves.size() - ply + 1;
+      // for(Node * n = my_node; n != search_->root_node_; n = n->GetParent()){
+      // 	if(n->GetN() > 0){
+      // 	  n->CancelScoreUpdate(counter);
+      // 	  LOGFILE << "Reverting N in flights value before reverting: " << n->GetNInFlight() << " will decrease by " << counter;
+      // 	} else {
+      // 	  if(n->GetNInFlight() == 1){
+      // 	    n->CancelScoreUpdate(1); // newly extended node.
+      // 	    LOGFILE << "Reverting N in flights for a newly extended node";
+      // 	  }
+      // 	}
+      // 	counter++;
+      // }
     }
     // Release the read lock before returning
     search_->nodes_mutex_.unlock_shared();

@@ -268,6 +268,7 @@ class SearchWorker {
 
   // Runs iterations while needed.
   void RunBlocking() {
+    LOGFILE << "SearchWorker::RunBlocking() entered.";    
     LOGFILE << "Started search thread.";
     try {
       // A very early stop may arrive before this point, so the test is at the
@@ -280,6 +281,7 @@ class SearchWorker {
                 << std::endl;
       abort();
     }
+    LOGFILE << "SearchWorker::RunBlocking() finished.";
   }
 
   // Does one full iteration of MCTS search:

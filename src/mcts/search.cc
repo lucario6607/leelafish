@@ -800,6 +800,7 @@ EdgeAndNode Search::GetBestRootChildWithTemperature(float temperature) const {
 }
 
 void Search::StartThreads(size_t how_many) {
+  LOGFILE << "Search::StartThreads() enterered.";
   thread_count_.store(how_many, std::memory_order_release);
   Mutex::Lock lock(threads_mutex_);
   OpenAuxEngine();
@@ -819,11 +820,15 @@ void Search::StartThreads(size_t how_many) {
                  std::chrono::steady_clock::now() - start_time_)
                  .count()
           << "ms already passed.";
+  LOGFILE << "Search::StartThreads() finished.";  
 }
 
 void Search::RunBlocking(size_t threads) {
+  LOGFILE << "Entered RunBlocking";
   StartThreads(threads);
+  LOGFILE << "RunBlocking has started threads";  
   Wait();
+  LOGFILE << "RunBlocking finished";    
 }
 
 bool Search::IsSearchActive() const {
@@ -934,10 +939,6 @@ void Search::Stop() {
   ok_to_respond_bestmove_ = true;
   FireStopInternal();
   LOGFILE << "Stopping search due to `stop` uci command.";
-  // Not sure if this is really necessary, and it does not help
-  /* LOGFILE << "Stop: About to enter AuxWait()"; */
-  /* AuxWait();  // This can take some time during which we are not ready to respond readyok, so for now increase timemargin. */
-  /* LOGFILE << "Stop: AuxWait() returned";   */
 }
 
 void Search::Abort() {
@@ -951,11 +952,13 @@ void Search::Abort() {
 }
 
 void Search::Wait() {
+  LOGFILE << "Entered Wait()";
   Mutex::Lock lock(threads_mutex_);
   while (!threads_.empty()) {
     threads_.back().join();
     threads_.pop_back();
   }
+  LOGFILE << "Exiting Wait()";  
 }
 
 void Search::CancelSharedCollisions() REQUIRES(nodes_mutex_) {
@@ -1060,6 +1063,7 @@ void SearchWorker::RunTasks(int tid) {
 }
 
 void SearchWorker::ExecuteOneIteration() {
+  LOGFILE << "ExecuteOneIteration() started";
   // 1. Initialize internal structures.
   InitializeIteration(search_->network_->NewComputation());
 
@@ -1115,12 +1119,15 @@ void SearchWorker::ExecuteOneIteration() {
 
   // 5. Retrieve NN computations (and terminal values) into nodes.
   FetchMinibatchResults();
+  LOGFILE << "FetchMinibatchResults() finished";  
 
   // 6. Propagate the new nodes' information to all their parents in the tree.
   DoBackupUpdate();
+  LOGFILE << "DoBackupUpdate() finished";
 
   // 7. Update the Search's status and progress information.
   UpdateCounters();
+  LOGFILE << "UpdateCounters() finished";  
 
   // If required, waste time to limit nps.
   if (params_.GetNpsLimit() > 0) {
@@ -1141,6 +1148,7 @@ void SearchWorker::ExecuteOneIteration() {
       }
     }
   }
+  LOGFILE << "ExecuteOneIteration() finished";  
 }
 
 // 1. Initialize internal structures.
@@ -1325,7 +1333,7 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	int visits_to_add = 0;
 	for(Node * n = child_node; n != search_->root_node_; n = n->GetParent()){
 	  n->IncrementNInFlight(visits_to_add);  
-	  LOGFILE << "Added visits_in_flight=" << visits_to_add << " to node " << n->DebugString();
+	  // LOGFILE << "Added visits_in_flight=" << visits_to_add << " to node " << n->DebugString();
 	  if(visits_to_add < nodes_added){
 	    visits_to_add++;
 	  }
@@ -1642,7 +1650,7 @@ void SearchWorker::ProcessPickedTask(int start_idx, int end_idx,
                                      TaskWorkspace* workspace) {
   auto& history = workspace->history;
   history = search_->played_history_;
-  LOGFILE << "ProcessPickedTask starting at node " << start_idx;
+  // LOGFILE << "ProcessPickedTask starting at node " << start_idx;
 
   for (int i = start_idx; i < end_idx; i++) {
     auto& picked_node = minibatch_[i];
@@ -1652,7 +1660,7 @@ void SearchWorker::ProcessPickedTask(int start_idx, int end_idx,
     // If node is already known as terminal (win/loss/draw according to rules
     // of the game), it means that we already visited this node before.
     if (picked_node.IsExtendable()) {
-      LOGFILE << "ProcessPickedTask at node " << i << " " << node->DebugString() << " is extendable";
+      // LOGFILE << "ProcessPickedTask at node " << i << " " << node->DebugString() << " is extendable";
       
       // Node was never visited, extend it.
       ExtendNode(node, picked_node.depth, picked_node.moves_to_visit, &history);
@@ -1681,7 +1689,7 @@ void SearchWorker::ProcessPickedTask(int start_idx, int end_idx,
         }
       }
     } else {
-      LOGFILE << "ProcessPickedTask at node " << i << " " << node->DebugString() << " is NOT extendable";      
+      // LOGFILE << "ProcessPickedTask at node " << i << " " << node->DebugString() << " is NOT extendable";      
     }
     if (params_.GetOutOfOrderEval() && picked_node.CanEvalOutOfOrder()) {
       // Perform out of order eval for the last entry in minibatch_.
@@ -1714,9 +1722,9 @@ int SearchWorker::WaitForTasks() {
 
 void SearchWorker::PickNodesToExtend(int collision_limit) {
   {
-    LOGFILE << "PickNodesToExtend() tries to lock nodes_mutex_";
+    // LOGFILE << "PickNodesToExtend() tries to lock nodes_mutex_";
     SharedMutex::Lock lock(search_->nodes_mutex_);
-    LOGFILE << "PickNodesToExtend() got the lock on nodes_mutex_";
+    // LOGFILE << "PickNodesToExtend() got the lock on nodes_mutex_";
   }
   
   ResetTasks();
@@ -1730,9 +1738,9 @@ void SearchWorker::PickNodesToExtend(int collision_limit) {
   // This lock must be held until after the task_completed_ wait succeeds below.
   // Since the tasks perform work which assumes they have the lock, even though
   // actually this thread does.
-  LOGFILE << "PickNodesToExtend() tries to lock nodes_mutex_";
+  // LOGFILE << "PickNodesToExtend() tries to lock nodes_mutex_";
   SharedMutex::Lock lock(search_->nodes_mutex_);
-  LOGFILE << "PickNodesToExtend() got the lock on nodes_mutex_";
+  // LOGFILE << "PickNodesToExtend() got the lock on nodes_mutex_";
   PickNodesToExtendTask(search_->root_node_, 0, collision_limit, empty_movelist,
                         &minibatch_, &main_workspace_);
 
@@ -1792,7 +1800,7 @@ void SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
                                          std::vector<NodeToProcess>* receiver,
                                          TaskWorkspace* workspace) {
 
-  LOGFILE << "At PickNodesToExtendTask(), size of minibatch_" << minibatch_.size();
+  // LOGFILE << "At PickNodesToExtendTask(), size of minibatch_" << minibatch_.size();
   // TODO: Bring back pre-cached nodes created outside locks in a way that works
   // with tasks.
   // TODO: pre-reserve visits_to_perform for expected depth and likely maximum
@@ -2444,19 +2452,19 @@ void SearchWorker::FetchSingleNodeResult(NodeToProcess* node_to_process,
                                          const Computation& computation,
                                          int idx_in_computation) {
 
-  LOGFILE << "FetchSingleNodeResult: called for node" << node_to_process->node->DebugString() << "idx_in_computation is" << idx_in_computation;
+  // LOGFILE << "FetchSingleNodeResult: called for node" << node_to_process->node->DebugString() << "idx_in_computation is" << idx_in_computation;
   // Nodes mutex for doing node updates.
   SharedMutex::Lock lock(search_->nodes_mutex_);
-  LOGFILE << "FetchSingleNodeResult: got a lock";
+  // LOGFILE << "FetchSingleNodeResult: got a lock";
   
   // if (node_to_process->IsCollision()) return;
 
   if (node_to_process->IsCollision()) {
-    LOGFILE << "FetchSingleNodeResult: collision found on node " << node_to_process->node->DebugString();
+    // LOGFILE << "FetchSingleNodeResult: collision found on node " << node_to_process->node->DebugString();
     // Collisions are handled via shared_collisions instead.
     return;
   } else {
-    LOGFILE << "FetchSingleNodeResult: no collision found on node " << node_to_process->node->DebugString();    
+    // LOGFILE << "FetchSingleNodeResult: no collision found on node " << node_to_process->node->DebugString();    
   }
   
   Node* node = node_to_process->node;
@@ -2474,7 +2482,7 @@ void SearchWorker::FetchSingleNodeResult(NodeToProcess* node_to_process,
   node_to_process->v = -computation.GetQVal(idx_in_computation);
   node_to_process->d = computation.GetDVal(idx_in_computation);
   node_to_process->m = computation.GetMVal(idx_in_computation);
-  LOGFILE << "v for node: " << node_to_process->node->DebugString() << " is " << node_to_process->v;
+  // LOGFILE << "v for node: " << node_to_process->node->DebugString() << " is " << node_to_process->v;
   // ...and secondly, the policy data.
   // Calculate maximum first.
   float max_p = -std::numeric_limits<float>::infinity();
@@ -2483,7 +2491,7 @@ void SearchWorker::FetchSingleNodeResult(NodeToProcess* node_to_process,
   std::array<float, 256> intermediate;
   int counter = 0;
 
-  LOGFILE << "FetchSingleNodeResult: about to read edges from node:" << node->DebugString();
+  // LOGFILE << "FetchSingleNodeResult: about to read edges from node:" << node->DebugString();
   
   for (auto& edge : node->Edges()) {
     float p = computation.GetPVal(
@@ -2501,7 +2509,7 @@ void SearchWorker::FetchSingleNodeResult(NodeToProcess* node_to_process,
     intermediate[i] = p;
     total += p;
   }
-  LOGFILE << "FetchSingleNodeResult: about to set policy for edges from node:" << node->DebugString();
+  // LOGFILE << "FetchSingleNodeResult: about to set policy for edges from node:" << node->DebugString();
 
   counter = 0;
   // Normalize P values to add up to 1.0.
@@ -2537,7 +2545,9 @@ void SearchWorker::DoBackupUpdate() {
   }
   LOGFILE << "At SearchWorker::DoBackupUpdate(), ready backpropagating";  
   if (!work_done) return;
+  LOGFILE << "At SearchWorker::DoBackupUpdate(), Collisions left to cancel";    
   search_->CancelSharedCollisions();
+  LOGFILE << "At SearchWorker::DoBackupUpdate(), Finished canceling collisions";      
   search_->total_batches_ += 1;
 }
 
@@ -2548,11 +2558,11 @@ void SearchWorker::DoBackupUpdateSingleNode(
     // Collisions are handled via shared_collisions instead.
 
 
-    LOGFILE << "returning early because of collision: node " << node->DebugString();
+    // LOGFILE << "returning early because of collision: node " << node->DebugString();
     return;
 
   } else {
-      LOGFILE << "collision not true in node " << node->DebugString();    
+      // LOGFILE << "collision not true in node " << node->DebugString();    
   }
 
   // For the first visit to a terminal, maybe update parent bounds too.
@@ -2629,7 +2639,7 @@ void SearchWorker::DoBackupUpdateSingleNode(
   search_->cum_depth_ += node_to_process.depth * node_to_process.multivisit;
   search_->max_depth_ = std::max(search_->max_depth_, node_to_process.depth);
 
-  LOGFILE << "DoBackupUpdateSingleNode: node" << node->DebugString();
+  // LOGFILE << "DoBackupUpdateSingleNode: node" << node->DebugString();
   
 }
 

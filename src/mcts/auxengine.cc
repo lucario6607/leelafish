@@ -62,8 +62,8 @@ void SearchWorker::AuxMaybeEnqueueNode(Node* n) {
       !n->IsTerminal() &&
       n->HasChildren()) {
 
-    // // debug only put a node in the queue if the it is empty.
-    // if(search_->auxengine_queue_.size() > 0) return;
+    // debug only put a node in the queue if the it is empty.
+    if(search_->auxengine_queue_.size() > 0) return;
 
     n->SetAuxEngineMove(0xfffe); // TODO: magic for pending
     

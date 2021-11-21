@@ -1164,16 +1164,6 @@ void SearchWorker::InitializeIteration(
 }
 
 void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node, std::vector<lczero::Move> my_moves, int ply, int nodes_added) {
-  // keep track of how many nodes we actually add and adjust the visit count afterwards
-
-  // LOGFILE << "Trying to lock nodes for writing";
-  // search_->nodes_mutex_.lock();
-  // LOGFILE << "Got a lock on nodes for writing";
-  // // my_node->IncrementNInFlight(my_moves.size()-ply);
-  // my_node->IncrementNInFlight(my_moves.size()-ply+1);  
-  // LOGFILE << "Incremented NInFlight.";
-  // search_->nodes_mutex_.unlock();
-  // LOGFILE << "Released the lock on nodes for writing";    
 
   bool black_to_move = ! search_->played_history_.IsBlackToMove() ^ (ply % 2 == 0);
   bool edge_found = false;
@@ -1182,32 +1172,6 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 
   LOGFILE << "Got a lock on nodes reading.";  
 
-  // std::string s_1 = "";
-  // std::string s_2 = "";  
-  // // if my_node is not the root node
-  // if(my_node != search_->root_node_){
-  //   // Verify that the moves from root to my_node are the same as the moves in my_moves up to ply.
-  //   std::vector<Move> my_path;
-  //   my_path.reserve(ply);
-  //   Node* cur = my_node;
-  //   while (cur != search_->root_node_) {
-  //     Node* prev = cur->GetParent();
-  //     my_path.push_back(prev->GetEdgeToNode(cur)->GetMove());
-  //     cur = prev;
-  //   }
-  //   std::reverse(my_path.begin(), my_path.end());
-  //   for(int i = 0; i < ply; i++){
-  //     s_1 = s_1 + " " + my_path[i].as_string();
-  //     s_2 = s_2 + " " + my_moves[i].as_string();    
-  //   }
-  //   if(s_1 != s_2){
-  //     LOGFILE << "Paths not identical: s_1=" << s_1 << " s_2=" << s_2;    
-  //     throw Exception("paths not identical!");
-  //   } else {
-  //     LOGFILE << "Paths identical: s_1=" << s_1 << " s_2=" << s_2;
-  //   }
-  // }
-      
   if(black_to_move){
     LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation_inner called with node" << my_node->DebugString() << " white to edge/move _to_ this node: " << my_node->GetOwnEdge()->GetMove(black_to_move).as_string() << " (debugging info for the edge: " << my_node->GetOwnEdge()->DebugString() << ") and this move from the a/b-helper: " << my_moves[ply].as_string() << "(seen from whites perspective) is really made by black, ply=" << ply;
   } else {

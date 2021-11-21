@@ -56,17 +56,15 @@ void Search::OpenAuxEngine() REQUIRES(threads_mutex_) {
 }
 
 void SearchWorker::AuxMaybeEnqueueNode(Node* n) {
+  // the caller (DoBackupUpdateSingleNode) has a lock on search_->nodes_mutex_
   if (params_.GetAuxEngineFile() != "" &&
       n->GetN() >= (uint32_t) params_.GetAuxEngineThreshold() &&
       n->GetAuxEngineMove() == 0xffff &&
       !n->IsTerminal() &&
       n->HasChildren()) {
 
-    // // debug only put a node in the queue if the it is empty.
-    // if(search_->auxengine_queue_.size() > 0) return;
-
     n->SetAuxEngineMove(0xfffe); // TODO: magic for pending
-    
+
     std::lock_guard<std::mutex> lock(search_->auxengine_mutex_);
     search_->auxengine_queue_.push(n);
     search_->auxengine_cv_.notify_one();
@@ -115,7 +113,9 @@ void Search::AuxEngineWorker() {
   }
 
   // kickstart with the root node, no need to wait for it to get visits.
+  nodes_mutex_.lock(); // write lock  
   root_node_->SetAuxEngineMove(0xfffe); // mark root as pending.
+  nodes_mutex_.unlock(); // write lock    
   auxengine_mutex_.lock();  
   auxengine_queue_.push(root_node_);
   auxengine_cv_.notify_one();
@@ -142,17 +142,16 @@ void Search::DoAuxEngine(Node* n) {
   // Calculate depth in a safe way. Return early if root cannot be
   // reached from n.
   // Todo test if this lock is unnecessary when solidtree is disabled.
-  nodes_mutex_.lock();
+  nodes_mutex_.lock_shared();
   int depth = 0;
   for (Node* n2 = n; n2 != root_node_; n2 = n2->GetParent()) {
     depth++;
     if(n2 == nullptr){
       LOGFILE << "1. Could not reach root";
-      nodes_mutex_.unlock();
+      nodes_mutex_.unlock_shared();
       return;
     } 
   }
-  nodes_mutex_.unlock();
 
   std::string s = "";
   bool flip = played_history_.IsBlackToMove() ^ (depth % 2 == 0);
@@ -169,6 +168,7 @@ void Search::DoAuxEngine(Node* n) {
       my_moves_from_the_white_side.push_back(n2->GetOwnEdge()->GetMove());
       flip = !flip;
   }
+  nodes_mutex_.unlock_shared(); // todo only one loop needed to get depth, my_moves and flip.
 
   // Reverse the order
   std::reverse(my_moves.begin(), my_moves.end());
@@ -176,22 +176,6 @@ void Search::DoAuxEngine(Node* n) {
     
   ChessBoard my_board = played_history_.Last().GetBoard();
   Position my_position = played_history_.Last();
-
-  // Try exporting a fen instead of messing with individual moves,
-  // that way there is no need to convert moves from modern to legacy
-  // encoding
-
-  // // old code, use legacy moves      
-  // for(auto& move: my_moves) {
-  //   if (my_board.flipped()) move.Mirror();
-  //   move = my_board.GetLegacyMove(move);
-  //   my_board.ApplyMove(move);
-  //   my_position = Position(my_position, move);
-  //   if (my_board.flipped()) move.Mirror();
-  //   // not necessary now that we use GetFen().    
-  //   s = s + move.as_string() + " "; 
-  //   my_board.Mirror();
-  // }
 
   // modern encoding
   for(auto& move: my_moves) {
@@ -206,7 +190,6 @@ void Search::DoAuxEngine(Node* n) {
   if (params_.GetAuxEngineVerbosity() >= 1) {
     LOGFILE << "add pv=" << s << " from root position: " << GetFen(played_history_.Last());
   }
-  // s = current_uci_ + " " + s;
   LOGFILE << "trying to get a FEN from my_position";
   s = "position fen " + GetFen(my_position);
   LOGFILE << "got a FEN from my_position";  
@@ -286,13 +269,13 @@ void Search::DoAuxEngine(Node* n) {
   flip = played_history_.IsBlackToMove() ^ (depth % 2 == 0);
 
   auto bestmove_packed_int = Move(token, !flip).as_packed_int();
-  int pv_length = 1;
   // depth is distance between root and the starting point for the auxengine
   // params_.GetAuxEngineDepth() is the depth of the requested search
   // The actual PV is often times longer, but don't trust the extra plies.
-  LOGFILE << "capping PV at length: " << depth + params_.GetAuxEngineDepth() << ", sum of depth = " << depth << " and AuxEngineDepth = " << params_.GetAuxEngineDepth();
-  while(iss >> pv >> std::ws && pv_length < depth + params_.GetAuxEngineDepth()) {
-  // while(iss >> pv >> std::ws) {  
+  int pv_length = 1;
+  int max_pv_length = depth + params_.GetAuxEngineDepth();
+  LOGFILE << "capping PV at length: " << max_pv_length << ", sum of depth = " << depth << " and AuxEngineDepth = " << params_.GetAuxEngineDepth();
+  while(iss >> pv >> std::ws) {
     if (pv == "pv") {
       while(iss >> pv >> std::ws) {
         Move m;
@@ -320,6 +303,7 @@ void Search::DoAuxEngine(Node* n) {
 	my_moves_from_the_white_side.push_back(m_in_modern_encoding); // Add the PV to the queue	
         pv_moves.push_back(m_in_modern_encoding.as_packed_int());
         flip = !flip;
+	if(pv_length == max_pv_length) break;
 	pv_length++;
       }
     }
@@ -330,28 +314,16 @@ void Search::DoAuxEngine(Node* n) {
       LOGFILE << "Warning: the helper did not give a PV, will only use bestmove:" << bestmove_packed_int;
     }
     pv_moves.push_back(bestmove_packed_int);
-
-    // This test will fail whenever the first move in the PV is castle, since pv_moves[0] is in modern encoding while
-    // bestmove_packed_int is on legacy encoding
-    
-  // } else if (pv_moves[0] != bestmove_packed_int) {
-  //   // TODO: Is it possible for PV to not match bestmove?
-  //   LOGFILE << "error: pv doesn't match bestmove:" << pv_moves[0] << " " << "bm" << bestmove_packed_int;
-  //   pv_moves.clear();
-  //   pv_moves.push_back(bestmove_packed_int);
-  //   // stop here.
-  //   return;
   }
-
   
   std::string debug_string;
   for(int i = 0; i < (int) my_moves_from_the_white_side.size(); i++){
     debug_string = debug_string + my_moves_from_the_white_side[i].as_string() + " ";
   }
   if(played_history_.IsBlackToMove()){
-    LOGFILE << "debug info: pv_length=" << pv_length << ", length of PV given to helper engine: " << depth << " position given to helper: " << s << " black to move at root, length of my_moves_from_the_white_side " << my_moves_from_the_white_side.size() << " my_moves_from_the_white_side: " << debug_string;
+    LOGFILE << "debug info: length of PV given to helper engine: " << depth << " position given to helper: " << s << " black to move at root, length of my_moves_from_the_white_side " << my_moves_from_the_white_side.size() << " my_moves_from_the_white_side: " << debug_string;
   } else {
-    LOGFILE << "debug info: pv_length=" << pv_length << ", length of PV given to helper engine: " << depth << " position given to helper: " << s << " white to move at root, length of my_moves_from_the_white_side " << my_moves_from_the_white_side.size() << " my_moves_from_the_white_side: " << debug_string;    
+    LOGFILE << "debug info: length of PV given to helper engine: " << depth << " position given to helper: " << s << " white to move at root, length of my_moves_from_the_white_side " << my_moves_from_the_white_side.size() << " my_moves_from_the_white_side: " << debug_string;    
   }
   
   fast_track_extend_and_evaluate_queue_mutex_.lock();

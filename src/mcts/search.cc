@@ -535,6 +535,24 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
   // If we are the first to see that stop is needed.
   if (stop_.load(std::memory_order_acquire) && ok_to_respond_bestmove_ &&
       !bestmove_is_sent_) {
+
+    auxengine_stopped_mutex_.lock();
+    if(!auxengine_stopped_){
+      LOGFILE << "MaybeTriggerStop() Stopping the A/B helper Start";
+      auxengine_os_ << "stop" << std::endl; // stop the A/B helper
+      LOGFILE << "MaybeTriggerStop() Stopping the A/B helper Stop";
+      auxengine_stopped_ = true;
+    }
+    auxengine_stopped_mutex_.unlock();
+    auxengine_wait_mutex_.lock();
+    if(!auxengine_wait_){    
+      LOGFILE << "MaybeTriggerStop() Clean up the A/B helper via AuxWait() Start";
+      AuxWait();  // This can take some time during which we are not ready to respond readyok, so for now increase timemargin.
+      LOGFILE << "MaybeTriggerStop() Clean up the A/B helper via AuxWait() Stop";
+      auxengine_wait_ = true;
+    }
+    auxengine_wait_mutex_.unlock();    
+
     SendUciInfo();
     EnsureBestMoveKnown();
     SendMovesStats();
@@ -939,6 +957,10 @@ void Search::Stop() {
   ok_to_respond_bestmove_ = true;
   FireStopInternal();
   LOGFILE << "Stopping search due to `stop` uci command.";
+  LOGFILE << "from Stop() About to enter AuxWait()";
+  AuxWait();  // This can take some time during which we are not ready to respond readyok, so for now increase timemargin.
+  LOGFILE << "from Stop() AuxWait() returned";  
+
 }
 
 void Search::Abort() {
@@ -1165,6 +1187,11 @@ void SearchWorker::InitializeIteration(
 
 void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node, std::vector<lczero::Move> my_moves, int ply, int nodes_added) {
 
+  if (search_->stop_.load(std::memory_order_acquire)) {
+    LOGFILE << "Returning early from PreExtendTreeAndFastTrackForNNEvaluation_inner() since search has stopped";
+    return;
+  }
+
   bool black_to_move = ! search_->played_history_.IsBlackToMove() ^ (ply % 2 == 0);
   bool edge_found = false;
 
@@ -1192,6 +1219,7 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	  // unlock nodes so that the next level can write stuff.
 	  search_->nodes_mutex_.unlock_shared();
 	  PreExtendTreeAndFastTrackForNNEvaluation_inner(edge.node(), my_moves, ply+1, nodes_added);
+	  if (search_->stop_.load(std::memory_order_acquire)) return;
 	} else {
 	  LOGFILE << "All moves in the PV already expanded, nothing to do.";
 	  // unlock nodes before returning.
@@ -1289,6 +1317,7 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	// Not going deeper now, either because the PV is finished, or because we hit a terminal node.
 	// Aquire a write lock to adjust visits_in_flight.
 	search_->nodes_mutex_.lock();
+	search_->auxengine_num_updates += nodes_added;
 	LOGFILE << "Successfully added a full PV, depth = " << ply << ", number of nodes added = " << nodes_added;
 	// Adjust the visits_in_flight now that we know how many nodes where actually added.
 	// Each node shall have as many visits_in_flight as there are added nodes beneath it.
@@ -1347,7 +1376,6 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
     // ply is depth from root, so could be used to determine side to move.
     bool black_to_move = ! search_->played_history_.IsBlackToMove() ^ (ply % 2 == 0);
     Move m;
-    bool edges_found = false;
     if (!Move::ParseMove(&m, my_moves[ply].as_string(), black_to_move)) {
       LOGFILE << "Bad move: " << my_moves[ply].as_string() << black_to_move;
     } else {
@@ -1355,28 +1383,14 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
       // perhaps Leela marked this a "terminal" due to repetitions, if so, then there are no edges.
       for (auto& edge : my_node->Edges()) {
       	LOGFILE << "Edge " << edge.GetMove().as_string() << " does not match the move from the A/B helper: " << my_moves[ply].as_string() ;
-	edges_found = true;
+	edge_found = true;
       }
     }
-    if(edges_found){
+    if(edge_found){
       throw Exception("Leelas node has edges, but the recommended move was not found among them!");
       LOGFILE << "Leelas node has edges, but the recommended move was not found among them!";
     } else {
       LOGFILE << "No edges found, repetition?";
-      // Revert visits in flight for nodes in this branch with the remaining depth, which is the current value of ply, so my_moves.size() - ply
-      // int counter = my_moves.size() - ply + 1;
-      // for(Node * n = my_node; n != search_->root_node_; n = n->GetParent()){
-      // 	if(n->GetN() > 0){
-      // 	  n->CancelScoreUpdate(counter);
-      // 	  LOGFILE << "Reverting N in flights value before reverting: " << n->GetNInFlight() << " will decrease by " << counter;
-      // 	} else {
-      // 	  if(n->GetNInFlight() == 1){
-      // 	    n->CancelScoreUpdate(1); // newly extended node.
-      // 	    LOGFILE << "Reverting N in flights for a newly extended node";
-      // 	  }
-      // 	}
-      // 	counter++;
-      // }
     }
     // Release the read lock before returning
     search_->nodes_mutex_.unlock_shared();

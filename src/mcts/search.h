@@ -229,6 +229,10 @@ class Search {
   int64_t auxengine_total_dur = 0;
   int64_t auxengine_num_evals = 0;
   int64_t auxengine_num_updates = 0;
+  bool auxengine_stopped_ = true;
+  std::mutex auxengine_stopped_mutex_;
+  bool auxengine_wait_ = true;
+  std::mutex auxengine_wait_mutex_;
 
   friend class SearchWorker;
 };

@@ -65,14 +65,23 @@ void SearchWorker::AuxMaybeEnqueueNode(Node* n) {
 
     n->SetAuxEngineMove(0xfffe); // TODO: magic for pending
 
-    std::lock_guard<std::mutex> lock(search_->auxengine_mutex_);
+    search_->auxengine_mutex_.lock();
     search_->auxengine_queue_.push(n);
     search_->auxengine_cv_.notify_one();
+    search_->auxengine_mutex_.unlock();
   }
 }
 
 void Search::AuxEngineWorker() {
   int number_of_pvs_delivered = 0;
+
+  // set auxengine_wait_
+  auxengine_wait_mutex_.lock();
+  if(auxengine_wait_){
+    auxengine_wait_ = false;
+  }
+  auxengine_wait_mutex_.unlock();
+  
   if (!auxengine_ready_) {
     auxengine_c_ = boost::process::child(params_.GetAuxEngineFile(), boost::process::std_in < auxengine_os_, boost::process::std_out > auxengine_is_);
     {
@@ -139,6 +148,7 @@ void Search::AuxEngineWorker() {
 }
 
 void Search::DoAuxEngine(Node* n) {
+  
   // Calculate depth in a safe way. Return early if root cannot be
   // reached from n.
   // Todo test if this lock is unnecessary when solidtree is disabled.
@@ -206,6 +216,7 @@ void Search::DoAuxEngine(Node* n) {
   auto auxengine_start_time = std::chrono::steady_clock::now();
   auxengine_os_ << s << std::endl;
   auxengine_os_ << "go depth " << params_.GetAuxEngineDepth() << std::endl;
+  auxengine_stopped_ = false;
   std::string prev_line;
   std::string line;
   std::string token;
@@ -236,7 +247,15 @@ void Search::DoAuxEngine(Node* n) {
 	}
         // Send stop, stay in loop to get best response, otherwise it
         // will disturb the next iteration.
-        auxengine_os_ << "stop" << std::endl;
+	// only send stop if we are the first to detect that search has stopped.
+	auxengine_stopped_mutex_.lock();
+	if(!auxengine_stopped_){
+	  LOGFILE << "DoAuxEngine() Stopping the A/B helper Start";
+	  auxengine_os_ << "stop" << std::endl; // stop the A/B helper
+	  LOGFILE << "DoAuxEngine() Stopping the A/B helper Stop";
+	  auxengine_stopped_ = true;
+	}
+	auxengine_stopped_mutex_.unlock();	
       }
     }
   }
@@ -248,6 +267,10 @@ void Search::DoAuxEngine(Node* n) {
     // Search was interrupted, the results will not be used";
     return;
   }
+  auxengine_stopped_mutex_.lock();
+  auxengine_stopped_ = true;
+  auxengine_stopped_mutex_.unlock();
+  
   if (params_.GetAuxEngineVerbosity() >= 1) {
     LOGFILE << "pv:" << prev_line;
     LOGFILE << "bestanswer:" << token;
@@ -275,6 +298,9 @@ void Search::DoAuxEngine(Node* n) {
   int pv_length = 1;
   int max_pv_length = depth + params_.GetAuxEngineDepth();
   LOGFILE << "capping PV at length: " << max_pv_length << ", sum of depth = " << depth << " and AuxEngineDepth = " << params_.GetAuxEngineDepth();
+
+  fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before starting to modify it
+  
   while(iss >> pv >> std::ws) {
     if (pv == "pv") {
       while(iss >> pv >> std::ws) {
@@ -326,9 +352,9 @@ void Search::DoAuxEngine(Node* n) {
     LOGFILE << "debug info: length of PV given to helper engine: " << depth << " position given to helper: " << s << " white to move at root, length of my_moves_from_the_white_side " << my_moves_from_the_white_side.size() << " my_moves_from_the_white_side: " << debug_string;    
   }
   
-  fast_track_extend_and_evaluate_queue_mutex_.lock();
   fast_track_extend_and_evaluate_queue_.push(my_moves_from_the_white_side); // I think push() means push_back for queues.
   fast_track_extend_and_evaluate_queue_mutex_.unlock();
+  LOGFILE << "Returning from DoAuxEngine()";
 }
 
 void Search::AuxWait() REQUIRES(threads_mutex_) {
@@ -337,13 +363,6 @@ void Search::AuxWait() REQUIRES(threads_mutex_) {
     auxengine_threads_.back().join();
     auxengine_threads_.pop_back();
   }
-  // Threading/Locking:
-  // - Search::Wait is holding threads_mutex_.
-  // - SearchWorker threads are guaranteed done by Search::Wait
-  // - Above code guarantees auxengine_threads_ are done.
-  // - This is the only thread left that can modify auxengine_queue_
-  // - Take the lock anyways to be safe.
-  std::unique_lock<std::mutex> lock(auxengine_mutex_);
   LOGFILE << "Summaries per move: auxengine_queue_ size at the end of search: " << auxengine_queue_.size()
       << " Average duration " << (auxengine_num_evals ? (auxengine_total_dur / auxengine_num_evals) : -1.0f) << "ms"
       << " Number of evals " << auxengine_num_evals
@@ -352,29 +371,27 @@ void Search::AuxWait() REQUIRES(threads_mutex_) {
   // mark unfinished nodes not done again, and delete the queue.
   // Next search iteration will fill it again.
 
-  // aquire a lock before reading the data from the node
-  nodes_mutex_.lock();
-  
+  // Assume the caller has locked nodes_mutex_
+  auxengine_mutex_.lock();  
   while (!auxengine_queue_.empty()) {
     auto n = auxengine_queue_.front();
     assert(n->GetAuxEngineMove() != 0xffff); // TODO find out why this is here!
     if (n->GetAuxEngineMove() == 0xfffe) {
       n->SetAuxEngineMove(0xffff);
-      LOGFILE << "Changed GetAuxEngineMove() for a node while shutting down search.";
     }
     auxengine_queue_.pop();
   }
-  nodes_mutex_.unlock(); // release the lock.
+  
   auxengine_mutex_.unlock();
   
   // Empty the other queue.
   fast_track_extend_and_evaluate_queue_mutex_.lock();
   if(fast_track_extend_and_evaluate_queue_.empty()){
     LOGFILE << "No PVs in the fast_track_extend_and_evaluate_queue";
-  }
-  while (!fast_track_extend_and_evaluate_queue_.empty()){
-    LOGFILE << "Removing obsolete PV from queue";
-    fast_track_extend_and_evaluate_queue_.pop();
+  } else {
+    LOGFILE << fast_track_extend_and_evaluate_queue_.size() << " possibly obsolete PV:s in the queue.";
+    fast_track_extend_and_evaluate_queue_ = {}; // should be faster than pop()
+    LOGFILE << "Number of PV:s in the queue=" << fast_track_extend_and_evaluate_queue_.size();
   }
   fast_track_extend_and_evaluate_queue_mutex_.unlock();  
   LOGFILE << "AuxWait done";

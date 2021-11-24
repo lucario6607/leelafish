@@ -374,18 +374,7 @@ void Node::FinalizeScoreUpdate(float v, float d, float m, int multivisit) {
   // Increment N.
   n_ += multivisit;
   // Decrement virtual loss.
-  // n_in_flight_ -= multivisit;
-
-  // // Old hack
-  // // When multiple generations are added to the tree in the same batch, then they will have a single NinFlight which together with N=0 indicate that they are being extended.
-  // // multivisit might then be higher than their n_in_flight, which will overflow n_in_flight (which is unsigned).
-  // // To cope with this. Make sure n_in_flight never becomes negative.
-  // if(n_in_flight_ >= (uint32_t) multivisit){
-  //   n_in_flight_ -= multivisit;
-  // } else {
-  //   n_in_flight_ = 0;
-  // }
-  
+  n_in_flight_ -= multivisit;
 }
 
 void Node::AdjustForTerminal(float v, float d, float m, int multivisit) {

@@ -2549,16 +2549,7 @@ void SearchWorker::DoBackupUpdate() {
 void SearchWorker::DoBackupUpdateSingleNode(
     const NodeToProcess& node_to_process) REQUIRES(search_->nodes_mutex_) {
   Node* node = node_to_process.node;
-  if (node_to_process.IsCollision()) {
-    // Collisions are handled via shared_collisions instead.
-
-
-    // LOGFILE << "returning early because of collision: node " << node->DebugString();
-    return;
-
-  } else {
-      // LOGFILE << "collision not true in node " << node->DebugString();    
-  }
+  if (node_to_process.IsCollision()) return;
 
   // For the first visit to a terminal, maybe update parent bounds too.
   auto update_parent_bounds =

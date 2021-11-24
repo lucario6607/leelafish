@@ -56,7 +56,7 @@ void Search::OpenAuxEngine() REQUIRES(threads_mutex_) {
 }
 
 void SearchWorker::AuxMaybeEnqueueNode(Node* n) {
-  // the caller (DoBackupUpdateSingleNode) has a lock on search_->nodes_mutex_
+  // the caller (DoBackupUpdate()->DoBackupUpdateSingleNode()) has a lock on search_->nodes_mutex_
   if (params_.GetAuxEngineFile() != "" &&
       n->GetN() >= (uint32_t) params_.GetAuxEngineThreshold() &&
       n->GetAuxEngineMove() == 0xffff &&
@@ -154,18 +154,22 @@ void Search::AuxEngineWorker() {
 
 void Search::DoAuxEngine(Node* n) {
   
+  LOGFILE << "DoAuxEngine() called for node" << n->DebugString();
   // Calculate depth in a safe way. Return early if root cannot be
   // reached from n.
   // Todo test if this lock is unnecessary when solidtree is disabled.
-  nodes_mutex_.lock_shared();
   int depth = 0;
-  for (Node* n2 = n; n2 != root_node_; n2 = n2->GetParent()) {
-    depth++;
-    if(n2 == nullptr){
-      LOGFILE << "1. Could not reach root";
-      nodes_mutex_.unlock_shared();
-      return;
-    } 
+  if(n != root_node_){
+    nodes_mutex_.lock_shared();
+    for (Node* n2 = n; n2 != root_node_; n2 = n2->GetParent()) {
+      depth++;
+      if(n2 == nullptr){
+	LOGFILE << "1. Could not reach root";
+	nodes_mutex_.unlock_shared();
+	return;
+      } 
+    }
+    nodes_mutex_.unlock_shared();    
   }
 
   std::string s = "";
@@ -177,13 +181,16 @@ void Search::DoAuxEngine(Node* n) {
   // Apply the moves in reversed order to get the proper board state from which we can then make moves in legacy format.
   std::vector<lczero::Move> my_moves;
   std::vector<lczero::Move> my_moves_from_the_white_side;  
-    
-  for (Node* n2 = n; n2 != root_node_; n2 = n2->GetParent()) {
+
+  if(n != root_node_){  
+    nodes_mutex_.lock_shared();  
+    for (Node* n2 = n; n2 != root_node_; n2 = n2->GetParent()) {
       my_moves.push_back(n2->GetOwnEdge()->GetMove(flip));
       my_moves_from_the_white_side.push_back(n2->GetOwnEdge()->GetMove());
       flip = !flip;
+    }
+    nodes_mutex_.unlock_shared();
   }
-  nodes_mutex_.unlock_shared();
 
   // Reverse the order
   std::reverse(my_moves.begin(), my_moves.end());
@@ -226,11 +233,6 @@ void Search::DoAuxEngine(Node* n) {
   std::string line;
   std::string token;
   bool stopping = false;
-  // TODO: while waiting for getline() we do not listen for the stop
-  // signal, so shutting down search will be delayed by at most the
-  // time between the info lines of the A/B helper. Since we will not
-  // use that result anyway, it would be cleaner to return fast and
-  // stop the A/B helper when we have time to do so.
   while(std::getline(auxengine_is_, line)) {
     if (params_.GetAuxEngineVerbosity() >= 2) {
       LOGFILE << "auxe:" << line;
@@ -250,7 +252,8 @@ void Search::DoAuxEngine(Node* n) {
 	if (params_.GetAuxEngineVerbosity() >= 5) {
 	  LOGFILE << "DoAuxEngine caught a stop signal 2.";	
 	}
-        // Send stop, stay in loop to get best response, otherwise it
+        // (unless someone else already has sent stop) send stop,
+	// stay in loop to get best response, otherwise it
         // will disturb the next iteration.
 	// only send stop if we are the first to detect that search has stopped.
 	auxengine_stopped_mutex_.lock();
@@ -270,12 +273,10 @@ void Search::DoAuxEngine(Node* n) {
 
     // Don't use results of a search that was stopped.
     LOGFILE << "AUX Search was interrupted, the results will not be used";
-    // nodes_mutex_.unlock_shared();
-    LOGFILE << "AUX Search was interrupted, the results will not be used 2.";    
     return;
   }
   auxengine_stopped_mutex_.lock();
-  auxengine_stopped_ = true;
+  auxengine_stopped_ = true; // stopped means "not running". It does not mean it was stopped prematurely.
   auxengine_stopped_mutex_.unlock();
   
   if (params_.GetAuxEngineVerbosity() >= 1) {

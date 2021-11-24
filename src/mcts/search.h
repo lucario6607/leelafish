@@ -221,8 +221,8 @@ class Search {
   std::queue<Node*> auxengine_queue_;
   std::mutex fast_track_extend_and_evaluate_queue_mutex_;
   std::queue<std::vector<Move>> fast_track_extend_and_evaluate_queue_ GUARDED_BY(fast_track_extend_and_evaluate_queue_mutex_); // for now only used by aux-engine, but could be used by a UCI extension: searchline eg. `go nodes 1000 searchline e2e4 c7c5 g1f3`
-  std::mutex debug_nodes_added_by_aux_queue_mutex_;
-  std::queue<std::vector<Node>> debug_nodes_added_by_aux_queue_ GUARDED_BY(debug_nodes_added_by_aux_queue_mutex_); 
+  // std::mutex debug_nodes_added_by_aux_queue_mutex_;
+  // std::queue<std::vector<Node>> debug_nodes_added_by_aux_queue_ GUARDED_BY(debug_nodes_added_by_aux_queue_mutex_); 
   std::mutex auxengine_mutex_;
   std::condition_variable auxengine_cv_;
   std::vector<std::thread> auxengine_threads_;
@@ -233,6 +233,9 @@ class Search {
   std::mutex auxengine_stopped_mutex_;
   bool auxengine_wait_ = true;
   std::mutex auxengine_wait_mutex_;
+  // workaround for search_->stop_.load(std::memory_order_aquire) stalls, remove this when that works.
+  std::mutex auxengine_exit_preextend_early_mutex_;  
+  bool exit_preextend_early_ = false;
 
   friend class SearchWorker;
 };

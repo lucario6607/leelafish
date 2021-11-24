@@ -521,6 +521,7 @@ NNCacheLock Search::GetCachedNNEval(const Node* node) const {
 void Search::MaybeTriggerStop(const IterationStats& stats,
                               StoppersHints* hints) {
   hints->Reset();
+
   SharedMutex::Lock nodes_lock(nodes_mutex_);
   Mutex::Lock lock(counters_mutex_);
   // Already responded bestmove, nothing to do here.
@@ -536,6 +537,12 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
   if (stop_.load(std::memory_order_acquire) && ok_to_respond_bestmove_ &&
       !bestmove_is_sent_) {
 
+    nodes_mutex_.unlock(); // temporary unlock to let PreExtend..() finish without a deadlock.
+    fast_track_extend_and_evaluate_queue_mutex_.lock(); // get this _before_ locking nodes_mutex.
+    exit_preextend_early_ = true;
+    fast_track_extend_and_evaluate_queue_mutex_.unlock();
+    nodes_mutex_.lock(); // and lock again, this appears to fail if DoAuxEngine() stops on its own.
+    
     auxengine_stopped_mutex_.lock();
     if(!auxengine_stopped_){
       LOGFILE << "MaybeTriggerStop() Stopping the A/B helper Start";
@@ -544,10 +551,11 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
       auxengine_stopped_ = true;
     }
     auxengine_stopped_mutex_.unlock();
+    
     auxengine_wait_mutex_.lock();
     if(!auxengine_wait_){    
       LOGFILE << "MaybeTriggerStop() Clean up the A/B helper via AuxWait() Start";
-      AuxWait();  // This can take some time during which we are not ready to respond readyok, so for now increase timemargin.
+      AuxWait();
       LOGFILE << "MaybeTriggerStop() Clean up the A/B helper via AuxWait() Stop";
       auxengine_wait_ = true;
     }
@@ -567,6 +575,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
   // at the next iteration remaining playouts may be different.
   // TODO(crem) Is it really needed?
   root_node_->CancelScoreUpdate(0);
+  LOGFILE << "MaybeTriggerStop() finished";
 }
 
 // Return the evaluation of the actual best child, regardless of temperature
@@ -953,6 +962,7 @@ void Search::FireStopInternal() {
 }
 
 void Search::Stop() {
+  // This can interfere with 
   Mutex::Lock lock(counters_mutex_);
   ok_to_respond_bestmove_ = true;
   FireStopInternal();
@@ -1114,7 +1124,7 @@ void SearchWorker::ExecuteOneIteration() {
 
   // 1.5 Extend tree with nodes using PV of a/b helper, and add the new
   // // nodes to the minibatch
-  PreExtendTreeAndFastTrackForNNEvaluation();
+  // PreExtendTreeAndFastTrackForNNEvaluation();
 
   // 2. Gather minibatch.
   GatherMinibatch2();
@@ -1146,11 +1156,11 @@ void SearchWorker::ExecuteOneIteration() {
 
   // 6. Propagate the new nodes' information to all their parents in the tree.
   DoBackupUpdate();
-  LOGFILE << "DoBackupUpdate() finished";
+  LOGFILE << "DoBackupUpdate() finished, now on to UpdateCounters() for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
 
   // 7. Update the Search's status and progress information.
   UpdateCounters();
-  LOGFILE << "UpdateCounters() finished";  
+  LOGFILE << "UpdateCounters() finished for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
 
   // If required, waste time to limit nps.
   if (params_.GetNpsLimit() > 0) {
@@ -1171,7 +1181,7 @@ void SearchWorker::ExecuteOneIteration() {
       }
     }
   }
-  LOGFILE << "ExecuteOneIteration() finished";  
+  LOGFILE << "ExecuteOneIteration() finished for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
 }
 
 // 1. Initialize internal structures.
@@ -1187,8 +1197,8 @@ void SearchWorker::InitializeIteration(
 
 void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node, std::vector<lczero::Move> my_moves, int ply, int nodes_added) {
 
-  if (search_->stop_.load(std::memory_order_acquire)) {
-    LOGFILE << "Returning early from PreExtendTreeAndFastTrackForNNEvaluation_inner() since search has stopped";
+  if (search_->exit_preextend_early_) {
+    LOGFILE << "Returning early from PreExtendTreeAndFastTrackForNNEvaluation_inner() since search has stopped.";
     return;
   }
 
@@ -1196,7 +1206,6 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
   bool edge_found = false;
 
   search_->nodes_mutex_.lock_shared();
-
   LOGFILE << "Got a lock on nodes reading.";  
 
   if(black_to_move){
@@ -1219,7 +1228,14 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	  // unlock nodes so that the next level can write stuff.
 	  search_->nodes_mutex_.unlock_shared();
 	  PreExtendTreeAndFastTrackForNNEvaluation_inner(edge.node(), my_moves, ply+1, nodes_added);
-	  if (search_->stop_.load(std::memory_order_acquire)) return;
+	  // back out early?
+	  // search_->auxengine_exit_preextend_early_mutex_.lock();
+	  if (search_->exit_preextend_early_) {
+	    LOGFILE << "Returning semi-early from PreExtendTreeAndFastTrackForNNEvaluation_inner() since search has stopped.";
+	    // search_->auxengine_exit_preextend_early_mutex_.unlock();    
+	    return;
+	  }
+
 	} else {
 	  LOGFILE << "All moves in the PV already expanded, nothing to do.";
 	  // unlock nodes before returning.

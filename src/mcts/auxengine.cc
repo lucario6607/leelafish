@@ -75,6 +75,11 @@ void SearchWorker::AuxMaybeEnqueueNode(Node* n) {
 void Search::AuxEngineWorker() {
   int number_of_pvs_delivered = 0;
 
+  // set exit_preextend_early_
+  auxengine_exit_preextend_early_mutex_.lock();
+  exit_preextend_early_ = false;
+  auxengine_exit_preextend_early_mutex_.unlock();  
+
   // set auxengine_wait_
   auxengine_wait_mutex_.lock();
   if(auxengine_wait_){
@@ -178,7 +183,7 @@ void Search::DoAuxEngine(Node* n) {
       my_moves_from_the_white_side.push_back(n2->GetOwnEdge()->GetMove());
       flip = !flip;
   }
-  nodes_mutex_.unlock_shared(); // todo only one loop needed to get depth, my_moves and flip.
+  nodes_mutex_.unlock_shared();
 
   // Reverse the order
   std::reverse(my_moves.begin(), my_moves.end());
@@ -263,8 +268,10 @@ void Search::DoAuxEngine(Node* n) {
     // TODO: actually do use the result, if the depth achieved was the
     // requested depth and the line is actually played.
 
-    // Don't use results of a search that was stopped. LOGFILE << "AUX
-    // Search was interrupted, the results will not be used";
+    // Don't use results of a search that was stopped.
+    LOGFILE << "AUX Search was interrupted, the results will not be used";
+    // nodes_mutex_.unlock_shared();
+    LOGFILE << "AUX Search was interrupted, the results will not be used 2.";    
     return;
   }
   auxengine_stopped_mutex_.lock();

@@ -537,12 +537,6 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
   if (stop_.load(std::memory_order_acquire) && ok_to_respond_bestmove_ &&
       !bestmove_is_sent_) {
 
-    nodes_mutex_.unlock(); // temporary unlock to let PreExtend..() finish without a deadlock.
-    fast_track_extend_and_evaluate_queue_mutex_.lock(); // get this _before_ locking nodes_mutex.
-    exit_preextend_early_ = true;
-    fast_track_extend_and_evaluate_queue_mutex_.unlock();
-    nodes_mutex_.lock(); // and lock again, this appears to fail if DoAuxEngine() stops on its own.
-    
     auxengine_stopped_mutex_.lock();
     if(!auxengine_stopped_){
       LOGFILE << "MaybeTriggerStop() Stopping the A/B helper Start";
@@ -552,15 +546,6 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     }
     auxengine_stopped_mutex_.unlock();
     
-    auxengine_wait_mutex_.lock();
-    if(!auxengine_wait_){    
-      LOGFILE << "MaybeTriggerStop() Clean up the A/B helper via AuxWait() Start";
-      AuxWait();
-      LOGFILE << "MaybeTriggerStop() Clean up the A/B helper via AuxWait() Stop";
-      auxengine_wait_ = true;
-    }
-    auxengine_wait_mutex_.unlock();    
-
     SendUciInfo();
     EnsureBestMoveKnown();
     SendMovesStats();
@@ -962,7 +947,6 @@ void Search::FireStopInternal() {
 }
 
 void Search::Stop() {
-  // This can interfere with 
   Mutex::Lock lock(counters_mutex_);
   ok_to_respond_bestmove_ = true;
   FireStopInternal();
@@ -1096,7 +1080,7 @@ void SearchWorker::RunTasks(int tid) {
 }
 
 void SearchWorker::ExecuteOneIteration() {
-  LOGFILE << "ExecuteOneIteration() started";
+  LOGFILE << "ExecuteOneIteration() started for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
   // 1. Initialize internal structures.
   InitializeIteration(search_->network_->NewComputation());
 
@@ -1124,17 +1108,17 @@ void SearchWorker::ExecuteOneIteration() {
 
   // 1.5 Extend tree with nodes using PV of a/b helper, and add the new
   // // nodes to the minibatch
-  // PreExtendTreeAndFastTrackForNNEvaluation();
+  PreExtendTreeAndFastTrackForNNEvaluation();
 
   // 2. Gather minibatch.
   GatherMinibatch2();
   task_count_.store(-1, std::memory_order_release);
   search_->backend_waiting_counter_.fetch_add(1, std::memory_order_relaxed);
-  LOGFILE << "GatherMinibatch2() finished";  
+  LOGFILE << "GatherMinibatch2() finished for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
 
   // 2b. Collect collisions.
   CollectCollisions();
-  LOGFILE << "CollectCollisions() finished";  
+  LOGFILE << "CollectCollisions() finished for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
 
   // 3. Prefetch into cache.
   MaybePrefetchIntoCache();
@@ -1142,17 +1126,17 @@ void SearchWorker::ExecuteOneIteration() {
   if (params_.GetMaxConcurrentSearchers() != 0) {
     search_->pending_searchers_.fetch_add(1, std::memory_order_acq_rel);
   }
-  LOGFILE << "MaybePrefetchIntoCache() finished";
+  LOGFILE << "MaybePrefetchIntoCache() finished for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
 
   // 4. Run NN computation.
   RunNNComputation();
   search_->backend_waiting_counter_.fetch_add(-1, std::memory_order_relaxed);
 
-  LOGFILE << "NN computation finished";
+  LOGFILE << "NN computation finished for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
 
   // 5. Retrieve NN computations (and terminal values) into nodes.
   FetchMinibatchResults();
-  LOGFILE << "FetchMinibatchResults() finished";  
+  LOGFILE << "FetchMinibatchResults() finished for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
 
   // 6. Propagate the new nodes' information to all their parents in the tree.
   DoBackupUpdate();
@@ -1315,6 +1299,7 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 
 	} else {
 	  LOGFILE << "Houston, we got a terminal node: " << child_node->DebugString();
+	  // TODO: this is not tested yet. In particular I've never seen it being backpropagated by DoBackupUpdateSingleNode() even though I expected to see that.
 	  minibatch_.push_back(NodeToProcess::Visit(child_node, 1)); // Only one visit, since this is a terminal
 	  minibatch_[minibatch_.size()-1].nn_queried = false;
 	  minibatch_[minibatch_.size()-1].ooo_completed = false;
@@ -1339,8 +1324,7 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	// Each node shall have as many visits_in_flight as there are added nodes beneath it.
 	// Increase the number of visits_in_flight to add for each generational step, until the
 	// number is equal to nodes_added.
-	// Start at 0 because every evaluated node get 1 visit from minibatch_.multivisit=1.
-	int visits_to_add = 0;
+	int visits_to_add = 1;
 	for(Node * n = child_node; n != search_->root_node_; n = n->GetParent()){
 	  n->IncrementNInFlight(visits_to_add);  
 	  // LOGFILE << "Added visits_in_flight=" << visits_to_add << " to node " << n->DebugString();
@@ -1348,6 +1332,8 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	    visits_to_add++;
 	  }
 	}
+	// The loop above stops just before root, so fix root too. // TODO fix this ugly off-by-one hack. (perhaps test for n != nullptr)
+	search_->root_node_->IncrementNInFlight(visits_to_add);
 	search_->nodes_mutex_.unlock();
 
 	// std::vector<Move> my_path_final;
@@ -1417,7 +1403,7 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 
 void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation() {
   // input: a PV starting from root in form of a vector of Moves (the vectors are stored in a global queue called fast_track_extend_and_evaluate_queue_)
-  LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation()";
+  LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation() for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
   // lock the queue before reading from it
   std::lock_guard<std::mutex> lock(search_->fast_track_extend_and_evaluate_queue_mutex_);
   if(search_->fast_track_extend_and_evaluate_queue_.size() > 0){
@@ -2447,20 +2433,11 @@ void SearchWorker::FetchSingleNodeResult(NodeToProcess* node_to_process,
                                          const Computation& computation,
                                          int idx_in_computation) {
 
-  // LOGFILE << "FetchSingleNodeResult: called for node" << node_to_process->node->DebugString() << "idx_in_computation is" << idx_in_computation;
-  // Nodes mutex for doing node updates.
-  SharedMutex::Lock lock(search_->nodes_mutex_);
-  // LOGFILE << "FetchSingleNodeResult: got a lock";
+  // This look did non exist before PreExtend...(), which can write (add visits_in_flight, add children) to these nodes, but those operation should not interfere with the processing done here. I think PickNodesToExtendTask() ignores nodes with 0 visits and positive visit_in_flight, so that should be good. PreExtend...() does read policy, but only for informational purposes.
+  // // Nodes mutex for doing node updates.
+  // SharedMutex::Lock lock(search_->nodes_mutex_);
   
-  // if (node_to_process->IsCollision()) return;
-
-  if (node_to_process->IsCollision()) {
-    // LOGFILE << "FetchSingleNodeResult: collision found on node " << node_to_process->node->DebugString();
-    // Collisions are handled via shared_collisions instead.
-    return;
-  } else {
-    // LOGFILE << "FetchSingleNodeResult: no collision found on node " << node_to_process->node->DebugString();    
-  }
+  if (node_to_process->IsCollision()) return;
   
   Node* node = node_to_process->node;
   if (!node_to_process->nn_queried) {
@@ -2469,7 +2446,9 @@ void SearchWorker::FetchSingleNodeResult(NodeToProcess* node_to_process,
     node_to_process->v = node->GetWL();
     node_to_process->d = node->GetD();
     node_to_process->m = node->GetM();
-    // LOGFILE << "not setting policy because of nn_queried not true: node " << node->DebugString();
+    if(node->IsTerminal()){
+      LOGFILE << "Houston, we see that terminal node right here: node " << node->DebugString();
+    }
     return;
   }
   // For NN results, we need to populate policy as well as value.
@@ -2486,8 +2465,6 @@ void SearchWorker::FetchSingleNodeResult(NodeToProcess* node_to_process,
   std::array<float, 256> intermediate;
   int counter = 0;
 
-  // LOGFILE << "FetchSingleNodeResult: about to read edges from node:" << node->DebugString();
-  
   for (auto& edge : node->Edges()) {
     float p = computation.GetPVal(
         idx_in_computation,
@@ -2504,7 +2481,6 @@ void SearchWorker::FetchSingleNodeResult(NodeToProcess* node_to_process,
     intermediate[i] = p;
     total += p;
   }
-  // LOGFILE << "FetchSingleNodeResult: about to set policy for edges from node:" << node->DebugString();
 
   counter = 0;
   // Normalize P values to add up to 1.0.
@@ -2518,7 +2494,6 @@ void SearchWorker::FetchSingleNodeResult(NodeToProcess* node_to_process,
                         params_.GetNoiseAlpha());
   }
 
-  // LOGFILE << "FetchSingleNodeResult: about to sort edges from node:" << node->DebugString();  
   // node->SortEdges();
  
 }
@@ -2526,10 +2501,8 @@ void SearchWorker::FetchSingleNodeResult(NodeToProcess* node_to_process,
 // 6. Propagate the new nodes' information to all their parents in the tree.
 // ~~~~~~~~~~~~~~
 void SearchWorker::DoBackupUpdate() {
-  LOGFILE << "At SearchWorker::DoBackupUpdate(), trying to get a lock";
   // Nodes mutex for doing node updates.
   SharedMutex::Lock lock(search_->nodes_mutex_);
-  LOGFILE << "At SearchWorker::DoBackupUpdate(), got a lock";  
 
   bool work_done = number_out_of_order_ > 0;
   for (const NodeToProcess& node_to_process : minibatch_) {
@@ -2538,11 +2511,11 @@ void SearchWorker::DoBackupUpdate() {
       work_done = true;
     }
   }
-  LOGFILE << "At SearchWorker::DoBackupUpdate(), ready backpropagating";  
+  LOGFILE << "At SearchWorker::DoBackupUpdate(): ready backpropagating";  
   if (!work_done) return;
-  LOGFILE << "At SearchWorker::DoBackupUpdate(), Collisions left to cancel";    
+  LOGFILE << "At SearchWorker::DoBackupUpdate(): Collisions left to cancel";    
   search_->CancelSharedCollisions();
-  LOGFILE << "At SearchWorker::DoBackupUpdate(), Finished canceling collisions";      
+  LOGFILE << "At SearchWorker::DoBackupUpdate(): Finished canceling collisions";      
   search_->total_batches_ += 1;
 }
 

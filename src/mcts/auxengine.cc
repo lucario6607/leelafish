@@ -56,16 +56,20 @@ void Search::OpenAuxEngine() REQUIRES(threads_mutex_) {
 }
 
 void SearchWorker::AuxMaybeEnqueueNode(Node* n) {
-  // the caller (DoBackupUpdate()->DoBackupUpdateSingleNode()) has a lock on search_->nodes_mutex_
+  // the caller (DoBackupUpdate()->DoBackupUpdateSingleNode()) has a lock on search_->nodes_mutex_, so no other thread will change n right now.
+  if(search_->stop_.load(std::memory_order_acquire)) return;
   if (params_.GetAuxEngineFile() != "" &&
       n->GetN() >= (uint32_t) params_.GetAuxEngineThreshold() &&
       n->GetAuxEngineMove() == 0xffff &&
       !n->IsTerminal() &&
       n->HasChildren()) {
 
-    n->SetAuxEngineMove(0xfffe); // TODO: magic for pending
+    LOGFILE << "AuxMaybeEnqueueNode() picked node: " << n->DebugString() << " for the auxengine_queue.";
+
+    n->SetAuxEngineMove(0xfffe); // magic for pending
 
     search_->auxengine_mutex_.lock();
+    LOGFILE << "Size of search_->auxengine_queue_ is " << search_->auxengine_queue_.size();
     search_->auxengine_queue_.push(n);
     search_->auxengine_cv_.notify_one();
     search_->auxengine_mutex_.unlock();
@@ -126,14 +130,17 @@ void Search::AuxEngineWorker() {
     auxengine_ready_ = true;
   }
 
-  // kickstart with the root node, no need to wait for it to get visits.
-  nodes_mutex_.lock(); // write lock  
-  root_node_->SetAuxEngineMove(0xfffe); // mark root as pending.
-  nodes_mutex_.unlock(); // write lock    
-  auxengine_mutex_.lock();  
-  auxengine_queue_.push(root_node_);
-  auxengine_cv_.notify_one();
-  auxengine_mutex_.unlock();
+  // If root is not already picked, then kickstart with the root node, no need to wait for it to get some amount of visits.
+  nodes_mutex_.lock(); // write lock
+  if(! (root_node_->GetAuxEngineMove() == 0xfffe)){
+    // root not yet picked
+    root_node_->SetAuxEngineMove(0xfffe); // mark root as pending and queue it
+    auxengine_mutex_.lock(); 
+    auxengine_queue_.push(root_node_);
+    auxengine_cv_.notify_one();
+    auxengine_mutex_.unlock();
+  }
+  nodes_mutex_.unlock(); // write unlock
 
   Node* n;
 
@@ -153,13 +160,17 @@ void Search::AuxEngineWorker() {
 }
 
 void Search::DoAuxEngine(Node* n) {
-  
+  // before trying to take a lock on nodes_mutex_, always check if search has stopped, in which we return early
+  if(stop_.load(std::memory_order_acquire)) return;
+  nodes_mutex_.lock_shared();
   LOGFILE << "DoAuxEngine() called for node" << n->DebugString();
+  nodes_mutex_.unlock_shared();  
   // Calculate depth in a safe way. Return early if root cannot be
   // reached from n.
   // Todo test if this lock is unnecessary when solidtree is disabled.
   int depth = 0;
   if(n != root_node_){
+    if(stop_.load(std::memory_order_acquire)) return;    
     nodes_mutex_.lock_shared();
     for (Node* n2 = n; n2 != root_node_; n2 = n2->GetParent()) {
       depth++;
@@ -182,7 +193,8 @@ void Search::DoAuxEngine(Node* n) {
   std::vector<lczero::Move> my_moves;
   std::vector<lczero::Move> my_moves_from_the_white_side;  
 
-  if(n != root_node_){  
+  if(n != root_node_){
+    if(stop_.load(std::memory_order_acquire)) return;    
     nodes_mutex_.lock_shared();  
     for (Node* n2 = n; n2 != root_node_; n2 = n2->GetParent()) {
       my_moves.push_back(n2->GetOwnEdge()->GetMove(flip));
@@ -365,7 +377,8 @@ void Search::DoAuxEngine(Node* n) {
   LOGFILE << "Returning from DoAuxEngine()";
 }
 
-void Search::AuxWait() REQUIRES(threads_mutex_) {
+// void Search::AuxWait() REQUIRES(threads_mutex_) {
+void Search::AuxWait() {  
   LOGFILE << "AuxWait start";
   while (!auxengine_threads_.empty()) {
     auxengine_threads_.back().join();

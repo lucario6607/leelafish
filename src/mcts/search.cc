@@ -537,14 +537,14 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
   if (stop_.load(std::memory_order_acquire) && ok_to_respond_bestmove_ &&
       !bestmove_is_sent_) {
 
-    auxengine_stopped_mutex_.lock();
-    if(!auxengine_stopped_){
-      LOGFILE << "MaybeTriggerStop() Stopping the A/B helper Start";
-      auxengine_os_ << "stop" << std::endl; // stop the A/B helper
-      LOGFILE << "MaybeTriggerStop() Stopping the A/B helper Stop";
-      auxengine_stopped_ = true;
-    }
-    auxengine_stopped_mutex_.unlock();
+    // auxengine_stopped_mutex_.lock();
+    // if(!auxengine_stopped_){
+    //   LOGFILE << "MaybeTriggerStop() Stopping the A/B helper Start";
+    //   auxengine_os_ << "stop" << std::endl; // stop the A/B helper
+    //   LOGFILE << "MaybeTriggerStop() Stopping the A/B helper Stop";
+    //   auxengine_stopped_ = true;
+    // }
+    // auxengine_stopped_mutex_.unlock();
     
     SendUciInfo();
     EnsureBestMoveKnown();
@@ -815,7 +815,7 @@ void Search::StartThreads(size_t how_many) {
   LOGFILE << "Search::StartThreads() enterered.";
   thread_count_.store(how_many, std::memory_order_release);
   Mutex::Lock lock(threads_mutex_);
-  OpenAuxEngine();
+  // OpenAuxEngine();
   // First thread is a watchdog thread.
   if (threads_.size() == 0) {
     threads_.emplace_back([this]() { WatchdogThread(); });
@@ -943,7 +943,7 @@ void Search::WatchdogThread() {
 void Search::FireStopInternal() {
   stop_.store(true, std::memory_order_release);
   watchdog_cv_.notify_all();
-  auxengine_cv_.notify_all();  
+  // auxengine_cv_.notify_all();  
 }
 
 void Search::Stop() {
@@ -951,9 +951,9 @@ void Search::Stop() {
   ok_to_respond_bestmove_ = true;
   FireStopInternal();
   LOGFILE << "Stopping search due to `stop` uci command.";
-  LOGFILE << "from Stop() About to enter AuxWait()";
-  AuxWait();  // This can take some time during which we are not ready to respond readyok, so for now increase timemargin.
-  LOGFILE << "from Stop() AuxWait() returned";  
+  // LOGFILE << "from Stop() About to enter AuxWait()";
+  // AuxWait();  // This can take some time during which we are not ready to respond readyok, so for now increase timemargin.
+  // LOGFILE << "from Stop() AuxWait() returned";  
 
 }
 
@@ -996,10 +996,10 @@ Search::~Search() {
     SharedMutex::Lock lock(nodes_mutex_);
     CancelSharedCollisions();
   }
-  LOGFILE << "About to enter AuxWait()";
-  AuxWait();  // This can take some time during which we are not ready to respond readyok, so for now increase timemargin.
-  LOGFILE << "AuxWait() returned";  
-  LOGFILE << "Search destroyed.";
+  // LOGFILE << "About to enter AuxWait()";
+  // AuxWait();  // This can take some time during which we are not ready to respond readyok, so for now increase timemargin.
+  // LOGFILE << "AuxWait() returned";  
+  // LOGFILE << "Search destroyed.";
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -1108,7 +1108,7 @@ void SearchWorker::ExecuteOneIteration() {
 
   // 1.5 Extend tree with nodes using PV of a/b helper, and add the new
   // // nodes to the minibatch
-  PreExtendTreeAndFastTrackForNNEvaluation();
+  // PreExtendTreeAndFastTrackForNNEvaluation();
 
   // 2. Gather minibatch.
   GatherMinibatch2();
@@ -1129,10 +1129,12 @@ void SearchWorker::ExecuteOneIteration() {
   LOGFILE << "MaybePrefetchIntoCache() finished for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
 
   // 4. Run NN computation.
+  LOGFILE << "NN computation started for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());  
   RunNNComputation();
+  LOGFILE << "NN computation finished 0 for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());  
   search_->backend_waiting_counter_.fetch_add(-1, std::memory_order_relaxed);
 
-  LOGFILE << "NN computation finished for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
+  LOGFILE << "NN computation finished 1 for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
 
   // 5. Retrieve NN computations (and terminal values) into nodes.
   FetchMinibatchResults();
@@ -1181,22 +1183,21 @@ void SearchWorker::InitializeIteration(
 
 void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node, std::vector<lczero::Move> my_moves, int ply, int nodes_added) {
 
-  if (search_->exit_preextend_early_) {
-    LOGFILE << "Returning early from PreExtendTreeAndFastTrackForNNEvaluation_inner() since search has stopped.";
-    return;
-  }
-
   bool black_to_move = ! search_->played_history_.IsBlackToMove() ^ (ply % 2 == 0);
   bool edge_found = false;
 
   search_->nodes_mutex_.lock_shared();
-  LOGFILE << "Got a lock on nodes reading.";  
+  LOGFILE << "Got a lock on nodes reading for node: " << my_node->DebugString();
 
-  if(black_to_move){
-    LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation_inner called with node" << my_node->DebugString() << " white to edge/move _to_ this node: " << my_node->GetOwnEdge()->GetMove(black_to_move).as_string() << " (debugging info for the edge: " << my_node->GetOwnEdge()->DebugString() << ") and this move from the a/b-helper: " << my_moves[ply].as_string() << "(seen from whites perspective) is really made by black, ply=" << ply;
-  } else {
-    LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation_inner called with node" << my_node->DebugString() << " black to edge/move _to_ this node: " << my_node->GetOwnEdge()->GetMove(black_to_move).as_string() << " and this move from the a/b-helper: " << my_moves[ply].as_string() << " is made by white, ply=" << ply;
-  }
+  // Unless this is the starting position, check what brought us here (for informational purposes)
+  if(search_->played_history_.GetLength() > 1){
+    if(black_to_move){
+      LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation_inner called with node" << my_node->DebugString() << " white to edge/move _to_ this node: " << my_node->GetOwnEdge()->GetMove(black_to_move).as_string() << " (debugging info for the edge: " << my_node->GetOwnEdge()->DebugString() << ") and this move from the a/b-helper: " << my_moves[ply].as_string() << "(seen from whites perspective) is really made by black, ply=" << ply;
+    } else {
+      LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation_inner called with node" << my_node->DebugString() << " black to edge/move _to_ this node: " << my_node->GetOwnEdge()->GetMove(black_to_move).as_string() << " and this move from the a/b-helper: " << my_moves[ply].as_string() << " is made by white, ply=" << ply;
+    }
+  } 
+
   // Find the edge
   for (auto& edge : my_node->Edges()) {
     if(edge.GetMove() == my_moves[ply] ){
@@ -1212,13 +1213,6 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	  // unlock nodes so that the next level can write stuff.
 	  search_->nodes_mutex_.unlock_shared();
 	  PreExtendTreeAndFastTrackForNNEvaluation_inner(edge.node(), my_moves, ply+1, nodes_added);
-	  // back out early?
-	  // search_->auxengine_exit_preextend_early_mutex_.lock();
-	  if (search_->exit_preextend_early_) {
-	    LOGFILE << "Returning semi-early from PreExtendTreeAndFastTrackForNNEvaluation_inner() since search has stopped.";
-	    // search_->auxengine_exit_preextend_early_mutex_.unlock();    
-	    return;
-	  }
 
 	} else {
 	  LOGFILE << "All moves in the PV already expanded, nothing to do.";
@@ -1298,11 +1292,12 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 				 std::move(minibatch_[minibatch_.size()-1].probabilities_to_cache));
 
 	} else {
-	  LOGFILE << "Houston, we got a terminal node: " << child_node->DebugString();
 	  // TODO: this is not tested yet. In particular I've never seen it being backpropagated by DoBackupUpdateSingleNode() even though I expected to see that.
 	  minibatch_.push_back(NodeToProcess::Visit(child_node, 1)); // Only one visit, since this is a terminal
 	  minibatch_[minibatch_.size()-1].nn_queried = false;
 	  minibatch_[minibatch_.size()-1].ooo_completed = false;
+	  child_node->IncrementNInFlight(1); // seems necessary.
+	  LOGFILE << "Houston, we got a terminal node: " << child_node->DebugString();
 	}
 
 	// unlock the readlock.
@@ -1418,7 +1413,7 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation() {
 	s = s + my_moves[i].as_string() + " ";
       }
       LOGFILE << "Length of PV to add: " << my_moves.size() << " my_moves: " << s;
-      PreExtendTreeAndFastTrackForNNEvaluation_inner(search_->root_node_, my_moves, 0, 0);
+      // PreExtendTreeAndFastTrackForNNEvaluation_inner(search_->root_node_, my_moves, 0, 0);
       LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: finished one iteration, size of minibatch_ is " << minibatch_.size();
       LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: finished one iteration, size of fast_track_extend_and_evaluate_queue_ is " << search_->fast_track_extend_and_evaluate_queue_.size();
     }
@@ -1530,6 +1525,7 @@ void SearchWorker::GatherMinibatch2() {
       // Round down, left overs can go to main thread so it waits less.
       int per_worker = non_collisions / num_tasks;
       needs_wait = true;
+      LOGFILE << "SearchWorker::GatherMinibatch2() calling ResetTasks()";
       ResetTasks();
       int found = 0;
       for (int i = new_start; i < static_cast<int>(minibatch_.size()); i++) {
@@ -1683,12 +1679,18 @@ void SearchWorker::ProcessPickedTask(int start_idx, int end_idx,
 #define MAX_TASKS 100
 
 void SearchWorker::ResetTasks() {
+  // LOGFILE << "RT 1";
   task_count_.store(0, std::memory_order_release);
+  // LOGFILE << "RT 2";  
   tasks_taken_.store(0, std::memory_order_release);
+  // LOGFILE << "RT 3";  
   completed_tasks_.store(0, std::memory_order_release);
+  // LOGFILE << "RT 4";  
   picking_tasks_.clear();
+  // LOGFILE << "RT 5";  
   // Reserve because resizing breaks pointers held by the task threads.
   picking_tasks_.reserve(MAX_TASKS);
+  // LOGFILE << "RT 6";  
 }
 
 int SearchWorker::WaitForTasks() {
@@ -1707,7 +1709,8 @@ void SearchWorker::PickNodesToExtend(int collision_limit) {
     SharedMutex::Lock lock(search_->nodes_mutex_);
     // LOGFILE << "PickNodesToExtend() got the lock on nodes_mutex_";
   }
-  
+
+  LOGFILE << "SearchWorker::PickNodesToExtend() calling ResetTasks()";
   ResetTasks();
   {
     // While nothing is ready yet - wake the task runners so they are ready to
@@ -2447,7 +2450,7 @@ void SearchWorker::FetchSingleNodeResult(NodeToProcess* node_to_process,
     node_to_process->d = node->GetD();
     node_to_process->m = node->GetM();
     if(node->IsTerminal()){
-      LOGFILE << "Houston, we see that terminal node right here: node " << node->DebugString();
+      LOGFILE << "Houston, we populated a terminal with value: node " << node->DebugString();
     }
     return;
   }
@@ -2592,7 +2595,7 @@ void SearchWorker::DoBackupUpdateSingleNode(
       search_->current_best_edge_ =
           search_->GetBestChildNoTemperature(search_->root_node_, 0);
     }
-    AuxMaybeEnqueueNode(n);
+    // AuxMaybeEnqueueNode(n);
   }
   search_->total_playouts_ += node_to_process.multivisit;
   search_->cum_depth_ += node_to_process.depth * node_to_process.multivisit;

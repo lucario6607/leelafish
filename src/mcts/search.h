@@ -229,13 +229,9 @@ class Search {
   int64_t auxengine_total_dur = 0;
   int64_t auxengine_num_evals = 0;
   int64_t auxengine_num_updates = 0;
+  // when stop_ is issued, only send "Stop" via UCI to once, either from MaybeTriggerStop() or from DoAuxNode().
   bool auxengine_stopped_ = true;
   std::mutex auxengine_stopped_mutex_;
-  bool auxengine_wait_ = true;
-  std::mutex auxengine_wait_mutex_;
-  // workaround for search_->stop_.load(std::memory_order_aquire) stalls, remove this when that works.
-  std::mutex auxengine_exit_preextend_early_mutex_;  
-  bool exit_preextend_early_ = false;
 
   friend class SearchWorker;
 };
@@ -273,7 +269,7 @@ class SearchWorker {
       LOGFILE << "Destructing the searchworker threads i=" << i;          
       task_threads_[i].join();
     }
-    LOGFILE << "All searchworker threads destroyed.";
+    LOGFILE << "All searchworker threads destroyed for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
   }
 
   // Runs iterations while needed.

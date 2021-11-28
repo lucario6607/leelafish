@@ -79,18 +79,6 @@ void SearchWorker::AuxMaybeEnqueueNode(Node* n) {
 void Search::AuxEngineWorker() {
   int number_of_pvs_delivered = 0;
 
-  // set exit_preextend_early_
-  auxengine_exit_preextend_early_mutex_.lock();
-  exit_preextend_early_ = false;
-  auxengine_exit_preextend_early_mutex_.unlock();  
-
-  // set auxengine_wait_
-  auxengine_wait_mutex_.lock();
-  if(auxengine_wait_){
-    auxengine_wait_ = false;
-  }
-  auxengine_wait_mutex_.unlock();
-  
   if (!auxengine_ready_) {
     auxengine_c_ = boost::process::child(params_.GetAuxEngineFile(), boost::process::std_in < auxengine_os_, boost::process::std_out > auxengine_is_);
     {
@@ -161,7 +149,10 @@ void Search::AuxEngineWorker() {
 
 void Search::DoAuxEngine(Node* n) {
   // before trying to take a lock on nodes_mutex_, always check if search has stopped, in which we return early
-  if(stop_.load(std::memory_order_acquire)) return;
+  if(stop_.load(std::memory_order_acquire)) {
+    LOGFILE << "DoAuxEngine caught a stop signal beforing doing anything.";
+    return;
+  }
   nodes_mutex_.lock_shared();
   LOGFILE << "DoAuxEngine() called for node" << n->DebugString();
   nodes_mutex_.unlock_shared();  
@@ -170,7 +161,10 @@ void Search::DoAuxEngine(Node* n) {
   // Todo test if this lock is unnecessary when solidtree is disabled.
   int depth = 0;
   if(n != root_node_){
-    if(stop_.load(std::memory_order_acquire)) return;    
+    if(stop_.load(std::memory_order_acquire)) {
+      LOGFILE << "DoAuxEngine caught a stop signal while calculating depth.";
+      return;
+    }
     nodes_mutex_.lock_shared();
     for (Node* n2 = n; n2 != root_node_; n2 = n2->GetParent()) {
       depth++;
@@ -194,7 +188,10 @@ void Search::DoAuxEngine(Node* n) {
   std::vector<lczero::Move> my_moves_from_the_white_side;  
 
   if(n != root_node_){
-    if(stop_.load(std::memory_order_acquire)) return;    
+    if(stop_.load(std::memory_order_acquire)) {
+      LOGFILE << "DoAuxEngine caught a stop signal while populating my_moves.";
+      return;
+    }
     nodes_mutex_.lock_shared();  
     for (Node* n2 = n; n2 != root_node_; n2 = n2->GetParent()) {
       my_moves.push_back(n2->GetOwnEdge()->GetMove(flip));
@@ -240,7 +237,13 @@ void Search::DoAuxEngine(Node* n) {
   auto auxengine_start_time = std::chrono::steady_clock::now();
   auxengine_os_ << s << std::endl;
   auxengine_os_ << "go depth " << params_.GetAuxEngineDepth() << std::endl;
-  auxengine_stopped_ = false;
+
+  auxengine_stopped_mutex_.lock();
+  if(auxengine_stopped_){
+    auxengine_stopped_ = false;    
+  }
+  auxengine_stopped_mutex_.unlock();
+
   std::string prev_line;
   std::string line;
   std::string token;
@@ -316,8 +319,11 @@ void Search::DoAuxEngine(Node* n) {
   // params_.GetAuxEngineDepth() is the depth of the requested search
   // The actual PV is often times longer, but don't trust the extra plies.
   int pv_length = 1;
-  int max_pv_length = depth + params_.GetAuxEngineDepth();
-  LOGFILE << "capping PV at length: " << max_pv_length << ", sum of depth = " << depth << " and AuxEngineDepth = " << params_.GetAuxEngineDepth();
+  int max_pv_length = 100;
+  // int max_pv_length = depth + params_.GetAuxEngineDepth();
+  // LOGFILE << "capping PV at length: " << max_pv_length << ", sum of depth = " << depth << " and AuxEngineDepth = " << params_.GetAuxEngineDepth();
+  // int max_pv_length = depth + params_.GetAuxEngineFollowPvDepth();  
+  // LOGFILE << "capping PV at length: " << max_pv_length << ", sum of depth = " << depth << " and AuxEngineDepth = " << params_.GetAuxEngineFollowPvDepth();  
 
   fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before starting to modify it
   
@@ -379,7 +385,8 @@ void Search::DoAuxEngine(Node* n) {
 
 // void Search::AuxWait() REQUIRES(threads_mutex_) {
 void Search::AuxWait() {  
-  LOGFILE << "AuxWait start";
+  LOGFILE << "AuxWait start for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
+
   while (!auxengine_threads_.empty()) {
     auxengine_threads_.back().join();
     auxengine_threads_.pop_back();
@@ -411,7 +418,10 @@ void Search::AuxWait() {
     LOGFILE << "No PVs in the fast_track_extend_and_evaluate_queue";
   } else {
     LOGFILE << fast_track_extend_and_evaluate_queue_.size() << " possibly obsolete PV:s in the queue.";
-    fast_track_extend_and_evaluate_queue_ = {}; // should be faster than pop()
+    fast_track_extend_and_evaluate_queue_ = {}; // should be faster than pop() but it is safe?
+    while (!fast_track_extend_and_evaluate_queue_.empty()) {
+      fast_track_extend_and_evaluate_queue_.pop();
+    }
     LOGFILE << "Number of PV:s in the queue=" << fast_track_extend_and_evaluate_queue_.size();
   }
   fast_track_extend_and_evaluate_queue_mutex_.unlock();  

@@ -1525,7 +1525,7 @@ void SearchWorker::GatherMinibatch2() {
       // Round down, left overs can go to main thread so it waits less.
       int per_worker = non_collisions / num_tasks;
       needs_wait = true;
-      LOGFILE << "SearchWorker::GatherMinibatch2() calling ResetTasks()";
+      LOGFILE << "SearchWorker::GatherMinibatch2() calling ResetTasks() for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
       ResetTasks();
       int found = 0;
       for (int i = new_start; i < static_cast<int>(minibatch_.size()); i++) {
@@ -1704,13 +1704,6 @@ int SearchWorker::WaitForTasks() {
 }
 
 void SearchWorker::PickNodesToExtend(int collision_limit) {
-  {
-    // LOGFILE << "PickNodesToExtend() tries to lock nodes_mutex_";
-    SharedMutex::Lock lock(search_->nodes_mutex_);
-    // LOGFILE << "PickNodesToExtend() got the lock on nodes_mutex_";
-  }
-
-  LOGFILE << "SearchWorker::PickNodesToExtend() calling ResetTasks()";
   ResetTasks();
   {
     // While nothing is ready yet - wake the task runners so they are ready to
@@ -1722,9 +1715,7 @@ void SearchWorker::PickNodesToExtend(int collision_limit) {
   // This lock must be held until after the task_completed_ wait succeeds below.
   // Since the tasks perform work which assumes they have the lock, even though
   // actually this thread does.
-  // LOGFILE << "PickNodesToExtend() tries to lock nodes_mutex_";
   SharedMutex::Lock lock(search_->nodes_mutex_);
-  // LOGFILE << "PickNodesToExtend() got the lock on nodes_mutex_";
   PickNodesToExtendTask(search_->root_node_, 0, collision_limit, empty_movelist,
                         &minibatch_, &main_workspace_);
 
@@ -2514,18 +2505,18 @@ void SearchWorker::DoBackupUpdate() {
       work_done = true;
     }
   }
-  LOGFILE << "At SearchWorker::DoBackupUpdate(): ready backpropagating";  
   if (!work_done) return;
-  LOGFILE << "At SearchWorker::DoBackupUpdate(): Collisions left to cancel";    
   search_->CancelSharedCollisions();
-  LOGFILE << "At SearchWorker::DoBackupUpdate(): Finished canceling collisions";      
   search_->total_batches_ += 1;
 }
 
 void SearchWorker::DoBackupUpdateSingleNode(
     const NodeToProcess& node_to_process) REQUIRES(search_->nodes_mutex_) {
   Node* node = node_to_process.node;
-  if (node_to_process.IsCollision()) return;
+  if (node_to_process.IsCollision()) {
+    // Collisions are handled via shared_collisions instead.
+    return;
+  }
 
   // For the first visit to a terminal, maybe update parent bounds too.
   auto update_parent_bounds =

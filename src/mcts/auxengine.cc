@@ -118,7 +118,7 @@ void Search::AuxEngineWorker() {
     auxengine_ready_ = true;
   }
 
-  // If root is not already picked, then kickstart with the root node, no need to wait for it to get some amount of visits.
+  // Kickstart with the root node, no need to wait for it to get some amount of visits.
   nodes_mutex_.lock(); // write lock
   if(! (root_node_->GetAuxEngineMove() == 0xfffe)){
     // root not yet picked
@@ -131,20 +131,24 @@ void Search::AuxEngineWorker() {
   nodes_mutex_.unlock(); // write unlock
 
   Node* n;
-
-    while (!stop_.load(std::memory_order_acquire)) {
-      {
-	std::unique_lock<std::mutex> lock(auxengine_mutex_);
-	// Wait until there's some work to compute.
-	auxengine_cv_.wait(lock, [&] { return stop_.load(std::memory_order_acquire) || !auxengine_queue_.empty(); });
-	if (stop_.load(std::memory_order_acquire)) break;
-	n = auxengine_queue_.front();
-	auxengine_queue_.pop();
-      } // release lock
-      DoAuxEngine(n);
-      ++number_of_pvs_delivered;
-    }
-    LOGFILE << "AuxEngineWorker done, delivered " << number_of_pvs_delivered << " PVs.";
+  while (!stop_.load(std::memory_order_acquire)) {
+    {
+  	std::unique_lock<std::mutex> lock(auxengine_mutex_);
+  	// auxengine_mutex_.lock(); 
+  	// Wait until there's some work to compute.
+  	auxengine_cv_.wait(lock, [&] { return stop_.load(std::memory_order_acquire) || !auxengine_queue_.empty(); });
+  	if (stop_.load(std::memory_order_acquire)) {
+  	  auxengine_mutex_.unlock(); 	
+  	  break;
+  	}
+  	n = auxengine_queue_.front();
+  	auxengine_queue_.pop();
+    } // release lock
+    DoAuxEngine(n);
+    ++number_of_pvs_delivered;
+  }
+  auxengine_mutex_.unlock();    
+  LOGFILE << "AuxEngineWorker done, delivered " << number_of_pvs_delivered << " PVs.";
 }
 
 void Search::DoAuxEngine(Node* n) {

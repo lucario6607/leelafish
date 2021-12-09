@@ -304,13 +304,22 @@ void Node::SortEdges() {
   // the encoding, and its noticeably faster.
 
   if(child_){
-    LOGFILE << "SortEdges() called to sort edges where at least one edge is extended. But for now I'll just not sort them, since that would mess up the search tree.";
-    return;
+    std::sort(edges_.get(), (edges_.get() + num_edges_),
+	      [](const EdgeAndNode a, const EdgeAndNode b) {
+		if(a.node()){
+		  LOGFILE << "Returning true since the a-edge has a node. Policy of edge a=" << a.GetP() << " policy of edge b=" << b.GetP();
+		  return true;
+		}
+		if(b.node()){
+		  LOGFILE << "Returning true since the b-edge has a node. Policy of edge a=" << a.GetP() << " policy of edge b=" << b.GetP();
+		  return false;		  
+		}
+		return a.GetP() > b.GetP();
+	      });
+  } else {
+    std::sort(edges_.get(), (edges_.get() + num_edges_),
+	      [](const Edge& a, const Edge& b) { return a.p_ > b.p_; });
   }
-  
-  std::sort(edges_.get(), (edges_.get() + num_edges_),
-            [](const Edge& a, const Edge& b) { return a.p_ > b.p_; });
-
 }
 
 void Node::MakeTerminal(GameResult result, float plies_left, Terminal type) {

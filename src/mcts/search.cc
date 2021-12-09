@@ -2469,6 +2469,14 @@ void SearchWorker::FetchSingleNodeResult(NodeToProcess* node_to_process,
                         params_.GetNoiseAlpha());
   }
   node->SortEdges();
+
+  // if(node->HasChildren()){
+  //   for (const auto& child : node->Edges()) {
+  //     auto* edge = child.edge();
+  //     edge->SetP(edge->GetP() * (1 - eps) + eps * noise[noise_idx++] / total);
+  //   }
+  // }
+  
 }
 
 // 6. Propagate the new nodes' information to all their parents in the tree.

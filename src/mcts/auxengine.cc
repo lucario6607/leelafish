@@ -147,7 +147,7 @@ void Search::AuxEngineWorker() {
     DoAuxEngine(n);
     ++number_of_pvs_delivered;
   }
-  auxengine_mutex_.unlock();    
+  // auxengine_mutex_.unlock();    
   LOGFILE << "AuxEngineWorker done, delivered " << number_of_pvs_delivered << " PVs.";
 }
 
@@ -392,6 +392,8 @@ void Search::AuxWait() {
   LOGFILE << "AuxWait start for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
 
   while (!auxengine_threads_.empty()) {
+    Mutex::Lock lock(threads_mutex_);
+    LOGFILE << "AuxWait about to pop threads";
     auxengine_threads_.back().join();
     auxengine_threads_.pop_back();
   }

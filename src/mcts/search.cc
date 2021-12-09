@@ -537,14 +537,14 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
   if (stop_.load(std::memory_order_acquire) && ok_to_respond_bestmove_ &&
       !bestmove_is_sent_) {
 
-    // auxengine_stopped_mutex_.lock();
-    // if(!auxengine_stopped_){
-    //   LOGFILE << "MaybeTriggerStop() Stopping the A/B helper Start";
-    //   auxengine_os_ << "stop" << std::endl; // stop the A/B helper
-    //   LOGFILE << "MaybeTriggerStop() Stopping the A/B helper Stop";
-    //   auxengine_stopped_ = true;
-    // }
-    // auxengine_stopped_mutex_.unlock();
+    auxengine_stopped_mutex_.lock();
+    if(!auxengine_stopped_){
+      LOGFILE << "MaybeTriggerStop() Stopping the A/B helper Start";
+      auxengine_os_ << "stop" << std::endl; // stop the A/B helper
+      LOGFILE << "MaybeTriggerStop() Stopping the A/B helper Stop";
+      auxengine_stopped_ = true;
+    }
+    auxengine_stopped_mutex_.unlock();
     
     SendUciInfo();
     EnsureBestMoveKnown();
@@ -815,7 +815,7 @@ void Search::StartThreads(size_t how_many) {
   LOGFILE << "Search::StartThreads() enterered.";
   thread_count_.store(how_many, std::memory_order_release);
   Mutex::Lock lock(threads_mutex_);
-  // OpenAuxEngine();
+  OpenAuxEngine();
   // First thread is a watchdog thread.
   if (threads_.size() == 0) {
     threads_.emplace_back([this]() { WatchdogThread(); });
@@ -951,9 +951,9 @@ void Search::Stop() {
   ok_to_respond_bestmove_ = true;
   FireStopInternal();
   LOGFILE << "Stopping search due to `stop` uci command.";
-  // LOGFILE << "from Stop() About to enter AuxWait()";
-  // AuxWait();  // This can take some time during which we are not ready to respond readyok, so for now increase timemargin.
-  // LOGFILE << "from Stop() AuxWait() returned";  
+  LOGFILE << "from Stop() About to enter AuxWait()";
+  AuxWait();  // This can take some time during which we are not ready to respond readyok, so for now increase timemargin.
+  LOGFILE << "from Stop() AuxWait() returned";  
 
 }
 
@@ -996,10 +996,10 @@ Search::~Search() {
     SharedMutex::Lock lock(nodes_mutex_);
     CancelSharedCollisions();
   }
-  // LOGFILE << "About to enter AuxWait()";
-  // AuxWait();  // This can take some time during which we are not ready to respond readyok, so for now increase timemargin.
-  // LOGFILE << "AuxWait() returned";  
-  // LOGFILE << "Search destroyed.";
+  LOGFILE << "About to enter AuxWait()";
+  AuxWait();  // This can take some time during which we are not ready to respond readyok, so for now increase timemargin.
+  LOGFILE << "AuxWait() returned";  
+  LOGFILE << "Search destroyed.";
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -1107,8 +1107,8 @@ void SearchWorker::ExecuteOneIteration() {
   }
 
   // 1.5 Extend tree with nodes using PV of a/b helper, and add the new
-  // // nodes to the minibatch
-  // PreExtendTreeAndFastTrackForNNEvaluation();
+  // nodes to the minibatch
+  PreExtendTreeAndFastTrackForNNEvaluation();
 
   // 2. Gather minibatch.
   GatherMinibatch2();
@@ -1413,7 +1413,7 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation() {
 	s = s + my_moves[i].as_string() + " ";
       }
       LOGFILE << "Length of PV to add: " << my_moves.size() << " my_moves: " << s;
-      // PreExtendTreeAndFastTrackForNNEvaluation_inner(search_->root_node_, my_moves, 0, 0);
+      PreExtendTreeAndFastTrackForNNEvaluation_inner(search_->root_node_, my_moves, 0, 0);
       LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: finished one iteration, size of minibatch_ is " << minibatch_.size();
       LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: finished one iteration, size of fast_track_extend_and_evaluate_queue_ is " << search_->fast_track_extend_and_evaluate_queue_.size();
     }
@@ -1471,9 +1471,6 @@ void SearchWorker::GatherMinibatch2() {
   while (minibatch_size < params_.GetMiniBatchSize() &&
          number_out_of_order_ < params_.GetMaxOutOfOrderEvals()) {
     // If there's something to process without touching slow neural net, do it.
-    if(minibatch_size > 0 && computation_->GetCacheMisses() == 0){
-      LOGFILE << "There's something to process without touching slow neural net, do it.";
-    }
     if (minibatch_size > 0 && computation_->GetCacheMisses() == 0) return;
 
     // If there is backend work to be done, and the backend is idle - exit
@@ -1482,14 +1479,6 @@ void SearchWorker::GatherMinibatch2() {
     // early exit from every batch since there is never another search thread to
     // be keeping the backend busy. Which would mean that threads=1 has a
     // massive nps drop.
-    if(thread_count > 1 && minibatch_size > 0 &&
-        computation_->GetCacheMisses() > params_.GetIdlingMinimumWork() &&
-        thread_count - search_->backend_waiting_counter_.load(
-                           std::memory_order_relaxed) >
-            params_.GetThreadIdlingThreshold()){
-      LOGFILE << "There is backend work to be done, and the backend is idle, do it.";
-    }
-    
     if (thread_count > 1 && minibatch_size > 0 &&
         computation_->GetCacheMisses() > params_.GetIdlingMinimumWork() &&
         thread_count - search_->backend_waiting_counter_.load(
@@ -1665,8 +1654,6 @@ void SearchWorker::ProcessPickedTask(int start_idx, int end_idx,
               search_->network_->GetCapabilities().input_format, history);
         }
       }
-    } else {
-      // LOGFILE << "ProcessPickedTask at node " << i << " " << node->DebugString() << " is NOT extendable";      
     }
     if (params_.GetOutOfOrderEval() && picked_node.CanEvalOutOfOrder()) {
       // Perform out of order eval for the last entry in minibatch_.
@@ -1679,18 +1666,12 @@ void SearchWorker::ProcessPickedTask(int start_idx, int end_idx,
 #define MAX_TASKS 100
 
 void SearchWorker::ResetTasks() {
-  // LOGFILE << "RT 1";
   task_count_.store(0, std::memory_order_release);
-  // LOGFILE << "RT 2";  
   tasks_taken_.store(0, std::memory_order_release);
-  // LOGFILE << "RT 3";  
   completed_tasks_.store(0, std::memory_order_release);
-  // LOGFILE << "RT 4";  
   picking_tasks_.clear();
-  // LOGFILE << "RT 5";  
   // Reserve because resizing breaks pointers held by the task threads.
   picking_tasks_.reserve(MAX_TASKS);
-  // LOGFILE << "RT 6";  
 }
 
 int SearchWorker::WaitForTasks() {
@@ -1925,7 +1906,7 @@ void SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
         int best_idx = -1;
         float best_without_u = std::numeric_limits<float>::lowest();
         float second_best = std::numeric_limits<float>::lowest();
-        // bool can_exit = false;
+        bool can_exit = false;
         best_edge.Reset();
         for (int idx = 0; idx < max_needed; ++idx) {
           if (idx > cache_filled_idx) {
@@ -1975,13 +1956,13 @@ void SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
             second_best = score;
             second_best_edge = cur_iters[idx];
           }
-          // if (can_exit) break;
-          // if (nstarted == 0) {
-          //   // One more loop will get 2 unvisited nodes, which is sufficient to
-          //   // ensure second best is correct. This relies upon the fact that
-          //   // edges are sorted in policy decreasing order.
-          //   can_exit = true;
-          // }
+          if (can_exit) break;
+          if (nstarted == 0) {
+            // One more loop will get 2 unvisited nodes, which is sufficient to
+            // ensure second best is correct. This relies upon the fact that
+            // edges are sorted in policy decreasing order.
+            can_exit = true;
+          }
         }
         int new_visits = 0;
         if (second_best_edge) {
@@ -2487,9 +2468,7 @@ void SearchWorker::FetchSingleNodeResult(NodeToProcess* node_to_process,
     ApplyDirichletNoise(node, params_.GetNoiseEpsilon(),
                         params_.GetNoiseAlpha());
   }
-
-  // node->SortEdges();
- 
+  node->SortEdges();
 }
 
 // 6. Propagate the new nodes' information to all their parents in the tree.
@@ -2586,7 +2565,7 @@ void SearchWorker::DoBackupUpdateSingleNode(
       search_->current_best_edge_ =
           search_->GetBestChildNoTemperature(search_->root_node_, 0);
     }
-    // AuxMaybeEnqueueNode(n);
+    AuxMaybeEnqueueNode(n);
   }
   search_->total_playouts_ += node_to_process.multivisit;
   search_->cum_depth_ += node_to_process.depth * node_to_process.multivisit;

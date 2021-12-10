@@ -304,22 +304,59 @@ void Node::SortEdges() {
   // the encoding, and its noticeably faster.
 
   if(child_){
+
+    std::vector<EdgeAndNode> original_edges;
+    for (const auto& edge : Edges()) original_edges.push_back(edge);
+
     std::sort(edges_.get(), (edges_.get() + num_edges_),
-	      [](const EdgeAndNode a, const EdgeAndNode b) {
-		if(a.node()){
-		  LOGFILE << "Returning true since the a-edge has a node. Policy of edge a=" << a.GetP() << " policy of edge b=" << b.GetP();
-		  return true;
-		}
-		if(b.node()){
-		  LOGFILE << "Returning true since the b-edge has a node. Policy of edge a=" << a.GetP() << " policy of edge b=" << b.GetP();
-		  return false;		  
-		}
-		return a.GetP() > b.GetP();
-	      });
+  	      [&original_edges](Edge& a, Edge& b) {
+  		// Find the EdgeAndNode that corresponds to a and b.
+  		EdgeAndNode edge_and_node_a;
+  		EdgeAndNode edge_and_node_b;
+  		for(const auto& edge : original_edges){
+  		  if(edge.node()){
+  		    if(edge.node()->GetOwnEdge()->move_ == a.move_){
+  		      edge_and_node_a = edge;
+  		    }
+  		    if(edge.node()->GetOwnEdge()->move_ == b.move_){
+  		      edge_and_node_b = edge;
+  		    }
+  		  }
+  		}
+  		if(edge_and_node_a.node() && !edge_and_node_b.node()){
+  		  // LOGFILE << "Returning true since only the a-edge has a node. raw policy of edge a=" << a.p_ << " policy of edge b=" << b.p_;
+  		  return true;
+  		}
+  		if(edge_and_node_b.node() && !edge_and_node_a.node()){
+  		  // LOGFILE << "Returning false only since the b-edge has a node. raw policy of edge a=" << a.p_ << " policy of edge b=" << b.p_;
+  		  return false;		  
+  		}
+  		// LOGFILE << "Neither (or both) A or B had a node. raw policy of edge a=" << a.p_ << " policy of edge b=" << b.p_;
+  		return a.p_ > b.p_;
+  	      });
+
+    // I suspect this does nothing due to compiler optimisations which makes Edges() not changing.
+    // Update the index_ field in the child(ren).
+    int j = 0;
+    for (const auto& edge : Edges()){
+      if(edge.node()){
+  	// Child exists, Find this edge in the old list, and update the index_ field of the corresponding node
+  	int i=0;
+  	while(edge != original_edges[i]){
+  	  i++;
+  	}
+  	LOGFILE << "existing index: " << edge.node()->index_ << " new index: " << j;
+  	edge.node()->index_ = j;
+      }
+      j++;
+    }
   } else {
     std::sort(edges_.get(), (edges_.get() + num_edges_),
-	      [](const Edge& a, const Edge& b) { return a.p_ > b.p_; });
+  	      [](const Edge& a, const Edge& b) { return a.p_ > b.p_; });
   }
+
+  // std::sort(edges_.get(), (edges_.get() + num_edges_),
+  // 	    [](const Edge& a, const Edge& b) { return a.p_ > b.p_; });
 }
 
 void Node::MakeTerminal(GameResult result, float plies_left, Terminal type) {

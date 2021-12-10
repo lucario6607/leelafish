@@ -147,7 +147,7 @@ void Search::AuxEngineWorker() {
     DoAuxEngine(n);
     ++number_of_pvs_delivered;
   }
-  // auxengine_mutex_.unlock();    
+  auxengine_mutex_.unlock();    
   LOGFILE << "AuxEngineWorker done, delivered " << number_of_pvs_delivered << " PVs.";
 }
 

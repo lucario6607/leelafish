@@ -1386,8 +1386,8 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
       }
     }
     if(edge_found){
-      throw Exception("Leelas node has edges, but the recommended move was not found among them!");
-      LOGFILE << "Leelas node has edges, but the recommended move was not found among them!";
+      // throw Exception("Leelas node has edges, but the recommended move was not found among them!");
+      LOGFILE << "Leelas node has edges, but the recommended move was not found among them! Is this a case of https://github.com/hans-ekbrand/lc0/issues/2 where we mistakenly belive a move is castling when it isn't?";
     } else {
       LOGFILE << "No edges found, repetition?";
     }

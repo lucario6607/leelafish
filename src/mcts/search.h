@@ -210,6 +210,9 @@ class Search {
 
   std::unique_ptr<UciResponder> uci_responder_;
 
+  // temporary stuff
+  int64_t number_of_times_called_AuxMaybeEnqueueNode_ = 0;
+  
   void OpenAuxEngine();
   void AuxEngineWorker();
   void AuxWait();
@@ -241,6 +244,7 @@ class Search {
 // That used to be just a function Search::Worker(), but to parallelize it
 // within one thread, have to split into stages.
 class SearchWorker {
+  
  public:
   SearchWorker(Search* search, const SearchParams& params, int id)
       : search_(search),

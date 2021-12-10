@@ -57,7 +57,7 @@ void Search::OpenAuxEngine() REQUIRES(threads_mutex_) {
 
 void SearchWorker::AuxMaybeEnqueueNode(Node* n) {
   // the caller (DoBackupUpdate()->DoBackupUpdateSingleNode()) has a lock on search_->nodes_mutex_, so no other thread will change n right now.
-  if(search_->stop_.load(std::memory_order_acquire)) return;
+  // if(search_->stop_.load(std::memory_order_acquire)) return;
   if (params_.GetAuxEngineFile() != "" &&
       n->GetN() >= (uint32_t) params_.GetAuxEngineThreshold() &&
       n->GetAuxEngineMove() == 0xffff &&

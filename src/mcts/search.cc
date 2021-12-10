@@ -547,7 +547,8 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
       LOGFILE << "MaybeTriggerStop() Not stopping the A/B helper.";      
     }
     auxengine_stopped_mutex_.unlock();
-    
+    LOGFILE << "Called AuxMaybeEnqueueNode() " << number_of_times_called_AuxMaybeEnqueueNode_ << " times.";
+
     SendUciInfo();
     EnsureBestMoveKnown();
     SendMovesStats();
@@ -2557,7 +2558,12 @@ void SearchWorker::DoBackupUpdateSingleNode(
       search_->current_best_edge_ =
           search_->GetBestChildNoTemperature(search_->root_node_, 0);
     }
-    AuxMaybeEnqueueNode(n);
+    // Avoid a full function call unless it will likely actually queue the node.
+    if(n->GetN() >= (uint32_t) params_.GetAuxEngineThreshold() &&
+       n->GetAuxEngineMove() == 0xffff){
+      AuxMaybeEnqueueNode(n);
+      search_->number_of_times_called_AuxMaybeEnqueueNode_ += 1;
+    }
   }
   search_->total_playouts_ += node_to_process.multivisit;
   search_->cum_depth_ += node_to_process.depth * node_to_process.multivisit;

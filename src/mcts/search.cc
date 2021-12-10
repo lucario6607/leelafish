@@ -1333,36 +1333,11 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	search_->root_node_->IncrementNInFlight(visits_to_add);
 	search_->nodes_mutex_.unlock();
 
-	// std::vector<Move> my_path_final;
-	// my_path_final.reserve(ply+1);
-	// Node* cur = child_node;
-	// while (cur != search_->root_node_) {
-	//   Node* prev = cur->GetParent();
-	//   my_path_final.push_back(prev->GetEdgeToNode(cur)->GetMove());
-	//   cur = prev;
-	// }
-	// std::reverse(my_path_final.begin(), my_path_final.end());
-	// s_1 = "";
-	// s_2 = "";  
-	// for(int i = 0; i <= ply; i++){
-	//   s_1 = s_1 + " " + my_path_final[i].as_string();
-	//   s_2 = s_2 + " " + my_moves[i].as_string();    
-	// }
-	// if(s_1 != s_2){
-	//   throw Exception("Final paths not identical!");
-	// } else {
-	//   LOGFILE << "Final paths identical: s_1=" << s_1 << " s_2=" << s_2;
-	// }
-	
-	// Release the read lock before returning
-	// search_->nodes_mutex_.unlock_shared();
-	  
 	return;
       }
     }
   }
   if(!edge_found){
-    // TODO debug why some edges are not found. Seems some nodes are totally wrong.
     // show full my_moves
     std::string s;
     PositionHistory ph = search_->played_history_;

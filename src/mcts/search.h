@@ -35,6 +35,7 @@
 #include <optional>
 #include <shared_mutex>
 #include <thread>
+#include <algorithm>
 
 #include "chess/callbacks.h"
 #include "chess/uciloop.h"

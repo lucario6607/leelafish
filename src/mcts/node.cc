@@ -354,9 +354,6 @@ void Node::SortEdges() {
     std::sort(edges_.get(), (edges_.get() + num_edges_),
   	      [](const Edge& a, const Edge& b) { return a.p_ > b.p_; });
   }
-
-  // std::sort(edges_.get(), (edges_.get() + num_edges_),
-  // 	    [](const Edge& a, const Edge& b) { return a.p_ > b.p_; });
 }
 
 void Node::MakeTerminal(GameResult result, float plies_left, Terminal type) {

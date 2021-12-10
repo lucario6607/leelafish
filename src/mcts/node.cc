@@ -305,51 +305,82 @@ void Node::SortEdges() {
 
   if(child_){
 
+    // After sorting, the connection between nodes and edges is lost.
+    // In order to be able to recreate this connection information
+    // about which moves corresponds to which nodes needs to be kept
+    // in an independent structure.
+
+    // create a list of moves corresponding to the nodes you get by
+    // traversing child_ and sibling_.
+
+    std::vector<Move> moves_to_children;
+    Node * foo = child_.get();
+    moves_to_children.push_back(foo->GetOwnEdge()->GetMove());
+    // LOGFILE << "Move corresponding to first child: " << foo->GetOwnEdge()->GetMove().as_string() << " " << foo->DebugString();
+    
+    if(foo->sibling_){
+      foo = foo->sibling_.get();
+      // LOGFILE << "Move corresponding to other child: " << foo->GetOwnEdge()->GetMove().as_string() << " " << foo->DebugString();
+      moves_to_children.push_back(foo->GetOwnEdge()->GetMove());
+    }
+
     std::vector<EdgeAndNode> original_edges;
     for (const auto& edge : Edges()) original_edges.push_back(edge);
 
     std::sort(edges_.get(), (edges_.get() + num_edges_),
-  	      [&original_edges](Edge& a, Edge& b) {
-  		// Find the EdgeAndNode that corresponds to a and b.
-  		EdgeAndNode edge_and_node_a;
-  		EdgeAndNode edge_and_node_b;
-  		for(const auto& edge : original_edges){
-  		  if(edge.node()){
-  		    if(edge.node()->GetOwnEdge()->move_ == a.move_){
-  		      edge_and_node_a = edge;
-  		    }
-  		    if(edge.node()->GetOwnEdge()->move_ == b.move_){
-  		      edge_and_node_b = edge;
-  		    }
-  		  }
-  		}
-  		if(edge_and_node_a.node() && !edge_and_node_b.node()){
-  		  // LOGFILE << "Returning true since only the a-edge has a node. raw policy of edge a=" << a.p_ << " policy of edge b=" << b.p_;
-  		  return true;
-  		}
-  		if(edge_and_node_b.node() && !edge_and_node_a.node()){
-  		  // LOGFILE << "Returning false only since the b-edge has a node. raw policy of edge a=" << a.p_ << " policy of edge b=" << b.p_;
-  		  return false;		  
-  		}
-  		// LOGFILE << "Neither (or both) A or B had a node. raw policy of edge a=" << a.p_ << " policy of edge b=" << b.p_;
-  		return a.p_ > b.p_;
-  	      });
+    	      [&moves_to_children](Edge& a, Edge& b) {
+		// Test a and b against moves_to_children to find out if they have children or not.
+		bool a_has_children = false;
+		bool b_has_children = false;		
+		for(const auto& move : moves_to_children){
+		  if(a.move_ == move){
+		    a_has_children = true;
+		  }
+		  if(b.move_ == move){
+		    b_has_children = true;
+		  }
+		}
+    		if(a_has_children && !b_has_children){
+    		  // LOGFILE << "Returning true since only the a-edge has a node. raw policy of edge a=" << a.p_ << " policy of edge b=" << b.p_ << " move for edge a: " << a.move_.as_string();
+		  return true;
+		}
+    		if(b_has_children && !a_has_children){
+    		  // LOGFILE << "Returning false since only the b-edge has a node. raw policy of edge a=" << a.p_ << " policy of edge b=" << b.p_ << " move for edge b: " << b.move_.as_string();
+		  return false;
+		}
+    		return a.p_ > b.p_;		
+	      });
 
-    // I suspect this does nothing due to compiler optimisations which makes Edges() not changing.
-    // Update the index_ field in the child(ren).
-    int j = 0;
-    for (const auto& edge : Edges()){
-      if(edge.node()){
-  	// Child exists, Find this edge in the old list, and update the index_ field of the corresponding node
-  	int i=0;
-  	while(edge != original_edges[i]){
-  	  i++;
-  	}
-  	LOGFILE << "existing index: " << edge.node()->index_ << " new index: " << j;
-  	edge.node()->index_ = j;
+    // LOGFILE << "After sorting, first edge is: " << edges_.get()->DebugString();
+    // LOGFILE << "After sorting second edge is: " << (edges_.get() + 1)->DebugString();
+    // LOGFILE << "After sorting third edge is: " << (edges_.get() + 2)->DebugString();
+    // counter = 0;
+    // for (const auto& edge : Edges()){
+    //   LOGFILE << "element " << counter << " in Edges(): " << edge.DebugString() << " '(no node)' information is not reliable, first edge most like has a node";
+    //   if(counter > 2){
+    // 	break;
+    //   }
+    //   counter++;
+    // }
+
+    foo = child_.get();
+    int child_index = 0;
+    while(foo){
+      // Find index of the edge that corresponds to the move we have recorded for the first child.
+      int my_new_index = 0;
+      for (const auto& edge : Edges()){
+	// LOGFILE << "For child " << child_index << " comparing " << moves_to_children[child_index].as_string() << " with " << edge.GetMove().as_string();
+	if(moves_to_children[child_index] == edge.GetMove()){
+	  // LOGFILE << "The node should have index_=" << my_new_index;
+	  foo->index_ = my_new_index;
+	  break;
+	}
+	my_new_index++;
       }
-      j++;
+      foo = foo->sibling_.get();  // Repeat for siblings
+      child_index++;
     }
+
   } else {
     std::sort(edges_.get(), (edges_.get() + num_edges_),
   	      [](const Edge& a, const Edge& b) { return a.p_ > b.p_; });

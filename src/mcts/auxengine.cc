@@ -323,8 +323,8 @@ void Search::DoAuxEngine(Node* n) {
   // params_.GetAuxEngineDepth() is the depth of the requested search
   // The actual PV is often times longer, but don't trust the extra plies.
   int pv_length = 1;
-  int max_pv_length = 100;
-  // int max_pv_length = depth + params_.GetAuxEngineDepth();
+  // int max_pv_length = 100;
+  int max_pv_length = depth + params_.GetAuxEngineDepth();
   // LOGFILE << "capping PV at length: " << max_pv_length << ", sum of depth = " << depth << " and AuxEngineDepth = " << params_.GetAuxEngineDepth();
   // int max_pv_length = depth + params_.GetAuxEngineFollowPvDepth();  
   // LOGFILE << "capping PV at length: " << max_pv_length << ", sum of depth = " << depth << " and AuxEngineDepth = " << params_.GetAuxEngineFollowPvDepth();  

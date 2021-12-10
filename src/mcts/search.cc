@@ -2446,22 +2446,7 @@ void SearchWorker::FetchSingleNodeResult(NodeToProcess* node_to_process,
     ApplyDirichletNoise(node, params_.GetNoiseEpsilon(),
                         params_.GetNoiseAlpha());
   }
-  // std::vector<EdgeAndNode> original_edges;
-  // if(node->HasChildren()){
-  //   for (const auto& edge : node->Edges()) original_edges.push_back(edge);
-  // }
   node->SortEdges();
-
-  // // Forbid optimisation that would make new_edges a copy of original_edges;
-  // SharedMutex::Lock lock(search_->nodes_mutex_);
-  // if(node->HasChildren()){
-  //   std::vector<EdgeAndNode> new_edges;
-  //   for (const auto& edge : node->Edges()) new_edges.push_back(edge);
-  //   for(int i = 0; i < (int) new_edges.size(); i++){
-  //     LOGFILE << "position=" << i << " old_edge: " << original_edges[i].DebugString() << " new_edge: " << new_edges[i].DebugString();
-  //   }
-  // }
-  
 }
 
 // 6. Propagate the new nodes' information to all their parents in the tree.

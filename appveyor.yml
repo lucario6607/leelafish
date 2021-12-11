@@ -22,7 +22,7 @@ for:
   skip_non_tags: true
 clone_folder: c:\projects\lc0
 install:
-- cmd: set BOOST_ROOT=C:\Libraries\boost_1_77_0
+- cmd: set BOOST_ROOT=C:\Libraries\boost_1_69_0
 - cmd: set CUDA=false
 - cmd: set CUDNN=false
 - cmd: set DX=false

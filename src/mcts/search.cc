@@ -1300,7 +1300,6 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	  minibatch_[minibatch_.size()-1].nn_queried = false;
 	  minibatch_[minibatch_.size()-1].ooo_completed = false;
 	  child_node->IncrementNInFlight(1); // seems necessary.
-	  LOGFILE << "Houston, we got a terminal node: " << child_node->DebugString();
 	}
 
 	// unlock the readlock.
@@ -2399,9 +2398,6 @@ void SearchWorker::FetchSingleNodeResult(NodeToProcess* node_to_process,
     node_to_process->v = node->GetWL();
     node_to_process->d = node->GetD();
     node_to_process->m = node->GetM();
-    if(node->IsTerminal()){
-      LOGFILE << "Houston, we populated a terminal with value: node " << node->DebugString();
-    }
     return;
   }
   // For NN results, we need to populate policy as well as value.

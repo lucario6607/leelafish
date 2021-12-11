@@ -321,10 +321,10 @@ void Search::DoAuxEngine(Node* n) {
   auto bestmove_packed_int = Move(token, !flip).as_packed_int();
   // depth is distance between root and the starting point for the auxengine
   // params_.GetAuxEngineDepth() is the depth of the requested search
-  // The actual PV is often times longer, but don't trust the extra plies.
+  // The actual PV is often times longer, whether or not to use those extra plies is an open question.
   int pv_length = 1;
-  // int max_pv_length = 100;
-  int max_pv_length = depth + params_.GetAuxEngineDepth();
+  int max_pv_length = 100;
+  // int max_pv_length = depth + params_.GetAuxEngineDepth();
   // LOGFILE << "capping PV at length: " << max_pv_length << ", sum of depth = " << depth << " and AuxEngineDepth = " << params_.GetAuxEngineDepth();
   // int max_pv_length = depth + params_.GetAuxEngineFollowPvDepth();  
   // LOGFILE << "capping PV at length: " << max_pv_length << ", sum of depth = " << depth << " and AuxEngineDepth = " << params_.GetAuxEngineFollowPvDepth();  

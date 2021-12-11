@@ -1117,11 +1117,11 @@ void SearchWorker::ExecuteOneIteration() {
   GatherMinibatch2();
   task_count_.store(-1, std::memory_order_release);
   search_->backend_waiting_counter_.fetch_add(1, std::memory_order_relaxed);
-  LOGFILE << "GatherMinibatch2() finished for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
+  // LOGFILE << "GatherMinibatch2() finished for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
 
   // 2b. Collect collisions.
   CollectCollisions();
-  LOGFILE << "CollectCollisions() finished for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
+  // LOGFILE << "CollectCollisions() finished for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
 
   // 3. Prefetch into cache.
   MaybePrefetchIntoCache();
@@ -1129,27 +1129,27 @@ void SearchWorker::ExecuteOneIteration() {
   if (params_.GetMaxConcurrentSearchers() != 0) {
     search_->pending_searchers_.fetch_add(1, std::memory_order_acq_rel);
   }
-  LOGFILE << "MaybePrefetchIntoCache() finished for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
+  // LOGFILE << "MaybePrefetchIntoCache() finished for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
 
   // 4. Run NN computation.
-  LOGFILE << "NN computation started for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());  
+  // LOGFILE << "NN computation started for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());  
   RunNNComputation();
-  LOGFILE << "NN computation finished 0 for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());  
+  // LOGFILE << "NN computation finished 0 for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());  
   search_->backend_waiting_counter_.fetch_add(-1, std::memory_order_relaxed);
 
-  LOGFILE << "NN computation finished 1 for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
+  // LOGFILE << "NN computation finished 1 for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
 
   // 5. Retrieve NN computations (and terminal values) into nodes.
   FetchMinibatchResults();
-  LOGFILE << "FetchMinibatchResults() finished for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
+  // LOGFILE << "FetchMinibatchResults() finished for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
 
   // 6. Propagate the new nodes' information to all their parents in the tree.
   DoBackupUpdate();
-  LOGFILE << "DoBackupUpdate() finished, now on to UpdateCounters() for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
+  // LOGFILE << "DoBackupUpdate() finished, now on to UpdateCounters() for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
 
   // 7. Update the Search's status and progress information.
   UpdateCounters();
-  LOGFILE << "UpdateCounters() finished for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
+  // LOGFILE << "UpdateCounters() finished for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
 
   // If required, waste time to limit nps.
   if (params_.GetNpsLimit() > 0) {
@@ -1170,7 +1170,7 @@ void SearchWorker::ExecuteOneIteration() {
       }
     }
   }
-  LOGFILE << "ExecuteOneIteration() finished for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
+  // LOGFILE << "ExecuteOneIteration() finished for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
 }
 
 // 1. Initialize internal structures.
@@ -1491,7 +1491,7 @@ void SearchWorker::GatherMinibatch2() {
       // Round down, left overs can go to main thread so it waits less.
       int per_worker = non_collisions / num_tasks;
       needs_wait = true;
-      LOGFILE << "SearchWorker::GatherMinibatch2() calling ResetTasks() for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
+      // LOGFILE << "SearchWorker::GatherMinibatch2() calling ResetTasks() for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
       ResetTasks();
       int found = 0;
       for (int i = new_start; i < static_cast<int>(minibatch_.size()); i++) {
@@ -2377,7 +2377,7 @@ void SearchWorker::FetchMinibatchResults() {
     FetchSingleNodeResult(&node_to_process, *computation_, idx_in_computation);
     if (node_to_process.nn_queried) ++idx_in_computation;
   }
-  LOGFILE << "SearchWorker::FetchMinibatchResults() finished";
+  // LOGFILE << "SearchWorker::FetchMinibatchResults() finished";
 }
 
 template <typename Computation>

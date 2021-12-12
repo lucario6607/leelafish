@@ -58,27 +58,17 @@ void Search::OpenAuxEngine() REQUIRES(threads_mutex_) {
 void SearchWorker::AuxMaybeEnqueueNode(Node* n) {
   // the caller (DoBackupUpdate()->DoBackupUpdateSingleNode()) has a lock on search_->nodes_mutex_, so no other thread will change n right now.
 
-  // Do nothing if search is interrupted.
-  if(search_->stop_.load(std::memory_order_acquire)){
-    return;
-  }
+  // TODO change name to AuxEnqueueNode since the choice is moved to the caller now.
   
-  if (params_.GetAuxEngineFile() != "" &&
-      n->GetN() >= (uint32_t) params_.GetAuxEngineThreshold() &&
-      n->GetAuxEngineMove() == 0xffff &&
-      !n->IsTerminal() &&
-      n->HasChildren()) {
+  LOGFILE << "AuxMaybeEnqueueNode() picked node: " << n->DebugString() << " for the auxengine_queue.";
 
-    LOGFILE << "AuxMaybeEnqueueNode() picked node: " << n->DebugString() << " for the auxengine_queue.";
+  n->SetAuxEngineMove(0xfffe); // magic for pending
 
-    n->SetAuxEngineMove(0xfffe); // magic for pending
-
-    search_->auxengine_mutex_.lock();
-    LOGFILE << "Size of search_->auxengine_queue_ is " << search_->auxengine_queue_.size();
-    search_->auxengine_queue_.push(n);
-    search_->auxengine_cv_.notify_one();
-    search_->auxengine_mutex_.unlock();
-  }
+  search_->auxengine_mutex_.lock();
+  LOGFILE << "Size of search_->auxengine_queue_ is " << search_->auxengine_queue_.size();
+  search_->auxengine_queue_.push(n);
+  search_->auxengine_cv_.notify_one();
+  search_->auxengine_mutex_.unlock();
 }
 
 void Search::AuxEngineWorker() {

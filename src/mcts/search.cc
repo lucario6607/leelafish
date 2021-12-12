@@ -1201,7 +1201,15 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
     } else {
       LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation_inner called with node" << my_node->DebugString() << " black to edge/move _to_ this node: " << my_node->GetOwnEdge()->GetMove(black_to_move).as_string() << " and this move from the a/b-helper: " << my_moves[ply].as_string() << " is made by white, ply=" << ply;
     }
-  } 
+  }
+
+  // If the current node is terminal it will not have any edges, and there is nothing more to do.
+  if(my_node->IsTerminal()){
+    LOGFILE << "Reached a terminal node, nothing to do.";
+    // unlock nodes before returning.
+    search_->nodes_mutex_.unlock_shared();
+    return;
+  }
 
   // Find the edge
   for (auto& edge : my_node->Edges()) {
@@ -2542,8 +2550,13 @@ void SearchWorker::DoBackupUpdateSingleNode(
           search_->GetBestChildNoTemperature(search_->root_node_, 0);
     }
     // Avoid a full function call unless it will likely actually queue the node.
-    if(n->GetN() >= (uint32_t) params_.GetAuxEngineThreshold() &&
-       n->GetAuxEngineMove() == 0xffff){
+    // Do nothing if search is interrupted.
+    if(params_.GetAuxEngineFile() != "" &&
+       n->GetN() >= (uint32_t) params_.GetAuxEngineThreshold() &&
+       n->GetAuxEngineMove() == 0xffff &&
+       !n->IsTerminal() &&
+       n->HasChildren() &&
+       !search_->stop_.load(std::memory_order_acquire)){
       AuxMaybeEnqueueNode(n);
       search_->number_of_times_called_AuxMaybeEnqueueNode_ += 1;
     }
@@ -2552,8 +2565,6 @@ void SearchWorker::DoBackupUpdateSingleNode(
   search_->cum_depth_ += node_to_process.depth * node_to_process.multivisit;
   search_->max_depth_ = std::max(search_->max_depth_, node_to_process.depth);
 
-  // LOGFILE << "DoBackupUpdateSingleNode: node" << node->DebugString();
-  
 }
 
 bool SearchWorker::MaybeSetBounds(Node* p, float m, int* n_to_fix,

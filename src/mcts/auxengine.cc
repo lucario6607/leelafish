@@ -59,7 +59,7 @@ void SearchWorker::AuxMaybeEnqueueNode(Node* n) {
   // the caller (DoBackupUpdate()->DoBackupUpdateSingleNode()) has a lock on search_->nodes_mutex_, so no other thread will change n right now.
 
   // Do nothing if search is interrupted.
-  if(stop_.load(std::memory_order_acquire)){
+  if(search_->stop_.load(std::memory_order_acquire)){
     return;
   }
   

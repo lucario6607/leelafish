@@ -57,7 +57,6 @@ void Search::OpenAuxEngine() REQUIRES(threads_mutex_) {
 
 void SearchWorker::AuxMaybeEnqueueNode(Node* n) {
   // the caller (DoBackupUpdate()->DoBackupUpdateSingleNode()) has a lock on search_->nodes_mutex_, so no other thread will change n right now.
-  // if(search_->stop_.load(std::memory_order_acquire)) return;
   if (params_.GetAuxEngineFile() != "" &&
       n->GetN() >= (uint32_t) params_.GetAuxEngineThreshold() &&
       n->GetAuxEngineMove() == 0xffff &&
@@ -118,10 +117,14 @@ void Search::AuxEngineWorker() {
     auxengine_ready_ = true;
   }
 
-  // Kickstart with the root node, no need to wait for it to get some amount of visits.
+  // Kickstart with the root node, no need to wait for it to get some
+  // amount of visits. Except if root is not yet expanded, or lacks
+  // edges of any other reason (e.g. being terminal), in which case we
+  // should wait.
   nodes_mutex_.lock(); // write lock
-  if(! (root_node_->GetAuxEngineMove() == 0xfffe)){
-    // root not yet picked
+  if(! (root_node_->GetAuxEngineMove() == 0xfffe) &&
+     root_node_->GetNumEdges() > 0){
+    // root is extended and not yet picked 
     root_node_->SetAuxEngineMove(0xfffe); // mark root as pending and queue it
     auxengine_mutex_.lock(); 
     auxengine_queue_.push(root_node_);

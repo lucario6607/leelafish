@@ -563,7 +563,9 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
   // at the next iteration remaining playouts may be different.
   // TODO(crem) Is it really needed?
   root_node_->CancelScoreUpdate(0);
-  LOGFILE << "MaybeTriggerStop() finished";
+  if (stop_.load(std::memory_order_acquire)){
+    LOGFILE << "MaybeTriggerStop() finished";
+  }
 }
 
 // Return the evaluation of the actual best child, regardless of temperature
@@ -1083,7 +1085,7 @@ void SearchWorker::RunTasks(int tid) {
 }
 
 void SearchWorker::ExecuteOneIteration() {
-  LOGFILE << "ExecuteOneIteration() started for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
+  // LOGFILE << "ExecuteOneIteration() started for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
   // 1. Initialize internal structures.
   InitializeIteration(search_->network_->NewComputation());
 
@@ -1375,7 +1377,7 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 
 void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation() {
   // input: a PV starting from root in form of a vector of Moves (the vectors are stored in a global queue called fast_track_extend_and_evaluate_queue_)
-  LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation() for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
+  // LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation() for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
   // lock the queue before reading from it
   std::lock_guard<std::mutex> lock(search_->fast_track_extend_and_evaluate_queue_mutex_);
   if(search_->fast_track_extend_and_evaluate_queue_.size() > 0){

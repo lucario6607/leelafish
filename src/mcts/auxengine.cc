@@ -301,6 +301,10 @@ void Search::DoAuxEngine(Node* n) {
     LOGFILE << "pv:" << prev_line;
     LOGFILE << "bestanswer:" << token;
   }
+  if(prev_line == ""){
+    LOGFILE << "Empty PV, returning early from doAuxEngine().";
+    return;
+  }
   if (!auxengine_c_.running()) {
     LOGFILE << "AuxEngine died!";
     throw Exception("AuxEngine died!");

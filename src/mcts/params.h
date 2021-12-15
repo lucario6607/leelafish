@@ -147,14 +147,8 @@ class SearchParams {
   int GetAuxEngineThreshold() const {
     return options_.Get<int>(kAuxEngineThresholdId);
   }
-  int GetAuxEngineDepth() const {
-    return options_.Get<int>(kAuxEngineDepthId);
-  }
-  float GetAuxEngineBoost() const {
-    return options_.Get<float>(kAuxEngineBoostId);
-  }
-  int GetAuxEngineFollowPvDepth() const {
-    return options_.Get<int>(kAuxEngineFollowPvDepthId);
+  int GetAuxEngineTime() const {
+    return options_.Get<int>(kAuxEngineTimeId);
   }
   int GetAuxEngineVerbosity() const {
     return options_.Get<int>(kAuxEngineVerbosityId);
@@ -226,9 +220,7 @@ class SearchParams {
   static const OptionId kAuxEngineFileId;
   static const OptionId kAuxEngineOptionsId;
   static const OptionId kAuxEngineThresholdId;
-  static const OptionId kAuxEngineDepthId;
-  static const OptionId kAuxEngineBoostId;
-  static const OptionId kAuxEngineFollowPvDepthId;
+  static const OptionId kAuxEngineTimeId;
   static const OptionId kAuxEngineVerbosityId;
 
  private:

@@ -326,16 +326,9 @@ const OptionId SearchParams::kAuxEngineOptionsId{
 const OptionId SearchParams::kAuxEngineThresholdId{
     "auxengine-threshold", "AuxEngineThreshold",
     "The auxiliary engine is called when a node reaches this many visits"};
-const OptionId SearchParams::kAuxEngineDepthId{
-    "auxengine-depth", "AuxEngineDepth",
-    "Depth for the auxiliary engine to search."};
-const OptionId SearchParams::kAuxEngineBoostId{
-    "auxengine-boost", "AuxEngineBoost",
-    "How much to add to Policy, in percentage"};
-const OptionId SearchParams::kAuxEngineFollowPvDepthId{
-    "auxengine-follow-pv-depth", "AuxEngineFollowPvDepth",
-    "Add this many plies of the auxengine's PV at a time. "
-    "Higher is faster, but deeper PV moves are less accurate"};
+const OptionId SearchParams::kAuxEngineTimeId{
+    "auxengine-time", "AuxEngineTime",
+    "Time (in milliseconds) for the auxiliary engine to search."};
 const OptionId SearchParams::kAuxEngineVerbosityId{
     "auxengine-verbosity", "AuxEngineVerbosity",
     "Higher number for more logging."};
@@ -440,10 +433,8 @@ void SearchParams::Populate(OptionsParser* options) {
   options->HideOption(kTemperatureVisitOffsetId);
   options->Add<StringOption>(kAuxEngineFileId);
   options->Add<StringOption>(kAuxEngineOptionsId);
-  options->Add<IntOption>(kAuxEngineThresholdId, 1, 1000000) = 100;
-  options->Add<IntOption>(kAuxEngineDepthId, 1, 100) = 15;
-  options->Add<FloatOption>(kAuxEngineBoostId, 0.0f, 100.0f) = 50.0f;
-  options->Add<IntOption>(kAuxEngineFollowPvDepthId, 1, 20) = 4;
+  options->Add<IntOption>(kAuxEngineThresholdId, 1, 1000000) = 250;
+  options->Add<IntOption>(kAuxEngineTimeId, 10, 10000) = 400;
   options->Add<IntOption>(kAuxEngineVerbosityId, 0, 10) = 1;
 }
 

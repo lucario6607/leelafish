@@ -434,7 +434,7 @@ void SearchParams::Populate(OptionsParser* options) {
   options->Add<StringOption>(kAuxEngineFileId);
   options->Add<StringOption>(kAuxEngineOptionsId);
   options->Add<IntOption>(kAuxEngineThresholdId, 1, 1000000) = 250;
-  options->Add<IntOption>(kAuxEngineTimeId, 10, 10000) = 400;
+  options->Add<IntOption>(kAuxEngineTimeId, 10, 10000) = 350;
   options->Add<IntOption>(kAuxEngineVerbosityId, 0, 10) = 1;
 }
 

@@ -118,8 +118,7 @@ void Search::AuxEngineWorker() {
   // edges of any other reason (e.g. being terminal), in which case we
   // should wait.
   nodes_mutex_.lock(); // write lock
-  if(! (root_node_->GetAuxEngineMove() == 0xfffe) &&
-     root_node_->GetNumEdges() > 0){
+  if(root_node_->GetNumEdges() > 0){
     // root is extended and not yet picked 
     root_node_->SetAuxEngineMove(0xfffe); // mark root as pending and queue it
     auxengine_mutex_.lock(); 

@@ -238,7 +238,13 @@ void Search::DoAuxEngine(Node* n) {
 
   auto auxengine_start_time = std::chrono::steady_clock::now();
   auxengine_os_ << s << std::endl;
-  auxengine_os_ << "go movetime " << params_.GetAuxEngineTime() << std::endl;  
+  // use go depth when there are few pieces left on the board.
+  if((my_board.ours() | my_board.theirs()).count() < 20){
+    // auxengine_os_ << "go depth " << params_.GetAuxEngineTime() << std::endl;
+    auxengine_os_ << "go depth 18" << std::endl;    
+  } else {
+    auxengine_os_ << "go movetime " << params_.GetAuxEngineTime() << std::endl;
+  }
 
   auxengine_stopped_mutex_.lock();
   if(auxengine_stopped_){

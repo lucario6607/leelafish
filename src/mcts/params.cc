@@ -329,9 +329,15 @@ const OptionId SearchParams::kAuxEngineThresholdId{
 const OptionId SearchParams::kAuxEngineTimeId{
     "auxengine-time", "AuxEngineTime",
     "Time (in milliseconds) for the auxiliary engine to search."};
+const OptionId SearchParams::kAuxEngineDepthId{
+    "auxengine-depth", "AuxEngineDepth",
+    "Depth for the auxiliary engine search."};
 const OptionId SearchParams::kAuxEngineVerbosityId{
     "auxengine-verbosity", "AuxEngineVerbosity",
     "Higher number for more logging."};
+const OptionId SearchParams::kAuxEngineFollowPvDepthId{
+    "auxengine-follow-pv-depth", "AuxEngineFollowPvDepth",
+    "Trust the PVs given by the helper to this depth."};
 
 void SearchParams::Populate(OptionsParser* options) {
   // Here the uci optimized defaults" are set.
@@ -432,10 +438,12 @@ void SearchParams::Populate(OptionsParser* options) {
   options->HideOption(kTemperatureWinpctCutoffId);
   options->HideOption(kTemperatureVisitOffsetId);
   options->Add<StringOption>(kAuxEngineFileId);
-  options->Add<StringOption>(kAuxEngineOptionsId);
+  options->Add<StringOption>(kAuxEngineOptionsId) = "Threads=3;Hash=1024;Ponder=off";
   options->Add<IntOption>(kAuxEngineThresholdId, 1, 1000000) = 250;
   options->Add<IntOption>(kAuxEngineTimeId, 10, 10000) = 350;
+  options->Add<IntOption>(kAuxEngineDepthId, 8, 1000) = 18;
   options->Add<IntOption>(kAuxEngineVerbosityId, 0, 10) = 1;
+  options->Add<IntOption>(kAuxEngineFollowPvDepthId, 1, 100) = 10;
 }
 
 SearchParams::SearchParams(const OptionsDict& options)

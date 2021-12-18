@@ -156,7 +156,7 @@ class SearchParams {
   int GetAuxEngineVerbosity() const {
     return options_.Get<int>(kAuxEngineVerbosityId);
   }
-  int GetAuxEngineFollowPvDepthId() const {
+  int GetAuxEngineFollowPvDepth() const {
     return options_.Get<int>(kAuxEngineFollowPvDepthId);
   }
   

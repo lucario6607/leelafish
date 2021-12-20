@@ -338,6 +338,9 @@ const OptionId SearchParams::kAuxEngineVerbosityId{
 const OptionId SearchParams::kAuxEngineFollowPvDepthId{
     "auxengine-follow-pv-depth", "AuxEngineFollowPvDepth",
     "Trust the PVs given by the helper to this depth."};
+const OptionId SearchParams::kAuxEngineMaxAddedNodesId{
+    "auxengine-max-added-nodes", "AuxEngineMaxAddedNodes",
+    "Add at most this number of nodes per PV."};
 
 void SearchParams::Populate(OptionsParser* options) {
   // Here the uci optimized defaults" are set.
@@ -440,7 +443,7 @@ void SearchParams::Populate(OptionsParser* options) {
   options->Add<StringOption>(kAuxEngineFileId);
   options->Add<StringOption>(kAuxEngineOptionsId) = "Threads=3;Hash=1024;Ponder=off";
   options->Add<IntOption>(kAuxEngineThresholdId, 1, 1000000) = 100;
-  options->Add<IntOption>(kAuxEngineTimeId, 10, 10000) = 100;
+  options->Add<IntOption>(kAuxEngineTimeId, 10, 10000) = 150;
   options->Add<IntOption>(kAuxEngineDepthId, 8, 1000) = 16;
   options->Add<IntOption>(kAuxEngineVerbosityId, 0, 10) = 1;
   options->Add<IntOption>(kAuxEngineFollowPvDepthId, 1, 100) = 6;

@@ -159,6 +159,9 @@ class SearchParams {
   int GetAuxEngineFollowPvDepth() const {
     return options_.Get<int>(kAuxEngineFollowPvDepthId);
   }
+  int GetAuxEngineMaxAddedNodes() const {
+    return options_.Get<int>(kAuxEngineMaxAddedNodesId);
+  }
   
 
   // Search parameter IDs.
@@ -230,6 +233,7 @@ class SearchParams {
   static const OptionId kAuxEngineTimeId;
   static const OptionId kAuxEngineVerbosityId;
   static const OptionId kAuxEngineFollowPvDepthId;
+  static const OptionId kAuxEngineMaxAddedNodesId;
 
  private:
   const OptionsDict& options_;

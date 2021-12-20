@@ -327,9 +327,17 @@ void Search::DoAuxEngine(Node* n) {
   flip = played_history_.IsBlackToMove() ^ (depth % 2 == 0);
 
   auto bestmove_packed_int = Move(token, !flip).as_packed_int();
-  // depth is distance between root and the starting point for the auxengine
-  // params_.GetAuxEngineDepth() is the depth of the requested search
-  // The actual PV is often times longer, whether or not to use those extra plies is an open question.
+  // depth is distance between root and the starting point for the
+  // auxengine params_.GetAuxEngineDepth() is the depth of the
+  // requested search The actual PV is often times longer, whether or
+  // not to use those extra plies is an open question.
+
+  // For now, decide this in PreExtend..() where it is know how many
+  // plies Leela had already extended this line. Here we know the
+  // distance between root and the start of the PV (which is not know
+  // in PreExtend()) and here we use that to cut the PV at
+  // params_.GetAuxEngineFollowPvDepth().
+
   int pv_length = 1;
   int max_pv_length = depth + params_.GetAuxEngineFollowPvDepth();  
   LOGFILE << "capping PV at length: " << max_pv_length << ", sum of depth = " << depth << " and AuxEngineDepth = " << params_.GetAuxEngineFollowPvDepth();

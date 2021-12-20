@@ -446,7 +446,8 @@ void SearchParams::Populate(OptionsParser* options) {
   options->Add<IntOption>(kAuxEngineTimeId, 10, 10000) = 150;
   options->Add<IntOption>(kAuxEngineDepthId, 8, 1000) = 16;
   options->Add<IntOption>(kAuxEngineVerbosityId, 0, 10) = 1;
-  options->Add<IntOption>(kAuxEngineFollowPvDepthId, 1, 100) = 6;
+  options->Add<IntOption>(kAuxEngineFollowPvDepthId, 1, 100) = 16;
+  options->Add<IntOption>(kAuxEngineMaxAddedNodesId, 1, 100) = 8;  
 }
 
 SearchParams::SearchParams(const OptionsDict& options)

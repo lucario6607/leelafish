@@ -337,10 +337,14 @@ const OptionId SearchParams::kAuxEngineVerbosityId{
     "Higher number for more logging."};
 const OptionId SearchParams::kAuxEngineFollowPvDepthId{
     "auxengine-follow-pv-depth", "AuxEngineFollowPvDepth",
-    "Trust the PVs given by the helper to this depth."};
+      "Trust the PVs given by the helper to this depth. "
+      "Nodes deeper than this depth will never be added."};
 const OptionId SearchParams::kAuxEngineMaxAddedNodesId{
     "auxengine-max-added-nodes", "AuxEngineMaxAddedNodes",
-    "Add at most this number of nodes per PV."};
+      "The max number of nodes to add from a helper PV is "
+      "this numer times AuxEngineFollowPvDepth, rounded down "
+      "to nearest integer. The default values (16; 0.75) "
+      "results in maximum 12 new nodes added per PV."};
 
 void SearchParams::Populate(OptionsParser* options) {
   // Here the uci optimized defaults" are set.
@@ -447,7 +451,7 @@ void SearchParams::Populate(OptionsParser* options) {
   options->Add<IntOption>(kAuxEngineDepthId, 8, 1000) = 16;
   options->Add<IntOption>(kAuxEngineVerbosityId, 0, 10) = 1;
   options->Add<IntOption>(kAuxEngineFollowPvDepthId, 1, 100) = 16;
-  options->Add<IntOption>(kAuxEngineMaxAddedNodesId, 1, 100) = 8;  
+  options->Add<FloatOption>(kAuxEngineMaxAddedNodesId, 0, 1) = 0.75;  
 }
 
 SearchParams::SearchParams(const OptionsDict& options)

@@ -238,10 +238,9 @@ void Search::DoAuxEngine(Node* n) {
 
   auto auxengine_start_time = std::chrono::steady_clock::now();
   auxengine_os_ << s << std::endl;
-  // use go depth when there are few pieces left on the board.
+  // use go depth when there are few pieces left on the board. 20 pieces hardcoded for now.
   if((my_board.ours() | my_board.theirs()).count() < 20){
-    // auxengine_os_ << "go depth " << params_.GetAuxEngineTime() << std::endl;
-    auxengine_os_ << "go depth 18" << std::endl;    
+    auxengine_os_ << "go depth " << params_.GetAuxEngineDepth() << std::endl;
   } else {
     auxengine_os_ << "go movetime " << params_.GetAuxEngineTime() << std::endl;
   }
@@ -294,7 +293,7 @@ void Search::DoAuxEngine(Node* n) {
     // TODO: actually do use the result, if the depth achieved was the
     // requested depth and the line is actually played.
 
-    // Don't use results of a search that was stopped.
+    // For now don't use results of a search that was stopped.
     LOGFILE << "AUX Search was interrupted, the results will not be used";
     return;
   }
@@ -328,25 +327,25 @@ void Search::DoAuxEngine(Node* n) {
 
   auto bestmove_packed_int = Move(token, !flip).as_packed_int();
   // depth is distance between root and the starting point for the
-  // auxengine params_.GetAuxEngineDepth() is the depth of the
-  // requested search The actual PV is often times longer, whether or
-  // not to use those extra plies is an open question.
-
-  // For now, decide this in PreExtend..() where it is know how many
-  // plies Leela had already extended this line. Here we know the
-  // distance between root and the start of the PV (which is not know
-  // in PreExtend()) and here we use that to cut the PV at
-  // params_.GetAuxEngineFollowPvDepth().
-
-  int pv_length = 1;
-  int max_pv_length = depth + params_.GetAuxEngineFollowPvDepth();  
-  LOGFILE << "capping PV at length: " << max_pv_length << ", sum of depth = " << depth << " and AuxEngineDepth = " << params_.GetAuxEngineFollowPvDepth();
+  // auxengine.
+  // depth_reached records the depth the helper claim to have search.
+  // The PV is capped at this length (and can be shortened again in PreExt..()
 
   fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before starting to modify it
-  
+
+  int pv_length = 1;
+  int depth_reached = 0;
+
   while(iss >> pv >> std::ws) {
+    if (pv == "depth") {
+      // Figure out which depth was reached (can be zero).
+      iss >> depth_reached >> std::ws;
+      LOGFILE << "Reached depth: " << depth_reached;
+    }
     if (pv == "pv") {
-      while(iss >> pv >> std::ws) {
+      while(iss >> pv >> std::ws &&
+	    pv_length < depth_reached &&
+	    pv_length < params_.GetAuxEngineFollowPvDepth()) {
         Move m;
         if (!Move::ParseMove(&m, pv, !flip)) {	
           if (params_.GetAuxEngineVerbosity() >= 2) {
@@ -372,7 +371,7 @@ void Search::DoAuxEngine(Node* n) {
 	my_moves_from_the_white_side.push_back(m_in_modern_encoding); // Add the PV to the queue	
         pv_moves.push_back(m_in_modern_encoding.as_packed_int());
         flip = !flip;
-	if(pv_length == max_pv_length) break;
+	// if(pv_length == max_pv_length) break;
 	pv_length++;
       }
     }

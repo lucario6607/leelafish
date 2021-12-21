@@ -160,9 +160,8 @@ class SearchParams {
     return options_.Get<int>(kAuxEngineFollowPvDepthId);
   }
   int GetAuxEngineMaxAddedNodes() const {
-    return options_.Get<int>(kAuxEngineMaxAddedNodesId);
+    return options_.Get<float>(kAuxEngineMaxAddedNodesId);
   }
-  
 
   // Search parameter IDs.
   static const OptionId kMiniBatchSizeId;

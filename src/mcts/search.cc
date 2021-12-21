@@ -1249,10 +1249,6 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	// copy the part of my_moves that makes up the history of this node
 	std::vector<lczero::Move> moves_to_this_node;
 	std::copy_n(my_moves.begin(), ply+1, std::back_inserter(moves_to_this_node));
-	// check that copy_n() works like this, might be a one-off error. Checked: it was fine.
-	// for(int i=0; i < ply+1; i++){
-	//   LOGFILE << "moves_to_this_node[" << i << "]=" << (my_moves.begin()+i)->as_string() << " my_moves[" << i << "]=" << my_moves[i].as_string();
-	// }
 	
 	// unlock the read lock on nodes so that ExtendNode() can get a write lock.
 	search_->nodes_mutex_.unlock_shared();
@@ -1261,18 +1257,8 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	// Get a read lock again
 	search_->nodes_mutex_.lock_shared();
 
-	// // Verify that the newly created node has the edge to it that we intended
-	// if(child_node->GetOwnEdge()->GetMove() == edge.GetMove()){
-	//   LOGFILE << "Expected: " << edge.GetMove().as_string() << " got: " << child_node->GetOwnEdge()->GetMove().as_string();
-	//   LOGFILE << "node has correct OwnEdge move";
-	// } else {
-	//   throw Exception("node has incorrect OwnEdge move!");
-	// }
-	
 	// queue for NN evaluation.
 	LOGFILE << "Adding newly extended node: " << child_node->DebugString() << " to the minibatch_";
-
-	// Visit() only returns stuff for the minibatch_ it does not modify the node, so the read lock is sufficient here.
 
 	bool is_terminal=child_node->IsTerminal(); // while we have the read lock.
 
@@ -1314,10 +1300,11 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 
 	// unlock the readlock.
 	search_->nodes_mutex_.unlock_shared();
-	if(nodes_added == params_.GetAuxEngineMaxAddedNodes()){
+	if(nodes_added >= params_.GetAuxEngineFollowPvDepth() * params_.GetAuxEngineMaxAddedNodes()){
 	  LOGFILE << "Stopping adding nodes at depth " << ply << " since number of already added nodes from this PV is " << nodes_added;
 	}
-	if (!is_terminal && nodes_added < params_.GetAuxEngineMaxAddedNodes()){ // Don't add more than this number of nodes at a time in a line.
+	// Don't add more than this number of nodes at a time in a line.
+	if (!is_terminal && nodes_added < params_.GetAuxEngineFollowPvDepth() * params_.GetAuxEngineMaxAddedNodes()){
 	  if((int) my_moves.size() > ply+1){
 	    // Go deeper.
 	    PreExtendTreeAndFastTrackForNNEvaluation_inner(child_node, my_moves, ply+1, nodes_added);

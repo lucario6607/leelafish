@@ -1300,8 +1300,8 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 
 	// unlock the readlock.
 	search_->nodes_mutex_.unlock_shared();
-	if(nodes_added >= params_.GetAuxEngineFollowPvDepth() * params_.GetAuxEngineMaxAddedNodes()){
-	  LOGFILE << "Stopping adding nodes at depth " << ply << " since number of already added nodes from this PV is " << nodes_added;
+	if(nodes_added >= floor(params_.GetAuxEngineFollowPvDepth() * params_.GetAuxEngineMaxAddedNodes())){
+	  LOGFILE << "Stopping adding nodes at depth " << ply << " since number of already added nodes from this PV is " << nodes_added << " and the limit is the floor of the product of " << params_.GetAuxEngineFollowPvDepth() << " and " << params_.GetAuxEngineMaxAddedNodes();
 	}
 	// Don't add more than this number of nodes at a time in a line.
 	if (!is_terminal && nodes_added < params_.GetAuxEngineFollowPvDepth() * params_.GetAuxEngineMaxAddedNodes()){

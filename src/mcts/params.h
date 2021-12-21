@@ -159,7 +159,7 @@ class SearchParams {
   int GetAuxEngineFollowPvDepth() const {
     return options_.Get<int>(kAuxEngineFollowPvDepthId);
   }
-  int GetAuxEngineMaxAddedNodes() const {
+  float GetAuxEngineMaxAddedNodes() const {
     return options_.Get<float>(kAuxEngineMaxAddedNodesId);
   }
 

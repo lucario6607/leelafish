@@ -58,14 +58,25 @@ void Search::OpenAuxEngine() REQUIRES(threads_mutex_) {
 void SearchWorker::AuxMaybeEnqueueNode(Node* n) {
   // the caller (DoBackupUpdate()->DoBackupUpdateSingleNode()) has a lock on search_->nodes_mutex_, so no other thread will change n right now.
 
-  // TODO change name to AuxEnqueueNode since the choice is moved to the caller now.
+  // if the queue is alredy filled, then only add the node if it is low depth
+  search_->auxengine_mutex_.lock();
+  if(search_->auxengine_queue_.size() > 0){
+    // find the depth of the current node.
+    int depth = 0;
+    if(n != search_->root_node_){
+      for (Node* n2 = n; n2 != search_->root_node_; n2 = n2->GetParent()) {
+	depth++;
+      }
+    }
+    if(depth > params_.GetAuxEngineMaxQueryDepth()){
+      search_->auxengine_mutex_.unlock();      
+      return;
+    }
+  }
   
-  LOGFILE << "AuxMaybeEnqueueNode() picked node: " << n->DebugString() << " for the auxengine_queue.";
+  LOGFILE << "AuxMaybeEnqueueNode() picked node: " << n->DebugString() << " for the auxengine_queue which has size: " << search_->auxengine_queue_.size();
 
   n->SetAuxEngineMove(0xfffe); // magic for pending
-
-  search_->auxengine_mutex_.lock();
-  LOGFILE << "Size of search_->auxengine_queue_ is " << search_->auxengine_queue_.size();
   search_->auxengine_queue_.push(n);
   search_->auxengine_cv_.notify_one();
   search_->auxengine_mutex_.unlock();
@@ -125,6 +136,8 @@ void Search::AuxEngineWorker() {
     auxengine_queue_.push(root_node_);
     auxengine_cv_.notify_one();
     auxengine_mutex_.unlock();
+    // if root has children, queue those too. (since we can only queue _nodes_ we can not unconditionally queue all _edges_ of root).
+    
   }
   nodes_mutex_.unlock(); // write unlock
 
@@ -132,7 +145,6 @@ void Search::AuxEngineWorker() {
   while (!stop_.load(std::memory_order_acquire)) {
     {
   	std::unique_lock<std::mutex> lock(auxengine_mutex_);
-  	// auxengine_mutex_.lock(); 
   	// Wait until there's some work to compute.
   	auxengine_cv_.wait(lock, [&] { return stop_.load(std::memory_order_acquire) || !auxengine_queue_.empty(); });
   	if (stop_.load(std::memory_order_acquire)) {
@@ -340,7 +352,7 @@ void Search::DoAuxEngine(Node* n) {
     if (pv == "depth") {
       // Figure out which depth was reached (can be zero).
       iss >> depth_reached >> std::ws;
-      LOGFILE << "Reached depth: " << depth_reached;
+      LOGFILE << "Reached depth: " << depth_reached << " for node with depth: " << depth;
     }
     if (pv == "pv") {
       while(iss >> pv >> std::ws &&
@@ -396,6 +408,10 @@ void Search::DoAuxEngine(Node* n) {
   
   fast_track_extend_and_evaluate_queue_.push(my_moves_from_the_white_side); // I think push() means push_back for queues.
   fast_track_extend_and_evaluate_queue_mutex_.unlock();
+
+  //
+  // n->SetAuxEngineMove(0xffff); // no longer pending
+  // LOGFILE << "Set AuxEngineMove back to 0xffff for node " << n->DebugString();
   LOGFILE << "Returning from DoAuxEngine()";
 }
 

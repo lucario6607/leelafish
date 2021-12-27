@@ -162,6 +162,9 @@ class SearchParams {
   float GetAuxEngineMaxAddedNodes() const {
     return options_.Get<float>(kAuxEngineMaxAddedNodesId);
   }
+  int GetAuxEngineMaxQueryDepth() const {
+    return options_.Get<int>(kAuxEngineMaxQueryDepthId);
+  }
 
   // Search parameter IDs.
   static const OptionId kMiniBatchSizeId;
@@ -233,6 +236,7 @@ class SearchParams {
   static const OptionId kAuxEngineVerbosityId;
   static const OptionId kAuxEngineFollowPvDepthId;
   static const OptionId kAuxEngineMaxAddedNodesId;
+  static const OptionId kAuxEngineMaxQueryDepthId;
 
  private:
   const OptionsDict& options_;

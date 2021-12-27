@@ -345,7 +345,12 @@ const OptionId SearchParams::kAuxEngineMaxAddedNodesId{
       "this numer times AuxEngineFollowPvDepth, rounded down "
       "to nearest integer. The default values (16; 0.75) "
       "results in maximum 12 new nodes added per PV."};
-
+const OptionId SearchParams::kAuxEngineMaxQueryDepthId{
+    "auxengine-max-query-depth", "AuxEngineMaxQueryDepth",
+      "Nodes at depth higher than this number will only be "
+      "added the query-queue for the helper engine if the "
+      "query-queue is empty."};
+  
 void SearchParams::Populate(OptionsParser* options) {
   // Here the uci optimized defaults" are set.
   // Many of them are overridden with training specific values in tournament.cc.
@@ -446,12 +451,13 @@ void SearchParams::Populate(OptionsParser* options) {
   options->HideOption(kTemperatureVisitOffsetId);
   options->Add<StringOption>(kAuxEngineFileId);
   options->Add<StringOption>(kAuxEngineOptionsId) = "Threads=3;Hash=1024;Ponder=off";
-  options->Add<IntOption>(kAuxEngineThresholdId, 1, 1000000) = 100;
-  options->Add<IntOption>(kAuxEngineTimeId, 10, 10000) = 100;
-  options->Add<IntOption>(kAuxEngineDepthId, 8, 1000) = 16;
+  options->Add<IntOption>(kAuxEngineThresholdId, 1, 1000000) = 80;
+  options->Add<IntOption>(kAuxEngineTimeId, 10, 10000) = 125;
+  options->Add<IntOption>(kAuxEngineDepthId, 8, 1000) = 17;
   options->Add<IntOption>(kAuxEngineVerbosityId, 0, 10) = 1;
   options->Add<IntOption>(kAuxEngineFollowPvDepthId, 1, 100) = 16;
-  options->Add<FloatOption>(kAuxEngineMaxAddedNodesId, 0.0f, 1.0f) = 0.5f;  
+  options->Add<FloatOption>(kAuxEngineMaxAddedNodesId, 0.0f, 1.0f) = 1.0f;
+  options->Add<IntOption>(kAuxEngineMaxQueryDepthId, 0, 100) = 7;
 }
 
 SearchParams::SearchParams(const OptionsDict& options)

@@ -100,6 +100,8 @@ void Benchmark::Run() {
       NodeTree tree;
       tree.ResetToPosition(position, {});
 
+      std::queue<Node*> node_queue = {}; // this is for the auxengine stats, always empty for now.
+
       const auto start = std::chrono::steady_clock::now();
       auto search = std::make_unique<Search>(
           tree, network.get(),
@@ -107,7 +109,7 @@ void Benchmark::Run() {
               std::bind(&Benchmark::OnBestMove, this, std::placeholders::_1),
               std::bind(&Benchmark::OnInfo, this, std::placeholders::_1)),
           MoveList(), start, std::move(stopper), false, option_dict, &cache,
-          nullptr);
+          nullptr, &node_queue);
       search->StartThreads(option_dict.Get<int>(kThreadsOptionId));
       search->Wait();
       const auto end = std::chrono::steady_clock::now();

@@ -89,6 +89,7 @@ EngineController::EngineController(std::unique_ptr<UciResponder> uci_responder,
                                    const OptionsDict& options)
     : options_(options),
       uci_responder_(std::move(uci_responder)),
+      ec_nodes_added_by_the_auxengine_{},
       current_position_{ChessBoard::kStartposFen, {}} {}
 
 void EngineController::PopulateOptions(OptionsParser* options) {
@@ -205,6 +206,8 @@ void EngineController::SetupPosition(
   UpdateFromUciOptions();
 
   if (!tree_) tree_ = std::make_unique<NodeTree>();
+  // reset/initiate auxengine_stats whenever a new position is setup
+  // ec_nodes_added_by_the_auxengine_ = {};
 
   std::vector<Move> moves;
   for (const auto& move : moves_str) moves.emplace_back(move);
@@ -293,11 +296,12 @@ void EngineController::Go(const GoParams& params) {
   }
 
   auto stopper = time_manager_->GetStopper(params, *tree_.get());
+  LOGFILE << "Size of added nodes: " << ec_nodes_added_by_the_auxengine_.size() << " address of added nodes: " << &ec_nodes_added_by_the_auxengine_;
   search_ = std::make_unique<Search>(
       *tree_, network_.get(), std::move(responder),
       StringsToMovelist(params.searchmoves, tree_->HeadPosition().GetBoard()),
       *move_start_time_, std::move(stopper), params.infinite || params.ponder,
-      options_, &cache_, syzygy_tb_.get());
+      options_, &cache_, syzygy_tb_.get(), &ec_nodes_added_by_the_auxengine_);
   // AuxEngine needs the UCI string of the position.
   // assert(current_position_);
   search_->current_position_fen_ = current_position_.fen;

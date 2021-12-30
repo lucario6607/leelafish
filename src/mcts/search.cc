@@ -151,7 +151,8 @@ Search::Search(const NodeTree& tree, Network* network,
                std::chrono::steady_clock::time_point start_time,
                std::unique_ptr<SearchStopper> stopper, bool infinite,
                const OptionsDict& options, NNCache* cache,
-               SyzygyTablebase* syzygy_tb)
+               SyzygyTablebase* syzygy_tb,
+	       std::queue<Node*>* nodes_added_by_the_auxengine)
     : ok_to_respond_bestmove_(!infinite),
       stopper_(std::move(stopper)),
       root_node_(tree.GetCurrentHead()),
@@ -162,6 +163,7 @@ Search::Search(const NodeTree& tree, Network* network,
       params_(options),
       searchmoves_(searchmoves),
       start_time_(start_time),
+      nodes_added_by_the_auxengine_(nodes_added_by_the_auxengine),
       initial_visits_(root_node_->GetN()),
       root_move_filter_(MakeRootMoveFilter(
           searchmoves_, syzygy_tb_, played_history_,
@@ -171,6 +173,7 @@ Search::Search(const NodeTree& tree, Network* network,
     pending_searchers_.store(params_.GetMaxConcurrentSearchers(),
                              std::memory_order_release);
   }
+  LOGFILE << "Search called with nodes_added_by_the_auxengine of size: " << nodes_added_by_the_auxengine_->size() << " at address " << nodes_added_by_the_auxengine_;
 }
 
 namespace {
@@ -557,12 +560,88 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     stopper_->OnSearchDone(stats);
     bestmove_is_sent_ = true;
     current_best_edge_ = EdgeAndNode();
+
+    // For fun: Was the move we just sent added by the helper engine?
+    // TODO: use a full struct with a reference both to the added node, and to its parent instead of a simple queue.
+    // Compare the output of GetParent() with the stored reference to the parent to decide whether or not this node is still valid.
+    // LOGFILE << "final_bestmove: " << final_bestmove_.as_string() << " address for the queue: " << nodes_added_by_the_auxengine_;
+    // if(nodes_added_by_the_auxengine_->size() > 0){
+    //   LOGFILE << "About to purge nodes no longer connected to the move we just sent, size of the queue before purging: " << nodes_added_by_the_auxengine_->size();
+    //   // Also, remove obsolete nodes from the list of nodes added by the helper engine
+    //   std::queue<Node*> nodes_added_by_the_auxengine_temp_;
+    //   int lowest_depth = 1000;
+    //   long unsigned int my_size = nodes_added_by_the_auxengine_->size();      
+    //   for(long unsigned int i=0; i < my_size; i++){
+    // 	// is this node connected to future_root?
+    // 	// if so, put it in nodes_added_by_the_auxengine_temp_
+    // 	LOGFILE << "about to read the first element from nodes_added_by_the_auxengine_, i: " << i;
+    // 	Node * n = nodes_added_by_the_auxengine_->front(); // read the element
+    // 	LOGFILE << "read the first element from nodes_added_by_the_auxengine_";	
+    // 	nodes_added_by_the_auxengine_->pop(); // remove it from the queue.
+    // 	LOGFILE << "removed the first element from nodes_added_by_the_auxengine_";
+    // 	LOGFILE << "size is now: " << nodes_added_by_the_auxengine_->size();	
+    // 	bool connected = false;
+    // 	int depth = 0;
+    // 	// n can already be deallocated at this point, but we can compare what we get with GetParent() with the element stored
+	
+    // 	if(n != nullptr && n->GetParent() == root_node_){
+    // 	  if(n->GetOwnEdge() != nullptr){
+    // 	    LOGFILE << "child of root added by the helper engine: " << n->DebugString() << " move " << n->GetOwnEdge()->GetMove().as_string();
+    // 	  } else {
+    // 	    LOGFILE << "n GetOwnEdge() is a nullptr";
+    // 	  }
+    // 	  if(n->GetOwnEdge()->GetMove() == final_bestmove_){
+    // 	    LOGFILE << "The helper engine added the selected move: " << final_bestmove_.as_string();	    
+    // 	  }
+    // 	} else { // only keep nodes deeper than children of root
+    // 	  if(n == nullptr){
+    // 	    LOGFILE << "n is null";
+    // 	  } else {
+    // 	    LOGFILE << "n is not null, good!";	    
+    // 	  }
+    // 	  for (Node* n2 = n; n2 != root_node_ && depth < 50; n2 = n2->GetParent()) {
+    // 	    depth++;
+    // 	    LOGFILE << "Depth is: " << depth << " node: " << n2->DebugString() << " n: " << n2->GetN() << " n in flight " << n2->GetNInFlight();
+    // 	    if(n2 == nullptr){
+    // 	      LOGFILE << "n2 is null, bad.";
+    // 	      break;
+    // 	    }
+    // 	    if(n2->GetParent() == nullptr){
+    // 	      LOGFILE << "null, bad. Not connected to root anymore then.";
+    // 	      break;
+    // 	    }
+    // 	    if(n2->GetParent() == root_node_){
+    // 	      connected = true;
+    // 	      LOGFILE << "That's a keeper";	    	      
+    // 	      break;
+    // 	    }
+    // 	  }
+    // 	}
+    // 	if(connected){
+    // 	  // keep this node
+    // 	  nodes_added_by_the_auxengine_temp_.push(n);
+    // 	  LOGFILE << "keeping this node: " << n->DebugString();
+    // 	}
+    // 	if(lowest_depth > depth) lowest_depth = depth;
+    //   }
+    //   // update nodes_added_by_the_auxengine_
+    //   my_size = nodes_added_by_the_auxengine_temp_.size();
+    //   for(long unsigned int i=0; i < my_size; i++){      
+    // 	nodes_added_by_the_auxengine_->push(nodes_added_by_the_auxengine_temp_.front());
+    // 	nodes_added_by_the_auxengine_temp_.pop();
+    //   }
+    //   LOGFILE << "Size of the queue after purging: " << nodes_added_by_the_auxengine_->size() << " lowest depth=" << lowest_depth << " address: " << nodes_added_by_the_auxengine_;
+    // }
+    
   }
 
+
+  
   // Use a 0 visit cancel score update to clear out any cached best edge, as
   // at the next iteration remaining playouts may be different.
   // TODO(crem) Is it really needed?
   root_node_->CancelScoreUpdate(0);
+
   if (stop_.load(std::memory_order_acquire)){
     LOGFILE << "MaybeTriggerStop() finished";
   }
@@ -1243,6 +1322,8 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	// GetOrSpawnNode() does work with the lock on since it does not modify the tree.
 	Node* child_node = edge.GetOrSpawnNode(my_node, nullptr);
 	nodes_added++;
+	// search_->nodes_added_by_the_auxengine_->push(child_node); // Keep a recorded of the added nodes, so we can measure how useful they are (or at least count how many of the moves that originate from the helper).
+	// search_->parent_for_nodes_added_by_the_auxengine_->push(my_node); // also record the parent so that we can later determine if a node is still valid or has been deallocated/overwritten.
 
 	// Create a history variable that will be filled by the four argument version of ExtendNode().
 	lczero::PositionHistory history = search_->played_history_;
@@ -1318,6 +1399,7 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	search_->nodes_mutex_.lock();
 	search_->auxengine_num_updates += nodes_added;
 	LOGFILE << "Successfully added a full PV, depth = " << ply << ", number of nodes added = " << nodes_added;
+	LOGFILE << " current size of added nodes: " << search_->nodes_added_by_the_auxengine_->size();
 	// Adjust the visits_in_flight now that we know how many nodes where actually added.
 	// Each node shall have as many visits_in_flight as there are added nodes beneath it.
 	// Increase the number of visits_in_flight to add for each generational step, until the

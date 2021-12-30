@@ -52,14 +52,18 @@
 namespace lczero {
 
 class Search {
+
  public:
+
   Search(const NodeTree& tree, Network* network,
          std::unique_ptr<UciResponder> uci_responder,
          const MoveList& searchmoves,
          std::chrono::steady_clock::time_point start_time,
          std::unique_ptr<SearchStopper> stopper, bool infinite,
          const OptionsDict& options, NNCache* cache,
-         SyzygyTablebase* syzygy_tb);
+         SyzygyTablebase* syzygy_tb,
+	 std::queue<Node*>* nodes_added_by_the_auxengine
+	 );
 
   ~Search();
 
@@ -173,6 +177,7 @@ class Search {
   Node* root_node_;
   NNCache* cache_;
   SyzygyTablebase* syzygy_tb_;
+
   // Fixed positions which happened before the search.
   const PositionHistory& played_history_;
 
@@ -180,6 +185,7 @@ class Search {
   const SearchParams params_;
   const MoveList searchmoves_;
   const std::chrono::steady_clock::time_point start_time_;
+  std::queue<Node*>* nodes_added_by_the_auxengine_; // To keep track of how many of the played moves originate from the helper.  
   int64_t initial_visits_;
   // root_is_in_dtz_ must be initialized before root_move_filter_.
   bool root_is_in_dtz_ = false;
@@ -212,6 +218,7 @@ class Search {
 
   // temporary stuff
   int64_t number_of_times_called_AuxMaybeEnqueueNode_ = 0;
+  std::queue<Node*>* parent_for_nodes_added_by_the_auxengine_; // To keep track of how many of the played moves originate from the helper.  
   
   void OpenAuxEngine();
   void AuxEngineWorker();

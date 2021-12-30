@@ -58,17 +58,17 @@ void Search::OpenAuxEngine() REQUIRES(threads_mutex_) {
 void SearchWorker::AuxMaybeEnqueueNode(Node* n) {
   // the caller (DoBackupUpdate()->DoBackupUpdateSingleNode()) has a lock on search_->nodes_mutex_, so no other thread will change n right now.
 
-  // find the depth of the current node, and only accept if depth is low enough
-  int depth = 0;
-  if(n != search_->root_node_){
-    for (Node* n2 = n; n2 != search_->root_node_; n2 = n2->GetParent()) {
-      depth++;
-    }
-  }
-  if(depth > params_.GetAuxEngineMaxQueryDepth()){
-    search_->auxengine_mutex_.unlock();      
-    return;
-  }
+  // // find the depth of the current node, and only accept if depth is low enough
+  // int depth = 0;
+  // if(n != search_->root_node_){
+  //   for (Node* n2 = n; n2 != search_->root_node_; n2 = n2->GetParent()) {
+  //     depth++;
+  //   }
+  // }
+  // if(depth > params_.GetAuxEngineMaxQueryDepth()){
+  //   search_->auxengine_mutex_.unlock();      
+  //   return;
+  // }
   
   LOGFILE << "AuxMaybeEnqueueNode() picked node: " << n->DebugString() << " for the auxengine_queue which has size: " << search_->auxengine_queue_.size();
 

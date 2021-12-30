@@ -286,6 +286,26 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
       uci_info.pv.push_back(iter.GetMove(flip));
       if (!iter.node()) break;  // Last edge was dangling, cannot continue.
       depth += 1;
+
+      // query the auxillary helper about the nodes in the PV
+      // possibly condition on the number of visits.
+      if(params_.GetAuxEngineFile() != "" &&
+	 iter.node()->GetAuxEngineMove() == 0xffff &&
+	 ! iter.node()->IsTerminal() &&
+	 iter.node()->GetN() >= (uint32_t) params_.GetAuxEngineThreshold()
+	 ){
+
+	iter.node()->SetAuxEngineMove(0xfffe); // magic for pending
+	auxengine_mutex_.lock();
+	auxengine_queue_.push(iter.node());
+	auxengine_cv_.notify_one();
+	auxengine_mutex_.unlock();
+	
+	number_of_times_called_AuxMaybeEnqueueNode_ += 1;
+	LOGFILE << " Adding a node from the PV to the helper queue: " << iter.node()->DebugString();
+      }
+
+      
     }
   }
 
@@ -1816,7 +1836,6 @@ void SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
                                          std::vector<NodeToProcess>* receiver,
                                          TaskWorkspace* workspace) {
 
-  // LOGFILE << "At PickNodesToExtendTask(), size of minibatch_" << minibatch_.size();
   // TODO: Bring back pre-cached nodes created outside locks in a way that works
   // with tasks.
   // TODO: pre-reserve visits_to_perform for expected depth and likely maximum
@@ -2050,6 +2069,24 @@ void SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
         (*visits_to_perform.back())[best_idx] += new_visits;
         cur_limit -= new_visits;
         Node* child_node = best_edge.GetOrSpawnNode(/* parent */ node, nullptr);
+
+	// if spawned and depth is low enough, then queue this new node to the auxillary helper.
+	// was the node extended or not?
+	if(child_node->GetN() == 0){
+	  // calculate depth
+	  int my_depth = 0;
+	  for (Node* n2 = child_node; n2 != search_->root_node_; n2 = n2->GetParent()) {
+	    my_depth++;
+	  }
+	  if(my_depth <= params_.GetAuxEngineMaxQueryDepth() &&
+	     params_.GetAuxEngineFile() != "" &&
+	     child_node->GetAuxEngineMove() == 0xffff &&
+	     ! child_node->IsTerminal()
+	     ){
+	    AuxMaybeEnqueueNode(child_node);
+	    search_->number_of_times_called_AuxMaybeEnqueueNode_ += 1;
+	  }
+	}
 
         // Probably best place to check for two-fold draws consistently.
         // Depth starts with 1 at root, so real depth is depth - 1.
@@ -2621,17 +2658,6 @@ void SearchWorker::DoBackupUpdateSingleNode(
           search_->current_best_edge_.GetN() <= n->GetN()))) {
       search_->current_best_edge_ =
           search_->GetBestChildNoTemperature(search_->root_node_, 0);
-    }
-    // Avoid a full function call unless it will likely actually queue the node.
-    // Do nothing if search is interrupted.
-    if(params_.GetAuxEngineFile() != "" &&
-       n->GetN() >= (uint32_t) params_.GetAuxEngineThreshold() &&
-       n->GetAuxEngineMove() == 0xffff &&
-       !n->IsTerminal() &&
-       n->HasChildren() &&
-       !search_->stop_.load(std::memory_order_acquire)){
-      AuxMaybeEnqueueNode(n);
-      search_->number_of_times_called_AuxMaybeEnqueueNode_ += 1;
     }
   }
   search_->total_playouts_ += node_to_process.multivisit;

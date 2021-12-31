@@ -58,18 +58,6 @@ void Search::OpenAuxEngine() REQUIRES(threads_mutex_) {
 void SearchWorker::AuxMaybeEnqueueNode(Node* n) {
   // the caller (DoBackupUpdate()->DoBackupUpdateSingleNode()) has a lock on search_->nodes_mutex_, so no other thread will change n right now.
 
-  // // find the depth of the current node, and only accept if depth is low enough
-  // int depth = 0;
-  // if(n != search_->root_node_){
-  //   for (Node* n2 = n; n2 != search_->root_node_; n2 = n2->GetParent()) {
-  //     depth++;
-  //   }
-  // }
-  // if(depth > params_.GetAuxEngineMaxQueryDepth()){
-  //   search_->auxengine_mutex_.unlock();      
-  //   return;
-  // }
-  
   LOGFILE << "AuxMaybeEnqueueNode() picked node: " << n->DebugString() << " for the auxengine_queue which has size: " << search_->auxengine_queue_.size();
 
   n->SetAuxEngineMove(0xfffe); // magic for pending
@@ -405,13 +393,9 @@ void Search::DoAuxEngine(Node* n) {
   fast_track_extend_and_evaluate_queue_.push(my_moves_from_the_white_side); // I think push() means push_back for queues.
   fast_track_extend_and_evaluate_queue_mutex_.unlock();
 
-  //
-  // n->SetAuxEngineMove(0xffff); // no longer pending
-  // LOGFILE << "Set AuxEngineMove back to 0xffff for node " << n->DebugString();
   LOGFILE << "Returning from DoAuxEngine()";
 }
 
-// void Search::AuxWait() REQUIRES(threads_mutex_) {
 void Search::AuxWait() {  
   LOGFILE << "AuxWait start for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
 
@@ -425,15 +409,12 @@ void Search::AuxWait() {
       << " Average duration " << (auxengine_num_evals ? (auxengine_total_dur / auxengine_num_evals) : -1.0f) << "ms"
       << " Number of evals " << auxengine_num_evals
       << " Number of added nodes " << auxengine_num_updates;
-  // TODO: For now with this simple queue method,
-  // mark unfinished nodes not done again, and delete the queue.
-  // Next search iteration will fill it again.
+  // TODO: make auxengine_queue_ persistent (or make sure PickNodesToExtendTask checks that all low depth nodes are already queried).
 
   // Assume the caller has locked nodes_mutex_
   auxengine_mutex_.lock();  
   while (!auxengine_queue_.empty()) {
     auto n = auxengine_queue_.front();
-    assert(n->GetAuxEngineMove() != 0xffff); // TODO find out why this is here!
     if (n->GetAuxEngineMove() == 0xfffe) {
       n->SetAuxEngineMove(0xffff);
     }

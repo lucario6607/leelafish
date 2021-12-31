@@ -289,10 +289,16 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
 
       // query the auxillary helper about the nodes in the PV
       // possibly condition on the number of visits.
-      if(params_.GetAuxEngineFile() != "" &&
+      // possibly only consider the PV and the second best.
+      // possibly condition on depth.
+      if(
+	 // multipv < 3 && 
+	 params_.GetAuxEngineFile() != "" &&
 	 iter.node()->GetAuxEngineMove() == 0xffff &&
-	 ! iter.node()->IsTerminal() &&
-	 iter.node()->GetN() >= (uint32_t) params_.GetAuxEngineThreshold()
+	 ! iter.node()->IsTerminal()
+	 &&
+	 iter.node()->GetN() >= (uint32_t) params_.GetAuxEngineThreshold() && // don't disturb too much
+	 depth <= params_.GetAuxEngineMaxQueryDepth() * 3 // prioritize lower depth nodes.
 	 ){
 
 	iter.node()->SetAuxEngineMove(0xfffe); // magic for pending
@@ -302,7 +308,7 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
 	auxengine_mutex_.unlock();
 	
 	number_of_times_called_AuxMaybeEnqueueNode_ += 1;
-	LOGFILE << " Adding a node from the PV to the helper queue: " << iter.node()->DebugString();
+	LOGFILE << " Adding a node from the PV (rank: " << multipv << ") at depth " << depth << " to the helper queue";
       }
 
       
@@ -2078,7 +2084,8 @@ void SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	  for (Node* n2 = child_node; n2 != search_->root_node_; n2 = n2->GetParent()) {
 	    my_depth++;
 	  }
-	  if(my_depth <= params_.GetAuxEngineMaxQueryDepth() &&
+	  // Allow slightly higher depth if the helper is at rest.
+	  if((my_depth <= params_.GetAuxEngineMaxQueryDepth() || (search_->auxengine_queue_.size() == 0 && my_depth <= params_.GetAuxEngineMaxQueryDepth() + 2)) &&
 	     params_.GetAuxEngineFile() != "" &&
 	     child_node->GetAuxEngineMove() == 0xffff &&
 	     ! child_node->IsTerminal()

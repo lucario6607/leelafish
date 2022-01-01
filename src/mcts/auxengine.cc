@@ -1,6 +1,6 @@
 /*
   This file is part of Leela Chess Zero.
-  Copyright (C) 2019 The LCZero Authors
+  Copyright (C) 2022 The LCZero Authors
 
   Leela Chess is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -58,10 +58,10 @@ void Search::OpenAuxEngine() REQUIRES(threads_mutex_) {
 void SearchWorker::AuxMaybeEnqueueNode(Node* n) {
   // the caller (DoBackupUpdate()->DoBackupUpdateSingleNode()) has a lock on search_->nodes_mutex_, so no other thread will change n right now.
 
-  LOGFILE << "AuxMaybeEnqueueNode() picked node: " << n->DebugString() << " for the auxengine_queue which has size: " << search_->auxengine_queue_.size();
+  LOGFILE << "AuxMaybeEnqueueNode() picked node: " << n->DebugString() << " for the persistent_queue_of_nodes_ which has size: " << search_->persistent_queue_of_nodes_->size();
 
   n->SetAuxEngineMove(0xfffe); // magic for pending
-  search_->auxengine_queue_.push(n);
+  search_->persistent_queue_of_nodes_->push(n);
   search_->auxengine_cv_.notify_one();
   search_->auxengine_mutex_.unlock();
 }
@@ -106,6 +106,28 @@ void Search::AuxEngineWorker() {
       }
     }
     auxengine_ready_ = true;
+  } else {
+    // purge obsolete nodes in the queue, if any. The even elements are the actual nodes, the odd elements is root if the preceding even element is still a relevant node.
+    if(persistent_queue_of_nodes_->size() > 0){
+      std::queue<Node*> persistent_queue_of_nodes_temp_;
+      long unsigned int my_size = persistent_queue_of_nodes_->size();      
+      for(long unsigned int i=0; i < my_size; i = i + 2){
+	Node * n = persistent_queue_of_nodes_->front();
+	persistent_queue_of_nodes_->pop();
+	Node * n_parent = persistent_queue_of_nodes_->front();
+	persistent_queue_of_nodes_->pop();
+	if(n_parent == root_node_){
+	  // node is still relevant
+	  persistent_queue_of_nodes_temp_.push(n);
+	}
+      }
+      // update persistent_queue_of_nodes_
+      my_size = persistent_queue_of_nodes_temp_.size();
+      for(long unsigned int i=0; i < my_size; i++){      
+    	persistent_queue_of_nodes_->push(persistent_queue_of_nodes_temp_.front());
+    	persistent_queue_of_nodes_temp_.pop();
+      }
+    }
   }
 
   // Kickstart with the root node, no need to wait for it to get some
@@ -117,7 +139,7 @@ void Search::AuxEngineWorker() {
     // root is extended.
     root_node_->SetAuxEngineMove(0xfffe); // mark root as pending and queue it
     auxengine_mutex_.lock(); 
-    auxengine_queue_.push(root_node_);
+    persistent_queue_of_nodes_->push(root_node_);
     auxengine_cv_.notify_one();
     auxengine_mutex_.unlock();
     // if root has children, queue those too. (since we can only queue _nodes_ we can not unconditionally queue all _edges_ of root).
@@ -130,13 +152,13 @@ void Search::AuxEngineWorker() {
     {
   	std::unique_lock<std::mutex> lock(auxengine_mutex_);
   	// Wait until there's some work to compute.
-  	auxengine_cv_.wait(lock, [&] { return stop_.load(std::memory_order_acquire) || !auxengine_queue_.empty(); });
+  	auxengine_cv_.wait(lock, [&] { return stop_.load(std::memory_order_acquire) || !persistent_queue_of_nodes_->empty(); });
   	if (stop_.load(std::memory_order_acquire)) {
   	  auxengine_mutex_.unlock(); 	
   	  break;
   	}
-  	n = auxengine_queue_.front();
-  	auxengine_queue_.pop();
+  	n = persistent_queue_of_nodes_->front();
+  	persistent_queue_of_nodes_->pop();
     } // release lock
     DoAuxEngine(n);
     ++number_of_pvs_delivered;
@@ -166,7 +188,7 @@ void Search::DoAuxEngine(Node* n) {
     nodes_mutex_.lock_shared();
     for (Node* n2 = n; n2 != root_node_; n2 = n2->GetParent()) {
       depth++;
-      if(n2 == nullptr){
+      if(n2 == nullptr || depth > params_.GetAuxEngineMaxQueryDepth() * 2){ // safety net. TODO check against parent of root or some known root.
 	LOGFILE << "1. Could not reach root";
 	nodes_mutex_.unlock_shared();
 	return;
@@ -405,23 +427,10 @@ void Search::AuxWait() {
     auxengine_threads_.back().join();
     auxengine_threads_.pop_back();
   }
-  LOGFILE << "Summaries per move: auxengine_queue_ size at the end of search: " << auxengine_queue_.size()
+  LOGFILE << "Summaries per move: persistent_queue_of_nodes__ size at the end of search: " << persistent_queue_of_nodes_->size()
       << " Average duration " << (auxengine_num_evals ? (auxengine_total_dur / auxengine_num_evals) : -1.0f) << "ms"
       << " Number of evals " << auxengine_num_evals
       << " Number of added nodes " << auxengine_num_updates;
-  // TODO: make auxengine_queue_ persistent (or make sure PickNodesToExtendTask checks that all low depth nodes are already queried).
-
-  // Assume the caller has locked nodes_mutex_
-  auxengine_mutex_.lock();  
-  while (!auxengine_queue_.empty()) {
-    auto n = auxengine_queue_.front();
-    if (n->GetAuxEngineMove() == 0xfffe) {
-      n->SetAuxEngineMove(0xffff);
-    }
-    auxengine_queue_.pop();
-  }
-  
-  auxengine_mutex_.unlock();
   
   // Empty the other queue.
   fast_track_extend_and_evaluate_queue_mutex_.lock();

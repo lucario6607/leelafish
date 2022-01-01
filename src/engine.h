@@ -99,7 +99,7 @@ class EngineController {
   std::unique_ptr<Network> network_;
   NNCache cache_;
 
-  std::queue<Node*> ec_nodes_added_by_the_auxengine_; // To keep track of how many of the played moves originate from the helper.
+  std::queue<Node*> persistent_queue_of_nodes_;
 
   // Store current TB and network settings to track when they change so that
   // they are reloaded.

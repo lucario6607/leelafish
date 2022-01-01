@@ -62,7 +62,7 @@ class Search {
          std::unique_ptr<SearchStopper> stopper, bool infinite,
          const OptionsDict& options, NNCache* cache,
          SyzygyTablebase* syzygy_tb,
-	 std::queue<Node*>* nodes_added_by_the_auxengine
+	 std::queue<Node*>* persistent_queue_of_nodes
 	 );
 
   ~Search();
@@ -185,7 +185,7 @@ class Search {
   const SearchParams params_;
   const MoveList searchmoves_;
   const std::chrono::steady_clock::time_point start_time_;
-  std::queue<Node*>* nodes_added_by_the_auxengine_; // To keep track of how many of the played moves originate from the helper.  
+  std::queue<Node*>* persistent_queue_of_nodes_;
   int64_t initial_visits_;
   // root_is_in_dtz_ must be initialized before root_move_filter_.
   bool root_is_in_dtz_ = false;
@@ -218,7 +218,6 @@ class Search {
 
   // temporary stuff
   int64_t number_of_times_called_AuxMaybeEnqueueNode_ = 0;
-  std::queue<Node*>* parent_for_nodes_added_by_the_auxengine_; // To keep track of how many of the played moves originate from the helper.  
   
   void OpenAuxEngine();
   void AuxEngineWorker();
@@ -229,7 +228,8 @@ class Search {
   static boost::process::opstream auxengine_os_;
   static boost::process::child auxengine_c_;
   static bool auxengine_ready_;
-  std::queue<Node*> auxengine_queue_;
+  // nodes_added_by_the_auxengine_
+  // std::queue<Node*> auxengine_queue_;
   std::mutex fast_track_extend_and_evaluate_queue_mutex_;
   std::queue<std::vector<Move>> fast_track_extend_and_evaluate_queue_ GUARDED_BY(fast_track_extend_and_evaluate_queue_mutex_); // for now only used by aux-engine, but could be used by a UCI extension: searchline eg. `go nodes 1000 searchline e2e4 c7c5 g1f3`
   // std::mutex debug_nodes_added_by_aux_queue_mutex_;

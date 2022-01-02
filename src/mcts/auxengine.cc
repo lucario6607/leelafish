@@ -109,6 +109,9 @@ void Search::AuxEngineWorker() {
     // Set the time to use, based on the UCI parameter
     search_stats_->AuxEngineTime = params_.GetAuxEngineTime();
   } else {
+    // If newgame then engine.cc will set search_stats_->AuxEngineTime to zero, and we have to set it to the parameter value (which is not available to engine.cc)
+    if(search_stats_->AuxEngineTime == 0) search_stats_->AuxEngineTime = params_.GetAuxEngineTime();
+    
     // purge obsolete nodes in the queue, if any. The even elements are the actual nodes, the odd elements is root if the preceding even element is still a relevant node.
     if(persistent_queue_of_nodes_->size() > 0){
       std::queue<Node*> persistent_queue_of_nodes_temp_;
@@ -429,19 +432,29 @@ void Search::AuxWait() {
     auxengine_threads_.back().join();
     auxengine_threads_.pop_back();
   }
-  if(persistent_queue_of_nodes_->size() == 0){
-    // increase time since all queue was empty at move selection time
-    search_stats_->AuxEngineTime = search_stats_->AuxEngineTime * 1.1;
-  }
-  if(persistent_queue_of_nodes_->size() > 100){
-    // increase time since all queue was empty at move selection time
-    search_stats_->AuxEngineTime = search_stats_->AuxEngineTime * 0.9;
-  }
-  LOGFILE << "Summaries per move: persistent_queue_of_nodes_ size at the end of search: " << persistent_queue_of_nodes_->size()
+  ChessBoard my_board = played_history_.Last().GetBoard();
+  if((my_board.ours() | my_board.theirs()).count() < 20){
+    if(persistent_queue_of_nodes_->size() < auxengine_num_evals * 0.1){ 
+      // increase time if more than 90% of all queued nodes were delivered
+      search_stats_->AuxEngineTime = search_stats_->AuxEngineTime * 1.1;
+    }
+    if(persistent_queue_of_nodes_->size() > auxengine_num_evals * 0.5){
+      // decrease time if queue is greater than half of the number of delivered PVs
+      search_stats_->AuxEngineTime = search_stats_->AuxEngineTime * 0.9;
+    }
+    // Time based queries    
+    LOGFILE << "Summaries per move: (Time based queries) persistent_queue_of_nodes_ size at the end of search: " << persistent_queue_of_nodes_->size()
       << " Average duration " << (auxengine_num_evals ? (auxengine_total_dur / auxengine_num_evals) : -1.0f) << "ms"
-      << " New AuxEngineTime for next iteration " << search_stats_->AuxEngineTime
+      << " New AuxEngineTime for next iteration " << search_stats_->AuxEngineTime 
       << " Number of evals " << auxengine_num_evals
       << " Number of added nodes " << auxengine_num_updates;
+  } else {
+    // Depth based queries
+    LOGFILE << "Summaries per move: (Depth based queries) persistent_queue_of_nodes_ size at the end of search: " << persistent_queue_of_nodes_->size()
+      << " Average duration " << (auxengine_num_evals ? (auxengine_total_dur / auxengine_num_evals) : -1.0f) << "ms"
+      << " Number of evals " << auxengine_num_evals
+      << " Number of added nodes " << auxengine_num_updates;
+  }
   
   // Empty the other queue.
   fast_track_extend_and_evaluate_queue_mutex_.lock();

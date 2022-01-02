@@ -171,6 +171,8 @@ void EngineController::NewGame() {
   search_.reset();
   tree_.reset();
   CreateFreshTimeManager();
+  search_stats_->AuxEngineTime = 0;
+  persistent_queue_of_nodes_ = {};
   current_position_ = {ChessBoard::kStartposFen, {}};
   UpdateFromUciOptions();
 }

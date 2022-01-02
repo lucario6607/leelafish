@@ -196,11 +196,6 @@ void Search::DoAuxEngine(Node* n) {
     nodes_mutex_.lock_shared();
     for (Node* n2 = n; n2 != root_node_; n2 = n2->GetParent()) {
       depth++;
-      if(n2 == nullptr || depth > params_.GetAuxEngineMaxQueryDepth() * 2){ // safety net. TODO check against parent of root or some known root.
-	LOGFILE << "1. Could not reach root";
-	nodes_mutex_.unlock_shared();
-	return;
-      } 
     }
     nodes_mutex_.unlock_shared();    
   }
@@ -442,8 +437,8 @@ void Search::AuxWait() {
       // increase time if more than 90% of all queued nodes were delivered
       search_stats_->AuxEngineTime = search_stats_->AuxEngineTime * 1.1;
     }
-    if(persistent_queue_of_nodes_->size() > 100 && search_stats_->AuxEngineTime > 50){
-      // Don't go below 50 ms for a query.
+    if(persistent_queue_of_nodes_->size() > 100 && search_stats_->AuxEngineTime > 30){
+      // Don't go below 30 ms for a query.
       
     // if(persistent_queue_of_nodes_->size() > auxengine_num_evals * 0.5){
       // decrease time if queue is greater than half of the number of delivered PVs

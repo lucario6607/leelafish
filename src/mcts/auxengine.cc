@@ -58,10 +58,13 @@ void Search::OpenAuxEngine() REQUIRES(threads_mutex_) {
 void SearchWorker::AuxMaybeEnqueueNode(Node* n) {
   // the caller (DoBackupUpdate()->DoBackupUpdateSingleNode()) has a lock on search_->nodes_mutex_, so no other thread will change n right now.
 
-  LOGFILE << "AuxMaybeEnqueueNode() picked node: " << n->DebugString() << " for the persistent_queue_of_nodes_ which has size: " << search_->persistent_queue_of_nodes_->size();
+  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE
+      << "AuxMaybeEnqueueNode() picked node: " << n->DebugString()
+      << " for the persistent_queue_of_nodes which has size: "
+      << search_->search_stats_->persistent_queue_of_nodes->size();
 
   n->SetAuxEngineMove(0xfffe); // magic for pending
-  search_->persistent_queue_of_nodes_->push(n);
+  search_->search_stats_->persistent_queue_of_nodes->push(n);
   search_->auxengine_cv_.notify_one();
   search_->auxengine_mutex_.unlock();
 }
@@ -112,27 +115,29 @@ void Search::AuxEngineWorker() {
     // If newgame then engine.cc will set search_stats_->AuxEngineTime to zero, and we have to set it to the parameter value (which is not available to engine.cc)
     if(search_stats_->AuxEngineTime == 0) {
       search_stats_->AuxEngineTime = params_.GetAuxEngineTime();
-      LOGFILE << "Setting AuxEngineTime to " << search_stats_->AuxEngineTime << " since it was zero";
+      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE
+	  << "Setting AuxEngineTime to "
+	  << search_stats_->AuxEngineTime << " since it was zero";
     }
     
     // purge obsolete nodes in the queue, if any. The even elements are the actual nodes, the odd elements is root if the preceding even element is still a relevant node.
-    if(persistent_queue_of_nodes_->size() > 0){
+    if(search_stats_->persistent_queue_of_nodes->size() > 0){
       std::queue<Node*> persistent_queue_of_nodes_temp_;
-      long unsigned int my_size = persistent_queue_of_nodes_->size();      
+      long unsigned int my_size = search_stats_->persistent_queue_of_nodes->size();      
       for(long unsigned int i=0; i < my_size; i = i + 2){
-	Node * n = persistent_queue_of_nodes_->front();
-	persistent_queue_of_nodes_->pop();
-	Node * n_parent = persistent_queue_of_nodes_->front();
-	persistent_queue_of_nodes_->pop();
+	Node * n = search_stats_->persistent_queue_of_nodes->front();
+	search_stats_->persistent_queue_of_nodes->pop();
+	Node * n_parent = search_stats_->persistent_queue_of_nodes->front();
+	search_stats_->persistent_queue_of_nodes->pop();
 	if(n_parent == root_node_){
 	  // node is still relevant
 	  persistent_queue_of_nodes_temp_.push(n);
 	}
       }
-      // update persistent_queue_of_nodes_
+      // update search_stats_->persistent_queue_of_nodes
       my_size = persistent_queue_of_nodes_temp_.size();
       for(long unsigned int i=0; i < my_size; i++){      
-    	persistent_queue_of_nodes_->push(persistent_queue_of_nodes_temp_.front());
+    	search_stats_->persistent_queue_of_nodes->push(persistent_queue_of_nodes_temp_.front());
     	persistent_queue_of_nodes_temp_.pop();
       }
     }
@@ -147,7 +152,7 @@ void Search::AuxEngineWorker() {
     // root is extended.
     root_node_->SetAuxEngineMove(0xfffe); // mark root as pending and queue it
     auxengine_mutex_.lock(); 
-    persistent_queue_of_nodes_->push(root_node_);
+    search_stats_->persistent_queue_of_nodes->push(root_node_);
     auxengine_cv_.notify_one();
     auxengine_mutex_.unlock();
     // if root has children, queue those too. (since we can only queue _nodes_ we can not unconditionally queue all _edges_ of root).
@@ -160,29 +165,30 @@ void Search::AuxEngineWorker() {
     {
   	std::unique_lock<std::mutex> lock(auxengine_mutex_);
   	// Wait until there's some work to compute.
-  	auxengine_cv_.wait(lock, [&] { return stop_.load(std::memory_order_acquire) || !persistent_queue_of_nodes_->empty(); });
+  	auxengine_cv_.wait(lock, [&] { return stop_.load(std::memory_order_acquire) || !search_stats_->persistent_queue_of_nodes->empty(); });
   	if (stop_.load(std::memory_order_acquire)) {
   	  auxengine_mutex_.unlock(); 	
   	  break;
   	}
-  	n = persistent_queue_of_nodes_->front();
-  	persistent_queue_of_nodes_->pop();
+  	n = search_stats_->persistent_queue_of_nodes->front();
+  	search_stats_->persistent_queue_of_nodes->pop();
     } // release lock
     DoAuxEngine(n);
     ++number_of_pvs_delivered;
   }
-  auxengine_mutex_.unlock();    
-  LOGFILE << "AuxEngineWorker done, delivered " << number_of_pvs_delivered << " PVs.";
+  auxengine_mutex_.unlock();
+  if (params_.GetAuxEngineVerbosity() >= 1) LOGFILE  
+    << "AuxEngineWorker done, delivered " << number_of_pvs_delivered << " PVs.";
 }
 
 void Search::DoAuxEngine(Node* n) {
   // before trying to take a lock on nodes_mutex_, always check if search has stopped, in which we return early
   if(stop_.load(std::memory_order_acquire)) {
-    LOGFILE << "DoAuxEngine caught a stop signal beforing doing anything.";
+  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine caught a stop signal beforing doing anything.";
     return;
   }
   nodes_mutex_.lock_shared();
-  LOGFILE << "DoAuxEngine() called for node" << n->DebugString();
+  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "DoAuxEngine() called for node" << n->DebugString();
   nodes_mutex_.unlock_shared();  
   // Calculate depth in a safe way. Return early if root cannot be
   // reached from n.
@@ -190,7 +196,7 @@ void Search::DoAuxEngine(Node* n) {
   int depth = 0;
   if(n != root_node_){
     if(stop_.load(std::memory_order_acquire)) {
-      LOGFILE << "DoAuxEngine caught a stop signal while calculating depth.";
+      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine caught a stop signal while calculating depth.";
       return;
     }
     nodes_mutex_.lock_shared();
@@ -212,7 +218,7 @@ void Search::DoAuxEngine(Node* n) {
 
   if(n != root_node_){
     if(stop_.load(std::memory_order_acquire)) {
-      LOGFILE << "DoAuxEngine caught a stop signal while populating my_moves.";
+      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine caught a stop signal while populating my_moves.";
       return;
     }
     nodes_mutex_.lock_shared();  
@@ -241,19 +247,12 @@ void Search::DoAuxEngine(Node* n) {
     my_board.Mirror();
   }
 
-  if (params_.GetAuxEngineVerbosity() >= 1) {
-    LOGFILE << "add pv=" << s << " from root position: " << GetFen(played_history_.Last());
-  }
-  LOGFILE << "trying to get a FEN from my_position";
+  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "add pv=" << s << " from root position: " << GetFen(played_history_.Last());
   s = "position fen " + GetFen(my_position);
-  LOGFILE << "got a FEN from my_position";  
-  LOGFILE << "input to helper: " << s;
   
   // Before starting, test if stop_ is set
   if (stop_.load(std::memory_order_acquire)) {
-    if (params_.GetAuxEngineVerbosity() >= 5) {    
-      LOGFILE << "DoAuxEngine caught a stop signal 1.";
-    }
+    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine caught a stop signal 1.";
     return;
   }
 
@@ -277,7 +276,7 @@ void Search::DoAuxEngine(Node* n) {
   std::string token;
   bool stopping = false;
   while(std::getline(auxengine_is_, line)) {
-    if (params_.GetAuxEngineVerbosity() >= 2) {
+    if (params_.GetAuxEngineVerbosity() >= 9) {
       LOGFILE << "auxe:" << line;
     }
     std::istringstream iss(line);
@@ -292,18 +291,16 @@ void Search::DoAuxEngine(Node* n) {
     if (!stopping) {
       stopping = stop_.load(std::memory_order_acquire);
       if (stopping) {
-	if (params_.GetAuxEngineVerbosity() >= 5) {
-	  LOGFILE << "DoAuxEngine caught a stop signal 2.";	
-	}
+	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine caught a stop signal 2.";	
         // (unless someone else already has sent stop) send stop,
 	// stay in loop to get best response, otherwise it
         // will disturb the next iteration.
 	// only send stop if we are the first to detect that search has stopped.
 	auxengine_stopped_mutex_.lock();
 	if(!auxengine_stopped_){
-	  LOGFILE << "DoAuxEngine() Stopping the A/B helper Start";
+	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine() Stopping the A/B helper Start";
 	  auxengine_os_ << "stop" << std::endl; // stop the A/B helper
-	  LOGFILE << "DoAuxEngine() Stopping the A/B helper Stop";
+	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine() Stopping the A/B helper Stop";
 	  auxengine_stopped_ = true;
 	}
 	auxengine_stopped_mutex_.unlock();	
@@ -315,19 +312,19 @@ void Search::DoAuxEngine(Node* n) {
     // requested depth and the line is actually played.
 
     // For now don't use results of a search that was stopped.
-    LOGFILE << "AUX Search was interrupted, the results will not be used";
+    if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "AUX Search was interrupted, the results will not be used";
     return;
   }
   auxengine_stopped_mutex_.lock();
   auxengine_stopped_ = true; // stopped means "not running". It does not mean it was stopped prematurely.
   auxengine_stopped_mutex_.unlock();
   
-  if (params_.GetAuxEngineVerbosity() >= 1) {
+  if (params_.GetAuxEngineVerbosity() >= 9) {
     LOGFILE << "pv:" << prev_line;
     LOGFILE << "bestanswer:" << token;
   }
   if(prev_line == ""){
-    LOGFILE << "Empty PV, returning early from doAuxEngine().";
+    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Empty PV, returning early from doAuxEngine().";
     return;
   }
   if (!auxengine_c_.running()) {
@@ -361,7 +358,7 @@ void Search::DoAuxEngine(Node* n) {
     if (pv == "depth") {
       // Figure out which depth was reached (can be zero).
       iss >> depth_reached >> std::ws;
-      LOGFILE << "Reached depth: " << depth_reached << " for node with depth: " << depth;
+      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Reached depth: " << depth_reached << " for node with depth: " << depth;
     }
     if (pv == "pv") {
       while(iss >> pv >> std::ws &&
@@ -369,9 +366,7 @@ void Search::DoAuxEngine(Node* n) {
 	    pv_length < params_.GetAuxEngineFollowPvDepth()) {
         Move m;
         if (!Move::ParseMove(&m, pv, !flip)) {	
-          if (params_.GetAuxEngineVerbosity() >= 2) {
-            LOGFILE << "Ignore bad pv move: " << pv;
-          }
+          if (params_.GetAuxEngineVerbosity() >= 1) LOGFILE << "Ignoring bad pv move: " << pv;
           break;
         }
 	// convert to Modern encoding, update the board and the position
@@ -399,60 +394,60 @@ void Search::DoAuxEngine(Node* n) {
   }
 
   if (pv_moves.size() == 0) {
-    if (params_.GetAuxEngineVerbosity() >= 1) {
-      LOGFILE << "Warning: the helper did not give a PV, will only use bestmove:" << bestmove_packed_int;
-    }
+    if (params_.GetAuxEngineVerbosity() >= 1) LOGFILE << "Warning: the helper did not give a PV, will only use bestmove:" << bestmove_packed_int;
     pv_moves.push_back(bestmove_packed_int);
   }
-  
-  std::string debug_string;
-  for(int i = 0; i < (int) my_moves_from_the_white_side.size(); i++){
-    debug_string = debug_string + my_moves_from_the_white_side[i].as_string() + " ";
-  }
-  if(played_history_.IsBlackToMove()){
-    LOGFILE << "debug info: length of PV given to helper engine: " << depth << " position given to helper: " << s << " black to move at root, length of my_moves_from_the_white_side " << my_moves_from_the_white_side.size() << " my_moves_from_the_white_side: " << debug_string;
-  } else {
-    LOGFILE << "debug info: length of PV given to helper engine: " << depth << " position given to helper: " << s << " white to move at root, length of my_moves_from_the_white_side " << my_moves_from_the_white_side.size() << " my_moves_from_the_white_side: " << debug_string;    
+
+  if (params_.GetAuxEngineVerbosity() >= 9){
+    std::string debug_string;
+    for(int i = 0; i < (int) my_moves_from_the_white_side.size(); i++){
+      debug_string = debug_string + my_moves_from_the_white_side[i].as_string() + " ";
+    }
+    if(played_history_.IsBlackToMove()){
+      LOGFILE << "debug info: length of PV given to helper engine: " << depth << " position given to helper: " << s << " black to move at root, length of my_moves_from_the_white_side " << my_moves_from_the_white_side.size() << " my_moves_from_the_white_side: " << debug_string;
+    } else {
+      LOGFILE << "debug info: length of PV given to helper engine: " << depth << " position given to helper: " << s << " white to move at root, length of my_moves_from_the_white_side " << my_moves_from_the_white_side.size() << " my_moves_from_the_white_side: " << debug_string;    
+    }
   }
   
   fast_track_extend_and_evaluate_queue_.push(my_moves_from_the_white_side); // I think push() means push_back for queues.
   fast_track_extend_and_evaluate_queue_mutex_.unlock();
 
-  LOGFILE << "Returning from DoAuxEngine()";
+  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Returning from DoAuxEngine()";
 }
 
 void Search::AuxWait() {  
-  LOGFILE << "AuxWait start for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
+  if (params_.GetAuxEngineVerbosity() >= 7) LOGFILE << "AuxWait start for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
 
   while (!auxengine_threads_.empty()) {
     Mutex::Lock lock(threads_mutex_);
-    LOGFILE << "AuxWait about to pop threads";
+    if (params_.GetAuxEngineVerbosity() >= 7) LOGFILE << "AuxWait about to pop threads";
     auxengine_threads_.back().join();
     auxengine_threads_.pop_back();
   }
   ChessBoard my_board = played_history_.Last().GetBoard();
   if((my_board.ours() | my_board.theirs()).count() >= 20){
-    if(persistent_queue_of_nodes_->size() == 0){     
-    // if(persistent_queue_of_nodes_->size() < auxengine_num_evals * 0.1){ 
+    if(search_stats_->persistent_queue_of_nodes->size() == 0){     
+    // if(search_stats_->persistent_queue_of_nodes->size() < auxengine_num_evals * 0.1){ 
       // increase time if more than 90% of all queued nodes were delivered
       search_stats_->AuxEngineTime = search_stats_->AuxEngineTime * 1.1;
     }
-    if(persistent_queue_of_nodes_->size() > 100 && search_stats_->AuxEngineTime > 30){
+    if(search_stats_->persistent_queue_of_nodes->size() > 100 && search_stats_->AuxEngineTime > 30){
       // Don't go below 30 ms for a query.
       
-    // if(persistent_queue_of_nodes_->size() > auxengine_num_evals * 0.5){
+    // if(search_stats_->persistent_queue_of_nodes->size() > auxengine_num_evals * 0.5){
       // decrease time if queue is greater than half of the number of delivered PVs
       search_stats_->AuxEngineTime = search_stats_->AuxEngineTime * 0.9;
     }
     // Time based queries    
-    LOGFILE << "Summaries per move: (Time based queries) persistent_queue_of_nodes_ size at the end of search: " << persistent_queue_of_nodes_->size()
+    LOGFILE << "Summaries per move: (Time based queries) persistent_queue_of_nodes size at the end of search: " << search_stats_->persistent_queue_of_nodes->size()
       << " Average duration " << (auxengine_num_evals ? (auxengine_total_dur / auxengine_num_evals) : -1.0f) << "ms"
       << " New AuxEngineTime for next iteration " << search_stats_->AuxEngineTime 
       << " Number of evals " << auxengine_num_evals
       << " Number of added nodes " << auxengine_num_updates;
   } else {
     // Depth based queries
-    LOGFILE << "Summaries per move: (Depth based queries) persistent_queue_of_nodes_ size at the end of search: " << persistent_queue_of_nodes_->size()
+    LOGFILE << "Summaries per move: (Depth based queries) persistent_queue_of_nodes size at the end of search: " << search_stats_->persistent_queue_of_nodes->size()
       << " Average duration " << (auxengine_num_evals ? (auxengine_total_dur / auxengine_num_evals) : -1.0f) << "ms"
       << " Number of evals " << auxengine_num_evals
       << " Number of added nodes " << auxengine_num_updates;
@@ -461,17 +456,17 @@ void Search::AuxWait() {
   // Empty the other queue.
   fast_track_extend_and_evaluate_queue_mutex_.lock();
   if(fast_track_extend_and_evaluate_queue_.empty()){
-    LOGFILE << "No PVs in the fast_track_extend_and_evaluate_queue";
+    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "No PVs in the fast_track_extend_and_evaluate_queue";
   } else {
-    LOGFILE << fast_track_extend_and_evaluate_queue_.size() << " possibly obsolete PV:s in the queue.";
+    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << fast_track_extend_and_evaluate_queue_.size() << " possibly obsolete PV:s in the queue.";
     fast_track_extend_and_evaluate_queue_ = {}; // should be faster than pop() but it is safe?
     while (!fast_track_extend_and_evaluate_queue_.empty()) {
       fast_track_extend_and_evaluate_queue_.pop();
     }
-    LOGFILE << "Number of PV:s in the queue=" << fast_track_extend_and_evaluate_queue_.size();
+    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Number of PV:s in the queue=" << fast_track_extend_and_evaluate_queue_.size();
   }
   fast_track_extend_and_evaluate_queue_mutex_.unlock();  
-  LOGFILE << "AuxWait done";
+  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxWait done";
 }
 
 }  // namespace lczero

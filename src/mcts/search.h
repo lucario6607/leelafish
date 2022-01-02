@@ -56,12 +56,13 @@ class Search {
  public:
 
   struct SearchStats {
-    std::queue<Node*>* nodes_added_from_PV;
-    std::queue<Node*>* nodes_added_from_low_depth;
-    std::queue<Node*>* nodes_added_from_high_visits;
+    std::queue<Node*>* persistent_queue_of_nodes; // the query queue for the auxillary helper engine.
+    std::queue<int>* source_of_queued_nodes; // 0 = SearchWorker::PickNodesToExtendTask(); 1 = Search::DoBackupUpdateSingleNode(); 2 = Search::SendUciInfo()
+    std::queue<Node*>* nodes_added_by_the_helper; // this is useful only to assess how good the different sources are, it does not affect search
+    std::queue<int>* source_of_added_nodes; // 0 = SearchWorker::PickNodesToExtendTask(); 1 = Search::DoBackupUpdateSingleNode(); 2 = Search::SendUciInfo()    
     int AuxEngineTime; // dynamic version of the UCI option AuxEngineTime.
     Move ponder_move; // the move predicted by search().
-    float q; // the expected q based the predicted move.
+    float q; // the expected q based on the predicted move.
   };
 
   Search(const NodeTree& tree, Network* network,

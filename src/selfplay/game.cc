@@ -149,13 +149,14 @@ void SelfPlayGame::Play(int white_threads, int black_threads, bool training,
       }
 
       std::queue<Node*> node_queue = {}; // this is for the auxengine stats, always empty for now.
+      search_stats_ = std::make_unique<Search::SearchStats>();
 
       search_ = std::make_unique<Search>(
           *tree_[idx], options_[idx].network, std::move(responder),
           /* searchmoves */ MoveList(), std::chrono::steady_clock::now(),
           std::move(stoppers),
           /* infinite */ false, *options_[idx].uci_options, options_[idx].cache,
-          syzygy_tb, &node_queue);
+          syzygy_tb, &node_queue, search_stats_);
     }
 
     // Do search.

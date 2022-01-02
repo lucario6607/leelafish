@@ -106,6 +106,8 @@ void Search::AuxEngineWorker() {
       }
     }
     auxengine_ready_ = true;
+    // Set the time to use, based on the UCI parameter
+    search_stats_->AuxEngineTime = params_.GetAuxEngineTime();
   } else {
     // purge obsolete nodes in the queue, if any. The even elements are the actual nodes, the odd elements is root if the preceding even element is still a relevant node.
     if(persistent_queue_of_nodes_->size() > 0){
@@ -260,7 +262,7 @@ void Search::DoAuxEngine(Node* n) {
   if((my_board.ours() | my_board.theirs()).count() < 20){
     auxengine_os_ << "go depth " << params_.GetAuxEngineDepth() << std::endl;
   } else {
-    auxengine_os_ << "go movetime " << params_.GetAuxEngineTime() << std::endl;
+    auxengine_os_ << "go movetime " << search_stats_->AuxEngineTime << std::endl;
   }
 
   auxengine_stopped_mutex_.lock();
@@ -427,8 +429,17 @@ void Search::AuxWait() {
     auxengine_threads_.back().join();
     auxengine_threads_.pop_back();
   }
-  LOGFILE << "Summaries per move: persistent_queue_of_nodes__ size at the end of search: " << persistent_queue_of_nodes_->size()
+  if(persistent_queue_of_nodes_->size() == 0){
+    // increase time since all queue was empty at move selection time
+    search_stats_->AuxEngineTime = search_stats_->AuxEngineTime * 1.1;
+  }
+  if(persistent_queue_of_nodes_->size() > 100){
+    // increase time since all queue was empty at move selection time
+    search_stats_->AuxEngineTime = search_stats_->AuxEngineTime * 0.9;
+  }
+  LOGFILE << "Summaries per move: persistent_queue_of_nodes_ size at the end of search: " << persistent_queue_of_nodes_->size()
       << " Average duration " << (auxengine_num_evals ? (auxengine_total_dur / auxengine_num_evals) : -1.0f) << "ms"
+      << " New AuxEngineTime for next iteration " << search_stats_->AuxEngineTime
       << " Number of evals " << auxengine_num_evals
       << " Number of added nodes " << auxengine_num_updates;
   

@@ -152,7 +152,9 @@ Search::Search(const NodeTree& tree, Network* network,
                std::unique_ptr<SearchStopper> stopper, bool infinite,
                const OptionsDict& options, NNCache* cache,
                SyzygyTablebase* syzygy_tb,
-	       std::queue<Node*>* persistent_queue_of_nodes)
+	       std::queue<Node*>* persistent_queue_of_nodes,
+	       std::shared_ptr<SearchStats> search_stats
+	       )
     : ok_to_respond_bestmove_(!infinite),
       stopper_(std::move(stopper)),
       root_node_(tree.GetCurrentHead()),
@@ -164,6 +166,7 @@ Search::Search(const NodeTree& tree, Network* network,
       searchmoves_(searchmoves),
       start_time_(start_time),
       persistent_queue_of_nodes_(persistent_queue_of_nodes),
+      search_stats_(search_stats),
       initial_visits_(root_node_->GetN()),
       root_move_filter_(MakeRootMoveFilter(
           searchmoves_, syzygy_tb_, played_history_,
@@ -301,19 +304,22 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
 	 //  ||
 	 //  (2 * iter.node()->GetN() >= (uint32_t) params_.GetAuxEngineThreshold())) // Times 2 is the general PV bonus.
 	 &&
-	 depth <= params_.GetAuxEngineMaxQueryDepth() * 2 // prioritize lower depth nodes.
+	 depth <= params_.GetAuxEngineMaxQueryDepth() * 3 // prioritize lower depth nodes.
 	 ){
 
-	iter.node()->SetAuxEngineMove(0xfffe); // magic for pending
-	auxengine_mutex_.lock();
-	persistent_queue_of_nodes_->push(iter.node());
-	auxengine_cv_.notify_one();
-	auxengine_mutex_.unlock();
+	auxengine_stopped_mutex_.lock();
+	if(! auxengine_stopped_){
+	  iter.node()->SetAuxEngineMove(0xfffe); // magic for pending
+	  auxengine_mutex_.lock();
+	  persistent_queue_of_nodes_->push(iter.node());
+	  auxengine_cv_.notify_one();
+	  auxengine_mutex_.unlock();
 	
-	number_of_times_called_AuxMaybeEnqueueNode_ += 1;
-	LOGFILE << " Adding a node from the PV (rank: " << multipv << ") at depth " << depth << " and visits: " << iter.node()->GetN() << " to the helper queue";
+	  number_of_times_called_AuxMaybeEnqueueNode_ += 1;
+	  LOGFILE << " Adding a node from the PV (rank: " << multipv << ") at depth " << depth << " and visits: " << iter.node()->GetN() << " to the helper queue";
+	}
+	auxengine_stopped_mutex_.unlock();
       }
-
       
     }
   }
@@ -591,6 +597,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     current_best_edge_ = EdgeAndNode();
 
     // purge obsolete nodes in the helper queue. Note that depending on the move of the opponent more nodes can be obsolete.
+    LOGFILE << "Number of nodes in the query queue before purging: " << persistent_queue_of_nodes_->size() << " at address: " << persistent_queue_of_nodes_;
     if(persistent_queue_of_nodes_->size() > 0){
       std::queue<Node*> persistent_queue_of_nodes_temp_;
       long unsigned int my_size = persistent_queue_of_nodes_->size();      
@@ -616,6 +623,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     	persistent_queue_of_nodes_temp_.pop();
       }
     }
+    LOGFILE << "Number of nodes in the query queue after purging: " << persistent_queue_of_nodes_->size() / 2 << " at address: " << persistent_queue_of_nodes_;
   }
 
   
@@ -2029,18 +2037,12 @@ void SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
         cur_limit -= new_visits;
         Node* child_node = best_edge.GetOrSpawnNode(/* parent */ node, nullptr);
 
-	// if spawned and depth is low enough, then queue this new node to the auxillary helper.
-	// was the node extended or not?
+	// if the node was spawned and its depth is low enough, then queue this new node to the auxillary helper.
+	// current_path.size() + base_depth is the distance from root.
 	if(child_node->GetN() == 0){
-	  // calculate depth
-	  int my_depth = 0;
-	  for (Node* n2 = child_node; n2 != search_->root_node_; n2 = n2->GetParent()) {
-	    my_depth++;
-	  }
-	  // Allow slightly higher depth if the helper is at rest.
 	  if(
-	     (my_depth <= params_.GetAuxEngineMaxQueryDepth() ||
-	      (search_->persistent_queue_of_nodes_->size() == 0 && my_depth <= params_.GetAuxEngineMaxQueryDepth() + 2)) &&
+	     (int(current_path.size() + base_depth) <= params_.GetAuxEngineMaxQueryDepth() ||
+	      (search_->persistent_queue_of_nodes_->size() == 0 && int(current_path.size() + base_depth) <= params_.GetAuxEngineMaxQueryDepth() * 2)) &&
 	     params_.GetAuxEngineFile() != "" &&
 	     child_node->GetAuxEngineMove() == 0xffff &&
 	     ! child_node->IsTerminal()

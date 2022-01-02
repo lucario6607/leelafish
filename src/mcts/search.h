@@ -55,6 +55,15 @@ class Search {
 
  public:
 
+  struct SearchStats {
+    std::queue<Node*>* nodes_added_from_PV;
+    std::queue<Node*>* nodes_added_from_low_depth;
+    std::queue<Node*>* nodes_added_from_high_visits;
+    int AuxEngineTime; // dynamic version of the UCI option AuxEngineTime.
+    Move ponder_move; // the move predicted by search().
+    float q; // the expected q based the predicted move.
+  };
+
   Search(const NodeTree& tree, Network* network,
          std::unique_ptr<UciResponder> uci_responder,
          const MoveList& searchmoves,
@@ -62,7 +71,8 @@ class Search {
          std::unique_ptr<SearchStopper> stopper, bool infinite,
          const OptionsDict& options, NNCache* cache,
          SyzygyTablebase* syzygy_tb,
-	 std::queue<Node*>* persistent_queue_of_nodes
+	 std::queue<Node*>* persistent_queue_of_nodes,
+	 std::shared_ptr<SearchStats> search_stats
 	 );
 
   ~Search();
@@ -186,6 +196,7 @@ class Search {
   const MoveList searchmoves_;
   const std::chrono::steady_clock::time_point start_time_;
   std::queue<Node*>* persistent_queue_of_nodes_;
+  std::shared_ptr<SearchStats> search_stats_;
   int64_t initial_visits_;
   // root_is_in_dtz_ must be initialized before root_move_filter_.
   bool root_is_in_dtz_ = false;
@@ -228,12 +239,8 @@ class Search {
   static boost::process::opstream auxengine_os_;
   static boost::process::child auxengine_c_;
   static bool auxengine_ready_;
-  // nodes_added_by_the_auxengine_
-  // std::queue<Node*> auxengine_queue_;
   std::mutex fast_track_extend_and_evaluate_queue_mutex_;
   std::queue<std::vector<Move>> fast_track_extend_and_evaluate_queue_ GUARDED_BY(fast_track_extend_and_evaluate_queue_mutex_); // for now only used by aux-engine, but could be used by a UCI extension: searchline eg. `go nodes 1000 searchline e2e4 c7c5 g1f3`
-  // std::mutex debug_nodes_added_by_aux_queue_mutex_;
-  // std::queue<std::vector<Node>> debug_nodes_added_by_aux_queue_ GUARDED_BY(debug_nodes_added_by_aux_queue_mutex_); 
   std::mutex auxengine_mutex_;
   std::condition_variable auxengine_cv_;
   std::vector<std::thread> auxengine_threads_;

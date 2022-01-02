@@ -442,8 +442,8 @@ void Search::AuxWait() {
       // increase time if more than 90% of all queued nodes were delivered
       search_stats_->AuxEngineTime = search_stats_->AuxEngineTime * 1.1;
     }
-    if(persistent_queue_of_nodes_->size() > 100 && search_stats_->AuxEngineTime > 25){
-      // Don't go below 25 ms for a query.
+    if(persistent_queue_of_nodes_->size() > 100 && search_stats_->AuxEngineTime > 50){
+      // Don't go below 50 ms for a query.
       
     // if(persistent_queue_of_nodes_->size() > auxengine_num_evals * 0.5){
       // decrease time if queue is greater than half of the number of delivered PVs

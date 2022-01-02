@@ -56,10 +56,10 @@ class Search {
  public:
 
   struct SearchStats {
-    std::queue<Node*>* persistent_queue_of_nodes; // the query queue for the auxillary helper engine.
-    std::queue<int>* source_of_queued_nodes; // 0 = SearchWorker::PickNodesToExtendTask(); 1 = Search::DoBackupUpdateSingleNode(); 2 = Search::SendUciInfo()
-    std::queue<Node*>* nodes_added_by_the_helper; // this is useful only to assess how good the different sources are, it does not affect search
-    std::queue<int>* source_of_added_nodes; // 0 = SearchWorker::PickNodesToExtendTask(); 1 = Search::DoBackupUpdateSingleNode(); 2 = Search::SendUciInfo()    
+    std::queue<Node*> persistent_queue_of_nodes; // the query queue for the auxillary helper engine.
+    std::queue<int> source_of_queued_nodes; // 0 = SearchWorker::PickNodesToExtendTask(); 1 = Search::DoBackupUpdateSingleNode(); 2 = Search::SendUciInfo()
+    std::queue<Node*> nodes_added_by_the_helper; // this is useful only to assess how good the different sources are, it does not affect search
+    std::queue<int> source_of_added_nodes; // 0 = SearchWorker::PickNodesToExtendTask(); 1 = Search::DoBackupUpdateSingleNode(); 2 = Search::SendUciInfo()    
     int AuxEngineTime; // dynamic version of the UCI option AuxEngineTime.
     Move ponder_move; // the move predicted by search().
     float q; // the expected q based on the predicted move.
@@ -73,7 +73,7 @@ class Search {
          const OptionsDict& options, NNCache* cache,
          SyzygyTablebase* syzygy_tb,
 	 std::queue<Node*>* persistent_queue_of_nodes,
-	 std::shared_ptr<SearchStats> search_stats
+	 const std::shared_ptr<SearchStats> search_stats
 	 );
 
   ~Search();
@@ -197,7 +197,7 @@ class Search {
   const MoveList searchmoves_;
   const std::chrono::steady_clock::time_point start_time_;
   std::queue<Node*>* persistent_queue_of_nodes_;
-  std::shared_ptr<SearchStats> search_stats_;
+  const std::shared_ptr<SearchStats> search_stats_;
   int64_t initial_visits_;
   // root_is_in_dtz_ must be initialized before root_move_filter_.
   bool root_is_in_dtz_ = false;
@@ -278,7 +278,6 @@ class SearchWorker {
   }
 
   ~SearchWorker() {
-    LOGFILE << "Trying to destruct the searchworker threads for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
     {
       task_count_.store(-1, std::memory_order_release);
       Mutex::Lock lock(picking_tasks_mutex_);
@@ -286,16 +285,12 @@ class SearchWorker {
       task_added_.notify_all();
     }
     for (size_t i = 0; i < task_threads_.size(); i++) {
-      LOGFILE << "Destructing the searchworker threads i=" << i;          
       task_threads_[i].join();
     }
-    LOGFILE << "All searchworker threads destroyed for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
   }
 
   // Runs iterations while needed.
   void RunBlocking() {
-    LOGFILE << "SearchWorker::RunBlocking() entered.";    
-    LOGFILE << "Started search thread.";
     try {
       // A very early stop may arrive before this point, so the test is at the
       // end to ensure at least one iteration runs before exiting.
@@ -307,7 +302,6 @@ class SearchWorker {
                 << std::endl;
       abort();
     }
-    LOGFILE << "SearchWorker::RunBlocking() finished for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
   }
 
   // Does one full iteration of MCTS search:

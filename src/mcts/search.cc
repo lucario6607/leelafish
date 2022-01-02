@@ -177,10 +177,7 @@ Search::Search(const NodeTree& tree, Network* network,
                              std::memory_order_release);
   }
   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Search called with persistent_queue_of_nodes of size: " << persistent_queue_of_nodes_->size() << " at address " << persistent_queue_of_nodes_;  
-  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Search called with search_stats at: " << search_stats_;
-  // search_stats_->persistent_queue_of_nodes = {};
-  // if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Search called with persistent_queue_of_nodes of size: 2";
-  // if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Search called with persistent_queue_of_nodes of size: " << search_stats_->persistent_queue_of_nodes->size();
+  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Search called with search_stats at: " << &search_stats_ << " size of persistent_queue: " << search_stats_->persistent_queue_of_nodes.size();
 }
 
 namespace {
@@ -304,9 +301,9 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
 	 iter.node()->GetAuxEngineMove() == 0xffff &&
 	 ! iter.node()->IsTerminal()
 	 &&
-	   (depth <= params_.GetAuxEngineMaxQueryDepth() * 4 // prioritize lower depth nodes.
+	   (depth <= params_.GetAuxEngineMaxQueryDepth() * 5 // prioritize lower depth nodes.
 	    ||
-	    3 * iter.node()->GetN() >= (uint32_t) params_.GetAuxEngineThreshold() // don't disturb too much. Times 3 is the first PV bonus.	 
+	    3 * iter.node()->GetN() >= (uint32_t) params_.GetAuxEngineThreshold() // don't disturb too much. Times 3 is the first PV bonus.
    	   )
 	){
 
@@ -314,7 +311,7 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
 	if(! auxengine_stopped_){
 	  iter.node()->SetAuxEngineMove(0xfffe); // magic for pending
 	  auxengine_mutex_.lock();
-	  search_stats_->persistent_queue_of_nodes->push(iter.node());
+	  search_stats_->persistent_queue_of_nodes.push(iter.node());
 	  auxengine_cv_.notify_one();
 	  auxengine_mutex_.unlock();
 	
@@ -600,17 +597,13 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     current_best_edge_ = EdgeAndNode();
 
     // purge obsolete nodes in the helper queue. Note that depending on the move of the opponent more nodes can be obsolete.
-    // When comparing the move with final_bestmove_
-    if(params_.GetAuxEngineVerbosity() >= 5){
-      LOGFILE << "Number of nodes in the query queue before purging: " << search_stats_->persistent_queue_of_nodes->size()
-	      << " at address: " << search_stats_->persistent_queue_of_nodes << " final move is: " << final_bestmove_.as_string();
-    }
-    if(search_stats_->persistent_queue_of_nodes->size() > 0){
+    int size_before_purging = search_stats_->persistent_queue_of_nodes.size();
+    if(search_stats_->persistent_queue_of_nodes.size() > 0){
       std::queue<Node*> persistent_queue_of_nodes_temp_;
-      long unsigned int my_size = search_stats_->persistent_queue_of_nodes->size();      
+      long unsigned int my_size = search_stats_->persistent_queue_of_nodes.size();      
       for(long unsigned int i=0; i < my_size; i++){
-    	Node * n = search_stats_->persistent_queue_of_nodes->front(); // read the element
-    	search_stats_->persistent_queue_of_nodes->pop(); // remove it from the queue.
+    	Node * n = search_stats_->persistent_queue_of_nodes.front(); // read the element
+    	search_stats_->persistent_queue_of_nodes.pop(); // remove it from the queue.
 	for (Node* n2 = n; n2 != root_node_ ; n2 = n2->GetParent()) {
 	  if(n2->GetParent()->GetParent() == root_node_){
 	    if(n2->GetParent()->GetOwnEdge()->GetMove(played_history_.IsBlackToMove()) == final_bestmove_){
@@ -623,15 +616,16 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	  }
 	}
       }
-      // update search_stats_->persistent_queue_of_nodes
       my_size = persistent_queue_of_nodes_temp_.size();
       for(long unsigned int i=0; i < my_size; i++){      
-    	search_stats_->persistent_queue_of_nodes->push(persistent_queue_of_nodes_temp_.front());
+    	search_stats_->persistent_queue_of_nodes.push(persistent_queue_of_nodes_temp_.front());
     	persistent_queue_of_nodes_temp_.pop();
       }
     }
-    if(params_.GetAuxEngineVerbosity() >= 5){    
-      LOGFILE << "Number of nodes in the query queue after purging: " << int(search_stats_->persistent_queue_of_nodes->size() / 2) << " at address: " << search_stats_->persistent_queue_of_nodes;
+    if(params_.GetAuxEngineVerbosity() >= 5){
+      LOGFILE << "Purged " << size_before_purging - int(search_stats_->persistent_queue_of_nodes.size() / 2)
+	      << " nodes in the query queue based the selected move: " << final_bestmove_.as_string()
+	      << ". " << int(search_stats_->persistent_queue_of_nodes.size() / 2) << " nodes remain.";
     }
   }
 
@@ -892,7 +886,6 @@ EdgeAndNode Search::GetBestRootChildWithTemperature(float temperature) const {
 }
 
 void Search::StartThreads(size_t how_many) {
-  LOGFILE << "Search::StartThreads() enterered.";
   thread_count_.store(how_many, std::memory_order_release);
   Mutex::Lock lock(threads_mutex_);
   OpenAuxEngine();
@@ -912,15 +905,11 @@ void Search::StartThreads(size_t how_many) {
                  std::chrono::steady_clock::now() - start_time_)
                  .count()
           << "ms already passed.";
-  LOGFILE << "Search::StartThreads() finished.";  
 }
 
 void Search::RunBlocking(size_t threads) {
-  // LOGFILE << "Entered RunBlocking";
   StartThreads(threads);
-  // LOGFILE << "RunBlocking has started threads";  
   Wait();
-  // LOGFILE << "RunBlocking finished";    
 }
 
 bool Search::IsSearchActive() const {
@@ -1048,13 +1037,11 @@ void Search::Abort() {
 }
 
 void Search::Wait() {
-  LOGFILE << "Entered Wait()";
   Mutex::Lock lock(threads_mutex_);
   while (!threads_.empty()) {
     threads_.back().join();
     threads_.pop_back();
   }
-  LOGFILE << "Exiting Wait()";  
 }
 
 void Search::CancelSharedCollisions() REQUIRES(nodes_mutex_) {
@@ -1069,16 +1056,13 @@ void Search::CancelSharedCollisions() REQUIRES(nodes_mutex_) {
 }
 
 Search::~Search() {
-  LOGFILE << "Entered the Search() destructor";
   Abort();
   Wait();
   {
     SharedMutex::Lock lock(nodes_mutex_);
     CancelSharedCollisions();
   }
-  LOGFILE << "About to enter AuxWait()";
   AuxWait();  // This can take some time during which we are not ready to respond readyok, so for now increase timemargin.
-  LOGFILE << "AuxWait() returned";  
   LOGFILE << "Search destroyed.";
 }
 

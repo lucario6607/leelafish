@@ -61,10 +61,10 @@ void SearchWorker::AuxMaybeEnqueueNode(Node* n) {
   if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE
       << "AuxMaybeEnqueueNode() picked node: " << n->DebugString()
       << " for the persistent_queue_of_nodes which has size: "
-      << search_->search_stats_->persistent_queue_of_nodes->size();
+      << search_->search_stats_->persistent_queue_of_nodes.size();
 
   n->SetAuxEngineMove(0xfffe); // magic for pending
-  search_->search_stats_->persistent_queue_of_nodes->push(n);
+  search_->search_stats_->persistent_queue_of_nodes.push(n);
   search_->auxengine_cv_.notify_one();
   search_->auxengine_mutex_.unlock();
 }
@@ -121,14 +121,15 @@ void Search::AuxEngineWorker() {
     }
     
     // purge obsolete nodes in the queue, if any. The even elements are the actual nodes, the odd elements is root if the preceding even element is still a relevant node.
-    if(search_stats_->persistent_queue_of_nodes->size() > 0){
+    int number_of_nodes_before_purging = int(search_stats_->persistent_queue_of_nodes.size() / 2);
+    if(search_stats_->persistent_queue_of_nodes.size() > 0){
       std::queue<Node*> persistent_queue_of_nodes_temp_;
-      long unsigned int my_size = search_stats_->persistent_queue_of_nodes->size();      
+      long unsigned int my_size = search_stats_->persistent_queue_of_nodes.size();      
       for(long unsigned int i=0; i < my_size; i = i + 2){
-	Node * n = search_stats_->persistent_queue_of_nodes->front();
-	search_stats_->persistent_queue_of_nodes->pop();
-	Node * n_parent = search_stats_->persistent_queue_of_nodes->front();
-	search_stats_->persistent_queue_of_nodes->pop();
+	Node * n = search_stats_->persistent_queue_of_nodes.front();
+	search_stats_->persistent_queue_of_nodes.pop();
+	Node * n_parent = search_stats_->persistent_queue_of_nodes.front();
+	search_stats_->persistent_queue_of_nodes.pop();
 	if(n_parent == root_node_){
 	  // node is still relevant
 	  persistent_queue_of_nodes_temp_.push(n);
@@ -137,10 +138,14 @@ void Search::AuxEngineWorker() {
       // update search_stats_->persistent_queue_of_nodes
       my_size = persistent_queue_of_nodes_temp_.size();
       for(long unsigned int i=0; i < my_size; i++){      
-    	search_stats_->persistent_queue_of_nodes->push(persistent_queue_of_nodes_temp_.front());
+    	search_stats_->persistent_queue_of_nodes.push(persistent_queue_of_nodes_temp_.front());
     	persistent_queue_of_nodes_temp_.pop();
       }
     }
+    if (params_.GetAuxEngineVerbosity() >= 5)
+      LOGFILE << "Purged " << number_of_nodes_before_purging - search_stats_->persistent_queue_of_nodes.size()
+	      << " nodes due to the move seleted by the opponent. " << search_stats_->persistent_queue_of_nodes.size()
+	      << " nodes remain in the queue.";
   }
 
   // Kickstart with the root node, no need to wait for it to get some
@@ -152,7 +157,7 @@ void Search::AuxEngineWorker() {
     // root is extended.
     root_node_->SetAuxEngineMove(0xfffe); // mark root as pending and queue it
     auxengine_mutex_.lock(); 
-    search_stats_->persistent_queue_of_nodes->push(root_node_);
+    search_stats_->persistent_queue_of_nodes.push(root_node_);
     auxengine_cv_.notify_one();
     auxengine_mutex_.unlock();
     // if root has children, queue those too. (since we can only queue _nodes_ we can not unconditionally queue all _edges_ of root).
@@ -165,13 +170,13 @@ void Search::AuxEngineWorker() {
     {
   	std::unique_lock<std::mutex> lock(auxengine_mutex_);
   	// Wait until there's some work to compute.
-  	auxengine_cv_.wait(lock, [&] { return stop_.load(std::memory_order_acquire) || !search_stats_->persistent_queue_of_nodes->empty(); });
+  	auxengine_cv_.wait(lock, [&] { return stop_.load(std::memory_order_acquire) || !search_stats_->persistent_queue_of_nodes.empty(); });
   	if (stop_.load(std::memory_order_acquire)) {
   	  auxengine_mutex_.unlock(); 	
   	  break;
   	}
-  	n = search_stats_->persistent_queue_of_nodes->front();
-  	search_stats_->persistent_queue_of_nodes->pop();
+  	n = search_stats_->persistent_queue_of_nodes.front();
+  	search_stats_->persistent_queue_of_nodes.pop();
     } // release lock
     DoAuxEngine(n);
     ++number_of_pvs_delivered;
@@ -427,27 +432,27 @@ void Search::AuxWait() {
   }
   ChessBoard my_board = played_history_.Last().GetBoard();
   if((my_board.ours() | my_board.theirs()).count() >= 20){
-    if(search_stats_->persistent_queue_of_nodes->size() == 0){     
-    // if(search_stats_->persistent_queue_of_nodes->size() < auxengine_num_evals * 0.1){ 
+    if(search_stats_->persistent_queue_of_nodes.size() == 0){     
+    // if(search_stats_->persistent_queue_of_nodes.size() < auxengine_num_evals * 0.1){ 
       // increase time if more than 90% of all queued nodes were delivered
       search_stats_->AuxEngineTime = search_stats_->AuxEngineTime * 1.1;
     }
-    if(search_stats_->persistent_queue_of_nodes->size() > 100 && search_stats_->AuxEngineTime > 30){
+    if(search_stats_->persistent_queue_of_nodes.size() > 100 && search_stats_->AuxEngineTime > 30){
       // Don't go below 30 ms for a query.
       
-    // if(search_stats_->persistent_queue_of_nodes->size() > auxengine_num_evals * 0.5){
+    // if(search_stats_->persistent_queue_of_nodes.size() > auxengine_num_evals * 0.5){
       // decrease time if queue is greater than half of the number of delivered PVs
       search_stats_->AuxEngineTime = search_stats_->AuxEngineTime * 0.9;
     }
     // Time based queries    
-    LOGFILE << "Summaries per move: (Time based queries) persistent_queue_of_nodes size at the end of search: " << search_stats_->persistent_queue_of_nodes->size()
+    LOGFILE << "Summaries per move: (Time based queries) persistent_queue_of_nodes size at the end of search: " << search_stats_->persistent_queue_of_nodes.size()
       << " Average duration " << (auxengine_num_evals ? (auxengine_total_dur / auxengine_num_evals) : -1.0f) << "ms"
       << " New AuxEngineTime for next iteration " << search_stats_->AuxEngineTime 
       << " Number of evals " << auxengine_num_evals
       << " Number of added nodes " << auxengine_num_updates;
   } else {
     // Depth based queries
-    LOGFILE << "Summaries per move: (Depth based queries) persistent_queue_of_nodes size at the end of search: " << search_stats_->persistent_queue_of_nodes->size()
+    LOGFILE << "Summaries per move: (Depth based queries) persistent_queue_of_nodes size at the end of search: " << search_stats_->persistent_queue_of_nodes.size()
       << " Average duration " << (auxengine_num_evals ? (auxengine_total_dur / auxengine_num_evals) : -1.0f) << "ms"
       << " Number of evals " << auxengine_num_evals
       << " Number of added nodes " << auxengine_num_updates;

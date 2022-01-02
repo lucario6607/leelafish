@@ -100,7 +100,7 @@ class EngineController {
   NNCache cache_;
 
   std::queue<Node*> persistent_queue_of_nodes_;
-  std::shared_ptr<Search::SearchStats> search_stats_;
+  const std::shared_ptr<Search::SearchStats> search_stats_ = std::make_unique<Search::SearchStats>();
 
   // Store current TB and network settings to track when they change so that
   // they are reloaded.

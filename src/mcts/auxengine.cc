@@ -433,7 +433,7 @@ void Search::AuxWait() {
     auxengine_threads_.pop_back();
   }
   ChessBoard my_board = played_history_.Last().GetBoard();
-  if((my_board.ours() | my_board.theirs()).count() < 20){
+  if((my_board.ours() | my_board.theirs()).count() >= 20){
     if(persistent_queue_of_nodes_->size() < auxengine_num_evals * 0.1){ 
       // increase time if more than 90% of all queued nodes were delivered
       search_stats_->AuxEngineTime = search_stats_->AuxEngineTime * 1.1;

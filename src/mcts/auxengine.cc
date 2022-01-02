@@ -110,7 +110,10 @@ void Search::AuxEngineWorker() {
     search_stats_->AuxEngineTime = params_.GetAuxEngineTime();
   } else {
     // If newgame then engine.cc will set search_stats_->AuxEngineTime to zero, and we have to set it to the parameter value (which is not available to engine.cc)
-    if(search_stats_->AuxEngineTime == 0) search_stats_->AuxEngineTime = params_.GetAuxEngineTime();
+    if(search_stats_->AuxEngineTime == 0) {
+      search_stats_->AuxEngineTime = params_.GetAuxEngineTime();
+      LOGFILE << "Setting AuxEngineTime to " << search_stats_->AuxEngineTime << " since it was zero";
+    }
     
     // purge obsolete nodes in the queue, if any. The even elements are the actual nodes, the odd elements is root if the preceding even element is still a relevant node.
     if(persistent_queue_of_nodes_->size() > 0){
@@ -434,11 +437,15 @@ void Search::AuxWait() {
   }
   ChessBoard my_board = played_history_.Last().GetBoard();
   if((my_board.ours() | my_board.theirs()).count() >= 20){
-    if(persistent_queue_of_nodes_->size() < auxengine_num_evals * 0.1){ 
+    if(persistent_queue_of_nodes_->size() == 0){     
+    // if(persistent_queue_of_nodes_->size() < auxengine_num_evals * 0.1){ 
       // increase time if more than 90% of all queued nodes were delivered
       search_stats_->AuxEngineTime = search_stats_->AuxEngineTime * 1.1;
     }
-    if(persistent_queue_of_nodes_->size() > auxengine_num_evals * 0.5){
+    if(persistent_queue_of_nodes_->size() > 100 && search_stats_->AuxEngineTime > 25){
+      // Don't go below 25 ms for a query.
+      
+    // if(persistent_queue_of_nodes_->size() > auxengine_num_evals * 0.5){
       // decrease time if queue is greater than half of the number of delivered PVs
       search_stats_->AuxEngineTime = search_stats_->AuxEngineTime * 0.9;
     }

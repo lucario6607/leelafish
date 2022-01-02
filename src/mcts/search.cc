@@ -597,7 +597,11 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     current_best_edge_ = EdgeAndNode();
 
     // purge obsolete nodes in the helper queue. Note that depending on the move of the opponent more nodes can be obsolete.
-    LOGFILE << "Number of nodes in the query queue before purging: " << persistent_queue_of_nodes_->size() << " at address: " << persistent_queue_of_nodes_;
+    // When comparing the move with final_bestmove_
+    if(params_.GetAuxEngineVerbosity() >= 5){
+      LOGFILE << "Number of nodes in the query queue before purging: " << persistent_queue_of_nodes_->size()
+	      << " at address: " << persistent_queue_of_nodes_ << " final move is: " << final_bestmove_.as_string();
+    }
     if(persistent_queue_of_nodes_->size() > 0){
       std::queue<Node*> persistent_queue_of_nodes_temp_;
       long unsigned int my_size = persistent_queue_of_nodes_->size();      
@@ -606,7 +610,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     	persistent_queue_of_nodes_->pop(); // remove it from the queue.
 	for (Node* n2 = n; n2 != root_node_ ; n2 = n2->GetParent()) {
 	  if(n2->GetParent()->GetParent() == root_node_){
-	    if(n2->GetParent()->GetOwnEdge()->GetMove() == final_bestmove_){
+	    if(n2->GetParent()->GetOwnEdge()->GetMove(played_history_.IsBlackToMove()) == final_bestmove_){
 	      persistent_queue_of_nodes_temp_.push(n);
 	      // in order to be able to purge nodes that became obsolete and deallocated due to the move of the opponent,
 	      // also save the grandparent that will become root at next iteration if this node is still relevant by then.
@@ -623,7 +627,9 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     	persistent_queue_of_nodes_temp_.pop();
       }
     }
-    LOGFILE << "Number of nodes in the query queue after purging: " << persistent_queue_of_nodes_->size() / 2 << " at address: " << persistent_queue_of_nodes_;
+    if(params_.GetAuxEngineVerbosity() >= 5){    
+      LOGFILE << "Number of nodes in the query queue after purging: " << int(persistent_queue_of_nodes_->size() / 2) << " at address: " << persistent_queue_of_nodes_;
+    }
   }
 
   

@@ -1,6 +1,6 @@
 /*
   This file is part of Leela Chess Zero.
-  Copyright (C) 2018-2019 The LCZero Authors
+  Copyright (C) 2018-2022 The LCZero Authors
 
   Leela Chess is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -176,7 +176,6 @@ Search::Search(const NodeTree& tree, Network* network,
     pending_searchers_.store(params_.GetMaxConcurrentSearchers(),
                              std::memory_order_release);
   }
-  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Search called with persistent_queue_of_nodes of size: " << persistent_queue_of_nodes_->size() << " at address " << persistent_queue_of_nodes_;  
   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Search called with search_stats at: " << &search_stats_ << " size of persistent_queue: " << search_stats_->persistent_queue_of_nodes.size();
 }
 
@@ -296,14 +295,14 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
       // possibly only consider the PV and the second best.
       // possibly condition on depth.
       if(
-	 multipv == 1 && // only care about the best move from root.
+	 multipv == 1 && // only use the best move from root.
 	 params_.GetAuxEngineFile() != "" &&
 	 iter.node()->GetAuxEngineMove() == 0xffff &&
 	 ! iter.node()->IsTerminal()
 	 &&
-	   (depth <= params_.GetAuxEngineMaxQueryDepth() * 5 // prioritize lower depth nodes.
+	   (depth <= 22 // prioritize 'lower' depth nodes.
 	    ||
-	    3 * iter.node()->GetN() >= (uint32_t) params_.GetAuxEngineThreshold() // don't disturb too much. Times 3 is the first PV bonus.
+	    5 * iter.node()->GetN() >= (uint32_t) params_.GetAuxEngineThreshold() // don't disturb too much. Times 5 is the first PV bonus.
    	   )
 	){
 
@@ -312,11 +311,12 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
 	  iter.node()->SetAuxEngineMove(0xfffe); // magic for pending
 	  auxengine_mutex_.lock();
 	  search_stats_->persistent_queue_of_nodes.push(iter.node());
+	  search_stats_->source_of_queued_nodes.push(2);
 	  auxengine_cv_.notify_one();
 	  auxengine_mutex_.unlock();
 	
 	  number_of_times_called_AuxMaybeEnqueueNode_ += 1;
-	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << " Adding a node from the PV (rank: " << multipv << ") at depth " << depth << " and visits: " << iter.node()->GetN() << " to the helper queue";
+	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << " Adding this node from the PV (rank: " << multipv << ") at depth " << depth << " and visits: " << iter.node()->GetN() << " to the helper queue" << iter.node()->DebugString();
 	}
 	auxengine_stopped_mutex_.unlock();
       }
@@ -596,36 +596,106 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     bestmove_is_sent_ = true;
     current_best_edge_ = EdgeAndNode();
 
-    // purge obsolete nodes in the helper queue. Note that depending on the move of the opponent more nodes can be obsolete.
-    int size_before_purging = search_stats_->persistent_queue_of_nodes.size();
+    // purge obsolete nodes in the helper queues. Note that depending on the move of the opponent more nodes can become obsolete.
     if(search_stats_->persistent_queue_of_nodes.size() > 0){
-      std::queue<Node*> persistent_queue_of_nodes_temp_;
-      long unsigned int my_size = search_stats_->persistent_queue_of_nodes.size();      
+      std::queue<Node*> persistent_queue_of_nodes_temp;
+      std::queue<int> source_of_queued_nodes_temp;
+      long unsigned int my_size = search_stats_->persistent_queue_of_nodes.size();
       for(long unsigned int i=0; i < my_size; i++){
     	Node * n = search_stats_->persistent_queue_of_nodes.front(); // read the element
     	search_stats_->persistent_queue_of_nodes.pop(); // remove it from the queue.
+	int source = search_stats_->source_of_queued_nodes.front(); // read the element
+	search_stats_->source_of_queued_nodes.pop(); // remove it from the queue.	
 	for (Node* n2 = n; n2 != root_node_ ; n2 = n2->GetParent()) {
 	  if(n2->GetParent()->GetParent() == root_node_){
 	    if(n2->GetParent()->GetOwnEdge()->GetMove(played_history_.IsBlackToMove()) == final_bestmove_){
-	      persistent_queue_of_nodes_temp_.push(n);
+	      persistent_queue_of_nodes_temp.push(n);
 	      // in order to be able to purge nodes that became obsolete and deallocated due to the move of the opponent,
 	      // also save the grandparent that will become root at next iteration if this node is still relevant by then.
-	      persistent_queue_of_nodes_temp_.push(n2);
+	      persistent_queue_of_nodes_temp.push(n2);
+	      source_of_queued_nodes_temp.push(source);	      
 	    }
 	    break;
 	  }
 	}
       }
-      my_size = persistent_queue_of_nodes_temp_.size();
-      for(long unsigned int i=0; i < my_size; i++){      
-    	search_stats_->persistent_queue_of_nodes.push(persistent_queue_of_nodes_temp_.front());
-    	persistent_queue_of_nodes_temp_.pop();
+      long unsigned int size_kept = source_of_queued_nodes_temp.size();
+      for(long unsigned int i=0; i < size_kept; i++){      
+    	search_stats_->source_of_queued_nodes.push(source_of_queued_nodes_temp.front());
+	source_of_queued_nodes_temp.pop();
       }
-    }
-    if(params_.GetAuxEngineVerbosity() >= 5){
-      LOGFILE << "Purged " << size_before_purging - int(search_stats_->persistent_queue_of_nodes.size() / 2)
+      for(long unsigned int i=0; i < size_kept * 2; i++){
+	search_stats_->persistent_queue_of_nodes.push(persistent_queue_of_nodes_temp.front());
+    	persistent_queue_of_nodes_temp.pop();
+      }
+      
+      if(params_.GetAuxEngineVerbosity() >= 5)
+	LOGFILE << "Purged " << my_size - size_kept
 	      << " nodes in the query queue based the selected move: " << final_bestmove_.as_string()
-	      << ". " << int(search_stats_->persistent_queue_of_nodes.size() / 2) << " nodes remain.";
+	      << ". " << size_kept << " nodes remain.";
+    }
+  
+    // // Also purge nodes from nodes_added_by_the_helper TODO: generalize this to a function that takes two pointers as input which then can be used both for persistent_queue_of_nodes and nodes_added_by_the_helper.
+    // void purge_stale_nodes (const std::queue<Node*> * pointer_to_nodes, std::queue<int> queue_of_sources){
+    // }
+    
+    if(search_stats_->nodes_added_by_the_helper.size() > 0){
+      std::queue<Node*> nodes_added_by_the_helper_temp;
+      std::queue<int> source_of_added_nodes_temp;
+      long unsigned int my_size = search_stats_->nodes_added_by_the_helper.size();
+      std::vector<int> sources_stat(4);
+      std::vector<int> sources_purged_stat(4);      
+      for(long unsigned int i=0; i < my_size; i++){
+    	Node * n = search_stats_->nodes_added_by_the_helper.front(); // read the element
+    	search_stats_->nodes_added_by_the_helper.pop(); // remove it from the queue.
+	int source = search_stats_->source_of_added_nodes.front(); // read the element
+	search_stats_->source_of_added_nodes.pop(); // remove it from the queue.
+	if(n->GetParent() == root_node_ &&
+	   n->GetOwnEdge()->GetMove(played_history_.IsBlackToMove()) == final_bestmove_){
+	  LOGFILE << "OMG the helper engine added the move played! " << n->DebugString() << " " << n->GetOwnEdge()->GetMove(played_history_.IsBlackToMove()).as_string() << " The source was: " << source;
+	}
+	for (Node* n2 = n; n2 != root_node_ ; n2 = n2->GetParent()) {
+	  if(n2->GetParent()->GetParent() == root_node_){
+	    if(n2->GetParent()->GetOwnEdge()->GetMove(played_history_.IsBlackToMove()) == final_bestmove_){
+	      nodes_added_by_the_helper_temp.push(n);
+	      // in order to be able to purge nodes that became obsolete and deallocated due to the move of the opponent,
+	      // also save the grandparent that will become root at next iteration if this node is still relevant by then.
+	      nodes_added_by_the_helper_temp.push(n2);
+	      source_of_added_nodes_temp.push(source);
+	      sources_stat[source]++;
+	    } else {
+	      sources_purged_stat[source]++;
+	    }
+	    break;
+	  }
+	}
+      }
+      long unsigned int size_kept = source_of_added_nodes_temp.size();
+      for(long unsigned int i=0; i < size_kept; i++){
+    	search_stats_->source_of_added_nodes.push(source_of_added_nodes_temp.front());
+	source_of_added_nodes_temp.pop();
+      }
+      // two nodes per element, thus * 2
+      for(long unsigned int i=0; i < size_kept * 2; i++){      
+    	search_stats_->nodes_added_by_the_helper.push(nodes_added_by_the_helper_temp.front());
+    	nodes_added_by_the_helper_temp.pop();
+      }
+      
+    if(params_.GetAuxEngineVerbosity() >= 5)
+      LOGFILE << "Total number of nodes in the added by the helper engine: " << my_size
+	      << ". Purged " << my_size - size_kept
+	      << " nodes in the added queue based the selected move: " << final_bestmove_.as_string()
+	      << ". " << std::endl
+	      << "purged source zero: " << sources_purged_stat[0] << std::endl
+	      << "purged source one: " << sources_purged_stat[1] << std::endl
+	      << "purged source two: " << sources_purged_stat[2] << std::endl
+	      << "purged source three: " << sources_purged_stat[3] << std::endl
+	      << size_kept << " nodes remain: " << std::endl
+	      << "kept source zero: " << sources_stat[0] << std::endl
+	      << "kept source one: " << sources_stat[1] << std::endl
+	      << "kept source two: " << sources_stat[2] << std::endl
+	      << "kept source three: " << sources_stat[3];
+
     }
   }
 
@@ -1245,7 +1315,7 @@ void SearchWorker::InitializeIteration(
   minibatch_.reserve(2 * params_.GetMiniBatchSize());
 }
 
-void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node, std::vector<lczero::Move> my_moves, int ply, int nodes_added) {
+void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node, std::vector<lczero::Move> my_moves, int ply, int nodes_added, int source) {
 
   bool black_to_move = ! search_->played_history_.IsBlackToMove() ^ (ply % 2 == 0);
   bool edge_found = false;
@@ -1286,7 +1356,7 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	  }
 	  // unlock nodes so that the next level can write stuff.
 	  search_->nodes_mutex_.unlock_shared();
-	  PreExtendTreeAndFastTrackForNNEvaluation_inner(edge.node(), my_moves, ply+1, nodes_added);
+	  PreExtendTreeAndFastTrackForNNEvaluation_inner(edge.node(), my_moves, ply+1, nodes_added, source);
 
 	} else {
 	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "All moves in the PV already expanded, nothing to do.";
@@ -1305,6 +1375,9 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	
 	// GetOrSpawnNode() does work with the lock on since it does not modify the tree.
 	Node* child_node = edge.GetOrSpawnNode(my_node, nullptr);
+	search_->search_stats_->nodes_added_by_the_helper.push(child_node);
+	search_->search_stats_->source_of_added_nodes.push(source);
+
 	nodes_added++;
 
 	// Create a history variable that will be filled by the four argument version of ExtendNode().
@@ -1371,7 +1444,7 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	if (!is_terminal && nodes_added < params_.GetAuxEngineFollowPvDepth() * params_.GetAuxEngineMaxAddedNodes()){
 	  if((int) my_moves.size() > ply+1){
 	    // Go deeper.
-	    PreExtendTreeAndFastTrackForNNEvaluation_inner(child_node, my_moves, ply+1, nodes_added);
+	    PreExtendTreeAndFastTrackForNNEvaluation_inner(child_node, my_moves, ply+1, nodes_added, source);
 	    return; // someone further down has already added visits_in_flight;
 	  }
 	}
@@ -1450,13 +1523,15 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation() {
       }
       std::vector<lczero::Move> my_moves = search_->fast_track_extend_and_evaluate_queue_.front(); // read the element
       search_->fast_track_extend_and_evaluate_queue_.pop(); // remove it from the queue.
+      int source = search_->search_stats_->source_of_queued_nodes.front();
+      search_->search_stats_->source_of_queued_nodes.pop();      
       // show full my_moves
       std::string s;
       for(int i = 0; i < (int) my_moves.size(); i++){
 	s = s + my_moves[i].as_string() + " ";
       }
-      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Length of PV to add: " << my_moves.size() << " my_moves: " << s;
-      PreExtendTreeAndFastTrackForNNEvaluation_inner(search_->root_node_, my_moves, 0, 0);
+      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Length of PV to add: " << my_moves.size() << " my_moves: " << s << " source: " << source;
+      PreExtendTreeAndFastTrackForNNEvaluation_inner(search_->root_node_, my_moves, 0, 0, source);
       if (params_.GetAuxEngineVerbosity() >= 9) {
 	LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: finished one iteration, size of minibatch_ is " << minibatch_.size();
 	LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: finished one iteration, size of fast_track_extend_and_evaluate_queue_ is " << search_->fast_track_extend_and_evaluate_queue_.size();
@@ -2044,7 +2119,7 @@ void SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	     child_node->GetAuxEngineMove() == 0xffff &&
 	     ! child_node->IsTerminal()
 	     ){
-	    AuxMaybeEnqueueNode(child_node);
+	    AuxMaybeEnqueueNode(child_node, 0);
 	    search_->number_of_times_called_AuxMaybeEnqueueNode_ += 1;
 	  }
 	}
@@ -2629,7 +2704,7 @@ void SearchWorker::DoBackupUpdateSingleNode(
        !n->IsTerminal() &&
        n->HasChildren() &&
        !search_->stop_.load(std::memory_order_acquire)){
-      AuxMaybeEnqueueNode(n);
+      AuxMaybeEnqueueNode(n, 1);
       search_->number_of_times_called_AuxMaybeEnqueueNode_ += 1;
     }
     

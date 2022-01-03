@@ -55,16 +55,18 @@ void Search::OpenAuxEngine() REQUIRES(threads_mutex_) {
   auxengine_threads_.emplace_back([this]() { AuxEngineWorker(); });
 }
 
-void SearchWorker::AuxMaybeEnqueueNode(Node* n) {
+void SearchWorker::AuxMaybeEnqueueNode(Node* n, int source) {
   // the caller (DoBackupUpdate()->DoBackupUpdateSingleNode()) has a lock on search_->nodes_mutex_, so no other thread will change n right now.
 
   if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE
-      << "AuxMaybeEnqueueNode() picked node: " << n->DebugString()
+      << "AuxMaybeEnqueueNode() picked node: " << n->DebugString() 
       << " for the persistent_queue_of_nodes which has size: "
-      << search_->search_stats_->persistent_queue_of_nodes.size();
+      << search_->search_stats_->persistent_queue_of_nodes.size()
+      << " The source was " << source;
 
   n->SetAuxEngineMove(0xfffe); // magic for pending
   search_->search_stats_->persistent_queue_of_nodes.push(n);
+  search_->search_stats_->source_of_queued_nodes.push(source);
   search_->auxengine_cv_.notify_one();
   search_->auxengine_mutex_.unlock();
 }
@@ -144,8 +146,35 @@ void Search::AuxEngineWorker() {
     }
     if (params_.GetAuxEngineVerbosity() >= 5)
       LOGFILE << "Purged " << number_of_nodes_before_purging - search_stats_->persistent_queue_of_nodes.size()
-	      << " nodes due to the move seleted by the opponent. " << search_stats_->persistent_queue_of_nodes.size()
+	      << " nodes from the query queue due to the move selected by the opponent. " << search_stats_->persistent_queue_of_nodes.size()
 	      << " nodes remain in the queue.";
+
+    // Also purge stale nodes from the _added_ queue.
+    number_of_nodes_before_purging = int(search_stats_->nodes_added_by_the_helper.size() / 2);
+    if(search_stats_->nodes_added_by_the_helper.size() > 0){
+      std::queue<Node*> nodes_added_by_the_helper_temp_;
+      long unsigned int my_size = search_stats_->nodes_added_by_the_helper.size();      
+      for(long unsigned int i=0; i < my_size; i = i + 2){
+	Node * n = search_stats_->nodes_added_by_the_helper.front();
+	search_stats_->nodes_added_by_the_helper.pop();
+	Node * n_parent = search_stats_->nodes_added_by_the_helper.front();
+	search_stats_->nodes_added_by_the_helper.pop();
+	if(n_parent == root_node_){
+	  // node is still relevant
+	  nodes_added_by_the_helper_temp_.push(n);
+	}
+      }
+      // update search_stats_->nodes_added_by_the_helper
+      my_size = nodes_added_by_the_helper_temp_.size();
+      for(long unsigned int i=0; i < my_size; i++){      
+    	search_stats_->nodes_added_by_the_helper.push(nodes_added_by_the_helper_temp_.front());
+    	nodes_added_by_the_helper_temp_.pop();
+      }
+    }
+    if (params_.GetAuxEngineVerbosity() >= 5)
+      LOGFILE << "Purged " << number_of_nodes_before_purging - search_stats_->nodes_added_by_the_helper.size()
+	      << " stale nodes from the queue of nodes added by the auxillary helper due to the move seleted by the opponent. " << search_stats_->nodes_added_by_the_helper.size()
+	      << " nodes remain in the queue of nodes added by the auxillary helper.";
   }
 
   // Kickstart with the root node, no need to wait for it to get some
@@ -158,6 +187,7 @@ void Search::AuxEngineWorker() {
     root_node_->SetAuxEngineMove(0xfffe); // mark root as pending and queue it
     auxengine_mutex_.lock(); 
     search_stats_->persistent_queue_of_nodes.push(root_node_);
+    search_stats_->source_of_queued_nodes.push(3);
     auxengine_cv_.notify_one();
     auxengine_mutex_.unlock();
     // if root has children, queue those too. (since we can only queue _nodes_ we can not unconditionally queue all _edges_ of root).
@@ -437,8 +467,8 @@ void Search::AuxWait() {
       // increase time if more than 90% of all queued nodes were delivered
       search_stats_->AuxEngineTime = search_stats_->AuxEngineTime * 1.1;
     }
-    if(search_stats_->persistent_queue_of_nodes.size() > 100 && search_stats_->AuxEngineTime > 30){
-      // Don't go below 30 ms for a query.
+    if(search_stats_->persistent_queue_of_nodes.size() > 100 && search_stats_->AuxEngineTime > 100){
+      // Don't go below 100 ms for a query.
       
     // if(search_stats_->persistent_queue_of_nodes.size() > auxengine_num_evals * 0.5){
       // decrease time if queue is greater than half of the number of delivered PVs

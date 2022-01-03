@@ -57,9 +57,9 @@ class Search {
 
   struct SearchStats {
     std::queue<Node*> persistent_queue_of_nodes; // the query queue for the auxillary helper engine.
-    std::queue<int> source_of_queued_nodes; // 0 = SearchWorker::PickNodesToExtendTask(); 1 = Search::DoBackupUpdateSingleNode(); 2 = Search::SendUciInfo()
+    std::queue<int> source_of_queued_nodes; // 0 = SearchWorker::PickNodesToExtendTask(); 1 = Search::DoBackupUpdateSingleNode(); 2 = Search::SendUciInfo(); 3 = Search::AuxEngineWorker(), node is root
     std::queue<Node*> nodes_added_by_the_helper; // this is useful only to assess how good the different sources are, it does not affect search
-    std::queue<int> source_of_added_nodes; // 0 = SearchWorker::PickNodesToExtendTask(); 1 = Search::DoBackupUpdateSingleNode(); 2 = Search::SendUciInfo()    
+    std::queue<int> source_of_added_nodes; // 0 = SearchWorker::PickNodesToExtendTask(); 1 = Search::DoBackupUpdateSingleNode(); 2 = Search::SendUciInfo(); 3 = Search::AuxEngineWorker(), node is root
     int AuxEngineTime; // dynamic version of the UCI option AuxEngineTime.
     Move ponder_move; // the move predicted by search().
     float q; // the expected q based on the predicted move.
@@ -323,7 +323,7 @@ class SearchWorker {
   // nodes to the minibatch
   void PreExtendTreeAndFastTrackForNNEvaluation();
   void PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node,
-	     std::vector<lczero::Move> my_moves, int ply, int nodes_added);
+      std::vector<lczero::Move> my_moves, int ply, int nodes_added, int source);
   
   // 2. Gather minibatch.
   void GatherMinibatch();
@@ -537,7 +537,7 @@ class SearchWorker {
   TaskWorkspace main_workspace_;
   bool exiting_ = false;
 
-  void AuxMaybeEnqueueNode(Node* n);
+  void AuxMaybeEnqueueNode(Node* n, int source);
 
 };
 

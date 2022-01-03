@@ -467,8 +467,8 @@ void Search::AuxWait() {
     search_stats_->AuxEngineThreshold = search_stats_->AuxEngineThreshold * 1.1;
   }
   if(search_stats_->persistent_queue_of_nodes.size() == 0){
-    // increase the number of queued nodes that comes the via the threshold, by decreasing the threshold
-    search_stats_->AuxEngineThreshold = search_stats_->AuxEngineThreshold * 0.9;
+    // increase the number of queued nodes that comes the via the threshold, by decreasing the threshold. Don't decrease it under the parameter value.
+    search_stats_->AuxEngineThreshold = std::min(params_.GetAuxEngineThreshold(), int(search_stats_->AuxEngineThreshold * 0.9));
   }
   ChessBoard my_board = played_history_.Last().GetBoard();
   if((my_board.ours() | my_board.theirs()).count() >= 20){

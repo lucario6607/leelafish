@@ -463,12 +463,12 @@ void Search::AuxWait() {
     auxengine_threads_.pop_back();
   }
   if(search_stats_->AuxEngineQueueSizeAtMoveSelectionTime > 100){
-    // decrease the number of queued nodes that comes the via the threshold, by increasing the threshold
-    search_stats_->AuxEngineThreshold = search_stats_->AuxEngineThreshold * 1.1;
+    // decrease the number of queued nodes that comes the via the threshold, by increasing the threshold. Don't increase it above the parameter value.
+    search_stats_->AuxEngineThreshold = std::min(params_.GetAuxEngineThreshold(), int(search_stats_->AuxEngineThreshold * 1.1));
   }
   if(search_stats_->AuxEngineQueueSizeAtMoveSelectionTime == 0){
-    // increase the number of queued nodes that comes the via the threshold, by decreasing the threshold. Don't decrease it under the parameter value.
-    search_stats_->AuxEngineThreshold = std::max(params_.GetAuxEngineThreshold(), int(search_stats_->AuxEngineThreshold * 0.9));
+    // increase the number of queued nodes that comes the via the threshold, by decreasing the threshold.
+    search_stats_->AuxEngineThreshold = int(search_stats_->AuxEngineThreshold * 0.9);
   }
   ChessBoard my_board = played_history_.Last().GetBoard();
   if((my_board.ours() | my_board.theirs()).count() >= 20){
@@ -487,7 +487,7 @@ void Search::AuxWait() {
       << " Number of added nodes " << auxengine_num_updates;
   } else {
     // Depth based queries
-    LOGFILE << "Summaries per move: (Depth=" << params_.GetAuxEngineFollowPvDepth() << ") nodes in the query queue at the end of search: " << search_stats_->AuxEngineQueueSizeAtMoveSelectionTime
+    LOGFILE << "Summaries per move: (Depth=" << params_.GetAuxEngineDepth() << ") nodes in the query queue at the end of search: " << search_stats_->AuxEngineQueueSizeAtMoveSelectionTime
       << " Average duration " << (auxengine_num_evals ? (auxengine_total_dur / auxengine_num_evals) : -1.0f) << "ms"
       << " New AuxEngineThreshold for next iteration " << search_stats_->AuxEngineThreshold      
       << " Number of evals " << auxengine_num_evals

@@ -601,6 +601,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
       std::queue<Node*> persistent_queue_of_nodes_temp;
       std::queue<int> source_of_queued_nodes_temp;
       long unsigned int my_size = search_stats_->persistent_queue_of_nodes.size();
+      if(params_.GetAuxEngineVerbosity() >= 5) LOGFILE << my_size << " nodes left in the query queue at move selection time.";
       for(long unsigned int i=0; i < my_size; i++){
     	Node * n = search_stats_->persistent_queue_of_nodes.front(); // read the element
     	search_stats_->persistent_queue_of_nodes.pop(); // remove it from the queue.
@@ -633,6 +634,8 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	LOGFILE << "Purged " << my_size - size_kept
 	      << " nodes in the query queue based the selected move: " << final_bestmove_.as_string()
 	      << ". " << size_kept << " nodes remain.";
+    } else {
+      if(params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "No nodes in the query queue at move selection time.";
     }
   
     // // Also purge nodes from nodes_added_by_the_helper TODO: generalize this to a function that takes two pointers as input which then can be used both for persistent_queue_of_nodes and nodes_added_by_the_helper.
@@ -2112,17 +2115,19 @@ void SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 
 	// if the node was spawned and its depth is low enough, then queue this new node to the auxillary helper.
 	// current_path.size() + base_depth is the distance from root.
-	if(child_node->GetN() == 0){
-	  if(
-	     int(current_path.size() + base_depth) <= params_.GetAuxEngineMaxQueryDepth() &&
-	     params_.GetAuxEngineFile() != "" &&
-	     child_node->GetAuxEngineMove() == 0xffff &&
-	     ! child_node->IsTerminal()
-	     ){
-	    AuxMaybeEnqueueNode(child_node, 0);
-	    search_->number_of_times_called_AuxMaybeEnqueueNode_ += 1;
-	  }
-	}
+	// this is currently not safe
+
+	// if(child_node->GetN() == 0){
+	//   if(
+	//      int(current_path.size() + base_depth) <= params_.GetAuxEngineMaxQueryDepth() &&
+	//      params_.GetAuxEngineFile() != "" &&
+	//      child_node->GetAuxEngineMove() == 0xffff &&
+	//      ! child_node->IsTerminal() 
+	//      ){
+	//     AuxMaybeEnqueueNode(child_node, 0);
+	//     search_->number_of_times_called_AuxMaybeEnqueueNode_ += 1;
+	//   }
+	// }
 
         // Probably best place to check for two-fold draws consistently.
         // Depth starts with 1 at root, so real depth is depth - 1.

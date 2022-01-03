@@ -113,7 +113,9 @@ void Search::AuxEngineWorker() {
     auxengine_ready_ = true;
     // Set the time to use, based on the UCI parameter
     search_stats_->AuxEngineTime = params_.GetAuxEngineTime();
+    search_stats_->AuxEngineThreshold = params_.GetAuxEngineThreshold();
   } else {
+    // TODO implement a "newgame" field in search_stats_.
     // If newgame then engine.cc will set search_stats_->AuxEngineTime to zero, and we have to set it to the parameter value (which is not available to engine.cc)
     if(search_stats_->AuxEngineTime == 0) {
       search_stats_->AuxEngineTime = params_.GetAuxEngineTime();
@@ -123,8 +125,8 @@ void Search::AuxEngineWorker() {
     }
     
     // purge obsolete nodes in the queue, if any. The even elements are the actual nodes, the odd elements is root if the preceding even element is still a relevant node.
-    int number_of_nodes_before_purging = int(search_stats_->persistent_queue_of_nodes.size() / 2);
     if(search_stats_->persistent_queue_of_nodes.size() > 0){
+      int number_of_nodes_before_purging = int(search_stats_->persistent_queue_of_nodes.size() / 2);
       std::queue<Node*> persistent_queue_of_nodes_temp_;
       long unsigned int my_size = search_stats_->persistent_queue_of_nodes.size();      
       for(long unsigned int i=0; i < my_size; i = i + 2){
@@ -143,15 +145,15 @@ void Search::AuxEngineWorker() {
     	search_stats_->persistent_queue_of_nodes.push(persistent_queue_of_nodes_temp_.front());
     	persistent_queue_of_nodes_temp_.pop();
       }
+      if (params_.GetAuxEngineVerbosity() >= 5)
+	LOGFILE << "Purged " << number_of_nodes_before_purging - search_stats_->persistent_queue_of_nodes.size()
+		<< " nodes from the query queue due to the move selected by the opponent. " << search_stats_->persistent_queue_of_nodes.size()
+		<< " nodes remain in the queue.";
     }
-    if (params_.GetAuxEngineVerbosity() >= 5)
-      LOGFILE << "Purged " << number_of_nodes_before_purging - search_stats_->persistent_queue_of_nodes.size()
-	      << " nodes from the query queue due to the move selected by the opponent. " << search_stats_->persistent_queue_of_nodes.size()
-	      << " nodes remain in the queue.";
 
     // Also purge stale nodes from the _added_ queue.
-    number_of_nodes_before_purging = int(search_stats_->nodes_added_by_the_helper.size() / 2);
     if(search_stats_->nodes_added_by_the_helper.size() > 0){
+      int number_of_nodes_before_purging = int(search_stats_->nodes_added_by_the_helper.size() / 2);
       std::queue<Node*> nodes_added_by_the_helper_temp_;
       long unsigned int my_size = search_stats_->nodes_added_by_the_helper.size();      
       for(long unsigned int i=0; i < my_size; i = i + 2){
@@ -170,11 +172,11 @@ void Search::AuxEngineWorker() {
     	search_stats_->nodes_added_by_the_helper.push(nodes_added_by_the_helper_temp_.front());
     	nodes_added_by_the_helper_temp_.pop();
       }
+      if (params_.GetAuxEngineVerbosity() >= 5)
+	LOGFILE << "Purged " << number_of_nodes_before_purging - search_stats_->nodes_added_by_the_helper.size()
+		<< " stale nodes from the queue of nodes added by the auxillary helper due to the move seleted by the opponent. " << search_stats_->nodes_added_by_the_helper.size()
+		<< " nodes remain in the queue of nodes added by the auxillary helper.";
     }
-    if (params_.GetAuxEngineVerbosity() >= 5)
-      LOGFILE << "Purged " << number_of_nodes_before_purging - search_stats_->nodes_added_by_the_helper.size()
-	      << " stale nodes from the queue of nodes added by the auxillary helper due to the move seleted by the opponent. " << search_stats_->nodes_added_by_the_helper.size()
-	      << " nodes remain in the queue of nodes added by the auxillary helper.";
   }
 
   // Kickstart with the root node, no need to wait for it to get some
@@ -460,6 +462,14 @@ void Search::AuxWait() {
     auxengine_threads_.back().join();
     auxengine_threads_.pop_back();
   }
+  if(search_stats_->persistent_queue_of_nodes.size() > 100){
+    // decrease the number of queued nodes that comes the via the threshold, by increasing the threshold
+    search_stats_->AuxEngineThreshold = search_stats_->AuxEngineThreshold * 1.1;
+  }
+  if(search_stats_->persistent_queue_of_nodes.size() == 0){
+    // increase the number of queued nodes that comes the via the threshold, by decreasing the threshold
+    search_stats_->AuxEngineThreshold = search_stats_->AuxEngineThreshold * 0.9;
+  }
   ChessBoard my_board = played_history_.Last().GetBoard();
   if((my_board.ours() | my_board.theirs()).count() >= 20){
     if(search_stats_->persistent_queue_of_nodes.size() == 0){     
@@ -467,8 +477,8 @@ void Search::AuxWait() {
       // increase time if more than 90% of all queued nodes were delivered
       search_stats_->AuxEngineTime = search_stats_->AuxEngineTime * 1.1;
     }
-    if(search_stats_->persistent_queue_of_nodes.size() > 100 && search_stats_->AuxEngineTime > 100){
-      // Don't go below 100 ms for a query.
+    if(search_stats_->persistent_queue_of_nodes.size() > 100 && search_stats_->AuxEngineTime > 60){
+      // Don't go too low for a query.
       
     // if(search_stats_->persistent_queue_of_nodes.size() > auxengine_num_evals * 0.5){
       // decrease time if queue is greater than half of the number of delivered PVs
@@ -477,13 +487,15 @@ void Search::AuxWait() {
     // Time based queries    
     LOGFILE << "Summaries per move: (Time based queries) persistent_queue_of_nodes size at the end of search: " << search_stats_->persistent_queue_of_nodes.size()
       << " Average duration " << (auxengine_num_evals ? (auxengine_total_dur / auxengine_num_evals) : -1.0f) << "ms"
-      << " New AuxEngineTime for next iteration " << search_stats_->AuxEngineTime 
+      << " New AuxEngineTime for next iteration " << search_stats_->AuxEngineTime
+      << " New AuxEngineThreshold for next iteration " << search_stats_->AuxEngineThreshold
       << " Number of evals " << auxengine_num_evals
       << " Number of added nodes " << auxengine_num_updates;
   } else {
     // Depth based queries
-    LOGFILE << "Summaries per move: (Depth based queries) persistent_queue_of_nodes size at the end of search: " << search_stats_->persistent_queue_of_nodes.size()
+    LOGFILE << "Summaries per move: (Depth=" << params_.GetAuxEngineFollowPvDepth() << ") persistent_queue_of_nodes size at the end of search: " << search_stats_->persistent_queue_of_nodes.size()
       << " Average duration " << (auxengine_num_evals ? (auxengine_total_dur / auxengine_num_evals) : -1.0f) << "ms"
+      << " New AuxEngineThreshold for next iteration " << search_stats_->AuxEngineThreshold      
       << " Number of evals " << auxengine_num_evals
       << " Number of added nodes " << auxengine_num_updates;
   }

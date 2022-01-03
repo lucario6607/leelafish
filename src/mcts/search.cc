@@ -302,7 +302,7 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
 	 &&
 	   (depth <= 22 // prioritize 'lower' depth nodes.
 	    ||
-	    5 * iter.node()->GetN() >= (uint32_t) params_.GetAuxEngineThreshold() // don't disturb too much. Times 5 is the first PV bonus.
+	    5 * iter.node()->GetN() >= (uint32_t) search_stats_->AuxEngineThreshold // don't disturb too much. Times 5 is the first PV bonus.
    	   )
 	){
 
@@ -2704,7 +2704,7 @@ void SearchWorker::DoBackupUpdateSingleNode(
     // Avoid a full function call unless it will likely actually queue the node.
     // Do nothing if search is interrupted, the node will get picked the next iteration anyway.
     if(params_.GetAuxEngineFile() != "" &&
-       n->GetN() >= (uint32_t) params_.GetAuxEngineThreshold() &&
+       n->GetN() >= (uint32_t) search_->search_stats_->AuxEngineThreshold &&
        n->GetAuxEngineMove() == 0xffff &&
        !n->IsTerminal() &&
        n->HasChildren() &&

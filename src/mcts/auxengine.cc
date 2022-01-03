@@ -462,30 +462,24 @@ void Search::AuxWait() {
     auxengine_threads_.back().join();
     auxengine_threads_.pop_back();
   }
-  if(search_stats_->persistent_queue_of_nodes.size() > 100){
+  if(search_stats_->AuxEngineQueueSizeAtMoveSelectionTime > 100){
     // decrease the number of queued nodes that comes the via the threshold, by increasing the threshold
     search_stats_->AuxEngineThreshold = search_stats_->AuxEngineThreshold * 1.1;
   }
-  if(search_stats_->persistent_queue_of_nodes.size() == 0){
+  if(search_stats_->AuxEngineQueueSizeAtMoveSelectionTime == 0){
     // increase the number of queued nodes that comes the via the threshold, by decreasing the threshold. Don't decrease it under the parameter value.
-    search_stats_->AuxEngineThreshold = std::min(params_.GetAuxEngineThreshold(), int(search_stats_->AuxEngineThreshold * 0.9));
+    search_stats_->AuxEngineThreshold = std::max(params_.GetAuxEngineThreshold(), int(search_stats_->AuxEngineThreshold * 0.9));
   }
   ChessBoard my_board = played_history_.Last().GetBoard();
   if((my_board.ours() | my_board.theirs()).count() >= 20){
-    if(search_stats_->persistent_queue_of_nodes.size() == 0){     
-    // if(search_stats_->persistent_queue_of_nodes.size() < auxengine_num_evals * 0.1){ 
-      // increase time if more than 90% of all queued nodes were delivered
+    if(search_stats_->AuxEngineQueueSizeAtMoveSelectionTime == 0){     
       search_stats_->AuxEngineTime = search_stats_->AuxEngineTime * 1.1;
     }
-    if(search_stats_->persistent_queue_of_nodes.size() > 100 && search_stats_->AuxEngineTime > 60){
-      // Don't go too low for a query.
-      
-    // if(search_stats_->persistent_queue_of_nodes.size() > auxengine_num_evals * 0.5){
-      // decrease time if queue is greater than half of the number of delivered PVs
-      search_stats_->AuxEngineTime = search_stats_->AuxEngineTime * 0.9;
+    if(search_stats_->AuxEngineQueueSizeAtMoveSelectionTime > 100){
+      search_stats_->AuxEngineTime = std::max(params_.GetAuxEngineTime(), int(search_stats_->AuxEngineTime * 0.9)); // don't go below the parameter value
     }
     // Time based queries    
-    LOGFILE << "Summaries per move: (Time based queries) persistent_queue_of_nodes size at the end of search: " << search_stats_->persistent_queue_of_nodes.size()
+    LOGFILE << "Summaries per move: (Time based queries) persistent_queue_of_nodes size at the end of search: " << search_stats_->AuxEngineQueueSizeAtMoveSelectionTime
       << " Average duration " << (auxengine_num_evals ? (auxengine_total_dur / auxengine_num_evals) : -1.0f) << "ms"
       << " New AuxEngineTime for next iteration " << search_stats_->AuxEngineTime
       << " New AuxEngineThreshold for next iteration " << search_stats_->AuxEngineThreshold
@@ -493,7 +487,7 @@ void Search::AuxWait() {
       << " Number of added nodes " << auxengine_num_updates;
   } else {
     // Depth based queries
-    LOGFILE << "Summaries per move: (Depth=" << params_.GetAuxEngineFollowPvDepth() << ") persistent_queue_of_nodes size at the end of search: " << search_stats_->persistent_queue_of_nodes.size()
+    LOGFILE << "Summaries per move: (Depth=" << params_.GetAuxEngineFollowPvDepth() << ") nodes in the query queue at the end of search: " << search_stats_->AuxEngineQueueSizeAtMoveSelectionTime
       << " Average duration " << (auxengine_num_evals ? (auxengine_total_dur / auxengine_num_evals) : -1.0f) << "ms"
       << " New AuxEngineThreshold for next iteration " << search_stats_->AuxEngineThreshold      
       << " Number of evals " << auxengine_num_evals

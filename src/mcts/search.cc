@@ -596,6 +596,9 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     bestmove_is_sent_ = true;
     current_best_edge_ = EdgeAndNode();
 
+    // Store the size of the queue, for adjustment of threshold and time
+    search_stats_->AuxEngineQueueSizeAtMoveSelectionTime = search_stats_->persistent_queue_of_nodes.size();
+
     // purge obsolete nodes in the helper queues. Note that depending on the move of the opponent more nodes can become obsolete.
     if(search_stats_->persistent_queue_of_nodes.size() > 0){
       std::queue<Node*> persistent_queue_of_nodes_temp;

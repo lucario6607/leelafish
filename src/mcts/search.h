@@ -62,6 +62,7 @@ class Search {
     std::queue<int> source_of_added_nodes; // 0 = SearchWorker::PickNodesToExtendTask(); 1 = Search::DoBackupUpdateSingleNode(); 2 = Search::SendUciInfo(); 3 = Search::AuxEngineWorker(), node is root
     int AuxEngineTime; // dynamic version of the UCI option AuxEngineTime.
     int AuxEngineThreshold; // dynamic version of the UCI option AuxEngineThreshold.
+    int AuxEngineQueueSizeAtMoveSelectionTime; // dynamic version of the UCI option AuxEngineThreshold.
     Move ponder_move; // the move predicted by search().
     float q; // the expected q based on the predicted move.
   };

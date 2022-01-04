@@ -91,7 +91,7 @@ EngineController::EngineController(std::unique_ptr<UciResponder> uci_responder,
       uci_responder_(std::move(uci_responder)),
       persistent_queue_of_nodes_{},
       current_position_{ChessBoard::kStartposFen, {}} {
-	// search_stats_ = std::make_unique<Search::SearchStats>();
+	// search_stats_->New_Game = false;
       }
 
 void EngineController::PopulateOptions(OptionsParser* options) {
@@ -171,8 +171,7 @@ void EngineController::NewGame() {
   search_.reset();
   tree_.reset();
   CreateFreshTimeManager();
-  // search_stats_->AuxEngineTime = 0;
-  // persistent_queue_of_nodes_ = {};
+  search_stats_->New_Game = true;
   current_position_ = {ChessBoard::kStartposFen, {}};
   UpdateFromUciOptions();
 }

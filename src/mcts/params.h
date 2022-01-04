@@ -156,14 +156,8 @@ class SearchParams {
   int GetAuxEngineVerbosity() const {
     return options_.Get<int>(kAuxEngineVerbosityId);
   }
-  int GetAuxEngineFollowPvDepth() const {
-    return options_.Get<int>(kAuxEngineFollowPvDepthId);
-  }
-  float GetAuxEngineMaxAddedNodes() const {
-    return options_.Get<float>(kAuxEngineMaxAddedNodesId);
-  }
-  int GetAuxEngineMaxQueryDepth() const {
-    return options_.Get<int>(kAuxEngineMaxQueryDepthId);
+  float GetAuxEngineIdealRatio() const {
+    return options_.Get<float>(kAuxEngineIdealRatioId);
   }
 
   // Search parameter IDs.
@@ -234,9 +228,7 @@ class SearchParams {
   static const OptionId kAuxEngineDepthId;
   static const OptionId kAuxEngineTimeId;
   static const OptionId kAuxEngineVerbosityId;
-  static const OptionId kAuxEngineFollowPvDepthId;
-  static const OptionId kAuxEngineMaxAddedNodesId;
-  static const OptionId kAuxEngineMaxQueryDepthId;
+  static const OptionId kAuxEngineIdealRatioId;
 
  private:
   const OptionsDict& options_;

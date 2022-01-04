@@ -176,7 +176,11 @@ Search::Search(const NodeTree& tree, Network* network,
     pending_searchers_.store(params_.GetMaxConcurrentSearchers(),
                              std::memory_order_release);
   }
-  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Search called with search_stats at: " << &search_stats_ << " size of persistent_queue: " << search_stats_->persistent_queue_of_nodes.size();
+  if (search_stats_->AuxEngineThreshold == 0){
+    search_stats_->AuxEngineThreshold = params_.GetAuxEngineThreshold();
+  }
+  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Search called with search_stats at: " << &search_stats_ << " size of persistent_queue: " << search_stats_->persistent_queue_of_nodes.size() << " threshold=" << search_stats_->AuxEngineThreshold;
+
 }
 
 namespace {
@@ -598,13 +602,14 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 
     // Store the size of the queue, for adjustment of threshold and time
     search_stats_->AuxEngineQueueSizeAtMoveSelectionTime = search_stats_->persistent_queue_of_nodes.size();
+    search_stats_->Total_number_of_nodes = search_stats_->Total_number_of_nodes + root_node_->GetN();
 
     // purge obsolete nodes in the helper queues. Note that depending on the move of the opponent more nodes can become obsolete.
     if(search_stats_->persistent_queue_of_nodes.size() > 0){
       std::queue<Node*> persistent_queue_of_nodes_temp;
       std::queue<int> source_of_queued_nodes_temp;
       long unsigned int my_size = search_stats_->persistent_queue_of_nodes.size();
-      if(params_.GetAuxEngineVerbosity() >= 5) LOGFILE << my_size << " nodes left in the query queue at move selection time.";
+      if(params_.GetAuxEngineVerbosity() >= 5) LOGFILE << my_size << " nodes left in the query queue at move selection time. Threshold used: " << search_stats_->AuxEngineThreshold;
       for(long unsigned int i=0; i < my_size; i++){
     	Node * n = search_stats_->persistent_queue_of_nodes.front(); // read the element
     	search_stats_->persistent_queue_of_nodes.pop(); // remove it from the queue.
@@ -638,7 +643,9 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	      << " nodes in the query queue based the selected move: " << final_bestmove_.as_string()
 	      << ". " << size_kept << " nodes remain.";
     } else {
-      if(params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "No nodes in the query queue at move selection time.";
+      if(params_.GetAuxEngineVerbosity() >= 5) LOGFILE
+	 << "No nodes in the query queue at move selection time. "
+	 << "Threshold used: " << search_stats_->AuxEngineThreshold;
     }
   
     // // Also purge nodes from nodes_added_by_the_helper TODO: generalize this to a function that takes two pointers as input which then can be used both for persistent_queue_of_nodes and nodes_added_by_the_helper.
@@ -688,7 +695,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
       }
       
     if(params_.GetAuxEngineVerbosity() >= 5)
-      LOGFILE << "Total number of nodes in the added by the helper engine: " << my_size
+      LOGFILE << "Total number of nodes in the added by the helper engine during this move: " << my_size
 	      << ". Purged " << my_size - size_kept
 	      << " nodes in the added queue based the selected move: " << final_bestmove_.as_string()
 	      << ". " << std::endl
@@ -1440,25 +1447,18 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	  child_node->IncrementNInFlight(1); // seems necessary.
 	}
 
-	int node_limit = floor(params_.GetAuxEngineFollowPvDepth() * params_.GetAuxEngineMaxAddedNodes());
 	// unlock the readlock.
 	search_->nodes_mutex_.unlock_shared();
-	if(nodes_added >= node_limit && params_.GetAuxEngineVerbosity() >= 9){
-	       LOGFILE << "Stopping adding nodes at depth " << ply << " since number of already added nodes from this PV is " << nodes_added << " and the limit is " << node_limit << " the floor of the product of " << params_.GetAuxEngineFollowPvDepth() << " and " << params_.GetAuxEngineMaxAddedNodes();
-	}
-	// Don't add more than this number of nodes at a time in a line.
-	if (!is_terminal && nodes_added < params_.GetAuxEngineFollowPvDepth() * params_.GetAuxEngineMaxAddedNodes()){
-	  if((int) my_moves.size() > ply+1){
+	if (!is_terminal && (int) my_moves.size() > ply+1){
 	    // Go deeper.
 	    PreExtendTreeAndFastTrackForNNEvaluation_inner(child_node, my_moves, ply+1, nodes_added, source);
 	    return; // someone further down has already added visits_in_flight;
-	  }
 	}
 	
 	// Not going deeper now, either because the PV is finished, or because we hit a terminal node.
 	// Aquire a write lock to adjust visits_in_flight.
 	search_->nodes_mutex_.lock();
-	search_->auxengine_num_updates += nodes_added;
+	search_->search_stats_->Number_of_nodes_added_by_AuxEngine += nodes_added;
 	if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Successfully added a full PV, depth = " << ply << ", number of nodes added = " << nodes_added;
 	// Adjust the visits_in_flight now that we know how many nodes where actually added.
 	// Each node shall have as many visits_in_flight as there are added nodes beneath it.
@@ -2115,22 +2115,6 @@ void SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
         (*visits_to_perform.back())[best_idx] += new_visits;
         cur_limit -= new_visits;
         Node* child_node = best_edge.GetOrSpawnNode(/* parent */ node, nullptr);
-
-	// if the node was spawned and its depth is low enough, then queue this new node to the auxillary helper.
-	// current_path.size() + base_depth is the distance from root.
-	// this is currently not safe
-
-	// if(child_node->GetN() == 0){
-	//   if(
-	//      int(current_path.size() + base_depth) <= params_.GetAuxEngineMaxQueryDepth() &&
-	//      params_.GetAuxEngineFile() != "" &&
-	//      child_node->GetAuxEngineMove() == 0xffff &&
-	//      ! child_node->IsTerminal() 
-	//      ){
-	//     AuxMaybeEnqueueNode(child_node, 0);
-	//     search_->number_of_times_called_AuxMaybeEnqueueNode_ += 1;
-	//   }
-	// }
 
         // Probably best place to check for two-fold draws consistently.
         // Depth starts with 1 at root, so real depth is depth - 1.

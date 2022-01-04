@@ -57,14 +57,17 @@ class Search {
 
   struct SearchStats {
     std::queue<Node*> persistent_queue_of_nodes; // the query queue for the auxillary helper engine.
-    std::queue<int> source_of_queued_nodes; // 0 = SearchWorker::PickNodesToExtendTask(); 1 = Search::DoBackupUpdateSingleNode(); 2 = Search::SendUciInfo(); 3 = Search::AuxEngineWorker(), node is root
+    std::queue<int> source_of_queued_nodes; // 0 = SearchWorker::PickNodesToExtendTask(); 1 = Search::DoBackupUpdateSingleNode(); 2 = Search::SendUciInfo(); 3 = Search::AuxEngineWorker() node is root
     std::queue<Node*> nodes_added_by_the_helper; // this is useful only to assess how good the different sources are, it does not affect search
-    std::queue<int> source_of_added_nodes; // 0 = SearchWorker::PickNodesToExtendTask(); 1 = Search::DoBackupUpdateSingleNode(); 2 = Search::SendUciInfo(); 3 = Search::AuxEngineWorker(), node is root
+    std::queue<int> source_of_added_nodes; // 0 = SearchWorker::PickNodesToExtendTask(); 1 = Search::DoBackupUpdateSingleNode(); 2 = Search::SendUciInfo(); 3 = Search::AuxEngineWorker() node is root
     int AuxEngineTime; // dynamic version of the UCI option AuxEngineTime.
+    unsigned long long int Total_number_of_nodes; // all nodes ever added to the tree.
+    unsigned long long int Number_of_nodes_added_by_AuxEngine; // all nodes ever added by the auxillary engine.
     int AuxEngineThreshold; // dynamic version of the UCI option AuxEngineThreshold.
-    int AuxEngineQueueSizeAtMoveSelectionTime; // dynamic version of the UCI option AuxEngineThreshold.
+    int AuxEngineQueueSizeAtMoveSelectionTime;
     Move ponder_move; // the move predicted by search().
     float q; // the expected q based on the predicted move.
+    bool New_Game = false; // used by EngineController::NewGame in engine.cc to inform search that a new game has started, so it can re-initiate AuxEngineTime to the value given by UCI
   };
 
   Search(const NodeTree& tree, Network* network,

@@ -323,33 +323,30 @@ const OptionId SearchParams::kAuxEngineOptionsId{
     "auxengine-options", "AuxEngineOptions",
     "Semicolon separated list of UCI options for the auxiliary engine\n"
     "e.g. Hash=1024;Threads=1"};
+const OptionId SearchParams::kAuxEngineIdealRatioId{
+    "auxengine-ideal-ratio", "AuxEngineIdealRatio",
+      "The ideal ratio of total number of nodes added from a helper "
+      "PV to the total number of nodes. This value depends on the "
+      "size of the neural net, the strength of the helper engine "
+      "and the relative strength of the CPU compared to the GPU. "
+      "For systems with a relatively strong CPU this ratio is higher "
+      "than for systems with a relatively weak CPU, when the GPU is the "
+      "same. For two systems with identical CPU, this ratio is lower "
+      "on the system with the strongest GPU." };
 const OptionId SearchParams::kAuxEngineThresholdId{
     "auxengine-threshold", "AuxEngineThreshold",
-    "The auxiliary engine is called when a node reaches this many visits"};
+    "The auxiliary engine is intially called when a node reaches this "
+      "many visits. Between moves this value is adjusted "
+      "automatically."};
 const OptionId SearchParams::kAuxEngineTimeId{
     "auxengine-time", "AuxEngineTime",
-    "Time (in milliseconds) for the auxiliary engine to search."};
-const OptionId SearchParams::kAuxEngineDepthId{
-    "auxengine-depth", "AuxEngineDepth",
-    "Depth for the auxiliary engine search."};
+    "Time (in milliseconds) for the auxiliary engine to search. "
+      "This is automatically adjusted, but initially this value is "
+      "used and the automatic adjustment will never make it higher "
+      "than five times this value."};
 const OptionId SearchParams::kAuxEngineVerbosityId{
     "auxengine-verbosity", "AuxEngineVerbosity",
     "Higher number for more logging."};
-const OptionId SearchParams::kAuxEngineFollowPvDepthId{
-    "auxengine-follow-pv-depth", "AuxEngineFollowPvDepth",
-      "Trust the PVs given by the helper to this depth. "
-      "Nodes deeper than this depth will never be added."};
-const OptionId SearchParams::kAuxEngineMaxAddedNodesId{
-    "auxengine-max-added-nodes", "AuxEngineMaxAddedNodes",
-      "The max number of nodes to add from a helper PV is "
-      "this numer times AuxEngineFollowPvDepth, rounded down "
-      "to nearest integer. The default values (16; 0.75) "
-      "results in maximum 12 new nodes added per PV."};
-const OptionId SearchParams::kAuxEngineMaxQueryDepthId{
-    "auxengine-max-query-depth", "AuxEngineMaxQueryDepth",
-      "Nodes at depth higher than this number will only be "
-      "added the query-queue for the helper engine if the "
-      "query-queue is empty."};
   
 void SearchParams::Populate(OptionsParser* options) {
   // Here the uci optimized defaults" are set.
@@ -451,13 +448,10 @@ void SearchParams::Populate(OptionsParser* options) {
   options->HideOption(kTemperatureVisitOffsetId);
   options->Add<StringOption>(kAuxEngineFileId);
   options->Add<StringOption>(kAuxEngineOptionsId) = "Threads=3;Hash=1024;Ponder=off";
-  options->Add<IntOption>(kAuxEngineThresholdId, 1, 1000000) = 80;
-  options->Add<IntOption>(kAuxEngineTimeId, 10, 10000) = 125;
-  options->Add<IntOption>(kAuxEngineDepthId, 8, 1000) = 17;
+  options->Add<IntOption>(kAuxEngineThresholdId, 1, 1000000) = 150;
+  options->Add<IntOption>(kAuxEngineTimeId, 10, 10000) = 30;
   options->Add<IntOption>(kAuxEngineVerbosityId, 0, 10) = 1;
-  options->Add<IntOption>(kAuxEngineFollowPvDepthId, 1, 100) = 16;
-  options->Add<FloatOption>(kAuxEngineMaxAddedNodesId, 0.0f, 1.0f) = 1.0f;
-  options->Add<IntOption>(kAuxEngineMaxQueryDepthId, 0, 100) = 7;
+  options->Add<FloatOption>(kAuxEngineIdealRatioId, 0.0f, 1.0f) = 0.0005f;
 }
 
 SearchParams::SearchParams(const OptionsDict& options)

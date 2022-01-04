@@ -111,17 +111,23 @@ void Search::AuxEngineWorker() {
       }
     }
     auxengine_ready_ = true;
-    // Set the time to use, based on the UCI parameter
+    // Initiate some stats and parameters (Threshold needs to be set
+    // earlier, see search() in search.cc)
     search_stats_->AuxEngineTime = params_.GetAuxEngineTime();
-    search_stats_->AuxEngineThreshold = params_.GetAuxEngineThreshold();
+    search_stats_->Number_of_nodes_added_by_AuxEngine = 0;
+    search_stats_->Total_number_of_nodes = 0;
+    if(search_stats_->New_Game){
+      search_stats_->New_Game = false;
+    }
   } else {
-    // TODO implement a "newgame" field in search_stats_.
-    // If newgame then engine.cc will set search_stats_->AuxEngineTime to zero, and we have to set it to the parameter value (which is not available to engine.cc)
-    if(search_stats_->AuxEngineTime == 0) {
+    if(search_stats_->New_Game){
       search_stats_->AuxEngineTime = params_.GetAuxEngineTime();
+      search_stats_->AuxEngineThreshold = params_.GetAuxEngineThreshold();
+      search_stats_->Total_number_of_nodes = 0;
+      search_stats_->Number_of_nodes_added_by_AuxEngine = 0;
       if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE
-	  << "Setting AuxEngineTime to "
-	  << search_stats_->AuxEngineTime << " since it was zero";
+    << "Resetting AuxEngine parameters because a new game started.";
+      search_stats_->New_Game = false;
     }
     
     // purge obsolete nodes in the queue, if any. The even elements are the actual nodes, the odd elements is root if the preceding even element is still a relevant node.
@@ -192,8 +198,6 @@ void Search::AuxEngineWorker() {
     search_stats_->source_of_queued_nodes.push(3);
     auxengine_cv_.notify_one();
     auxengine_mutex_.unlock();
-    // if root has children, queue those too. (since we can only queue _nodes_ we can not unconditionally queue all _edges_ of root).
-    
   }
   nodes_mutex_.unlock(); // write unlock
 
@@ -227,9 +231,8 @@ void Search::DoAuxEngine(Node* n) {
   nodes_mutex_.lock_shared();
   if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "DoAuxEngine() called for node" << n->DebugString();
   nodes_mutex_.unlock_shared();  
-  // Calculate depth in a safe way. Return early if root cannot be
-  // reached from n.
-  // Todo test if this lock is unnecessary when solidtree is disabled.
+
+  // Calculate depth.
   int depth = 0;
   if(n != root_node_){
     if(stop_.load(std::memory_order_acquire)) {
@@ -295,12 +298,27 @@ void Search::DoAuxEngine(Node* n) {
 
   auto auxengine_start_time = std::chrono::steady_clock::now();
   auxengine_os_ << s << std::endl;
-  // use go depth when there are few pieces left on the board. 20 pieces hardcoded for now.
+
+  // Adjust time so that the ideal ratio of added nodes is reached.
+  float ideal_ratio = params_.GetAuxEngineIdealRatio();
   if((my_board.ours() | my_board.theirs()).count() < 20){
-    auxengine_os_ << "go depth " << params_.GetAuxEngineDepth() << std::endl;
-  } else {
-    auxengine_os_ << "go movetime " << search_stats_->AuxEngineTime << std::endl;
+    ideal_ratio *= 2.0f; // Accept more nodes from helper when fewer pieces on the board.
   }
+  // before reading N from root node, get a shared lock
+  nodes_mutex_.lock_shared();
+  float observed_ratio = float(search_stats_->Number_of_nodes_added_by_AuxEngine) / (search_stats_->Total_number_of_nodes + root_node_->GetN());
+  nodes_mutex_.unlock_shared();
+  if(observed_ratio > ideal_ratio){
+    // increase time so that fewer nodes are added.
+    search_stats_->AuxEngineTime = std::min(params_.GetAuxEngineTime() * 5, int(search_stats_->AuxEngineTime * 1.05));
+  }
+  if(observed_ratio < ideal_ratio){
+    // decrease time so that more nodes are added.
+    search_stats_->AuxEngineTime = std::max(30, int(search_stats_->AuxEngineTime * 0.95));
+  }
+  if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "observed ratio: " << observed_ratio << " Adjusted AuxEngineTime: " << search_stats_->AuxEngineTime;
+  
+  auxengine_os_ << "go movetime " << search_stats_->AuxEngineTime << std::endl;
 
   auxengine_stopped_mutex_.lock();
   if(auxengine_stopped_){
@@ -345,10 +363,7 @@ void Search::DoAuxEngine(Node* n) {
     }
   }
   if (stopping) {
-    // TODO: actually do use the result, if the depth achieved was the
-    // requested depth and the line is actually played.
-
-    // For now don't use results of a search that was stopped.
+    // Don't use results of a search that was stopped.
     if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "AUX Search was interrupted, the results will not be used";
     return;
   }
@@ -399,8 +414,7 @@ void Search::DoAuxEngine(Node* n) {
     }
     if (pv == "pv") {
       while(iss >> pv >> std::ws &&
-	    pv_length < depth_reached &&
-	    pv_length < params_.GetAuxEngineFollowPvDepth()) {
+	    pv_length < depth_reached) {
         Move m;
         if (!Move::ParseMove(&m, pv, !flip)) {	
           if (params_.GetAuxEngineVerbosity() >= 1) LOGFILE << "Ignoring bad pv move: " << pv;
@@ -424,7 +438,6 @@ void Search::DoAuxEngine(Node* n) {
 	my_moves_from_the_white_side.push_back(m_in_modern_encoding); // Add the PV to the queue	
         pv_moves.push_back(m_in_modern_encoding.as_packed_int());
         flip = !flip;
-	// if(pv_length == max_pv_length) break;
 	pv_length++;
       }
     }
@@ -443,7 +456,7 @@ void Search::DoAuxEngine(Node* n) {
     if(played_history_.IsBlackToMove()){
       LOGFILE << "debug info: length of PV given to helper engine: " << depth << " position given to helper: " << s << " black to move at root, length of my_moves_from_the_white_side " << my_moves_from_the_white_side.size() << " my_moves_from_the_white_side: " << debug_string;
     } else {
-      LOGFILE << "debug info: length of PV given to helper engine: " << depth << " position given to helper: " << s << " white to move at root, length of my_moves_from_the_white_side " << my_moves_from_the_white_side.size() << " my_moves_from_the_white_side: " << debug_string;    
+      LOGFILE << "debug info: length of PV given to helper engine: " << depth << " position given to helper: " << s << " white to move at root, length of my_moves_from_the_white_side " << my_moves_from_the_white_side.size() << " my_moves_from_the_white_side: " << debug_string;
     }
   }
   
@@ -463,63 +476,43 @@ void Search::AuxWait() {
     auxengine_threads_.pop_back();
   }
 
-  // Adjust time so that the ratio of added nodes is about 1/100
-  float ideal_ratio = 0.01f;
-  // before reading N from root node, get a shared lock
-  nodes_mutex_.lock_shared();
-  float observed_ratio = float(auxengine_num_updates) / root_node_->GetN();
-  nodes_mutex_.unlock_shared();  
+  // Adjust threshold so that almost all queued nodes get evaluated before move selection time
+  // If the amount of remaining nodes is higher than 10% of the number of nodes actually evaluated, then increase the threshold.
+  if(search_stats_->AuxEngineQueueSizeAtMoveSelectionTime > int(auxengine_num_evals * 0.10f)){
+    search_stats_->AuxEngineThreshold = search_stats_->AuxEngineThreshold * 1.1;
+  }
+  // decrease the threshold if we are in time for 95% of all queued nodes.
+  if(search_stats_->AuxEngineQueueSizeAtMoveSelectionTime < int(auxengine_num_evals * 0.5f)){
+    search_stats_->AuxEngineThreshold = search_stats_->AuxEngineThreshold * 0.9;
+  }
+  
+  search_stats_->Number_of_nodes_added_by_AuxEngine = search_stats_->Number_of_nodes_added_by_AuxEngine + auxengine_num_updates;
+    float observed_ratio = float(search_stats_->Number_of_nodes_added_by_AuxEngine) / search_stats_->Total_number_of_nodes;
+
+  ChessBoard my_board = played_history_.Last().GetBoard();
+
+  float ideal_ratio = params_.GetAuxEngineIdealRatio();
+  if((my_board.ours() | my_board.theirs()).count() < 20){
+    ideal_ratio *= 2.0f;
+  }
+  
   if(observed_ratio > ideal_ratio * 1.1){
     // increase time so that fewer nodes are added.
     search_stats_->AuxEngineTime = int(search_stats_->AuxEngineTime * 1.1);
   }
   if(observed_ratio < ideal_ratio * 0.9){
     // decrease time so that more nodes are added.
-    search_stats_->AuxEngineTime = int(search_stats_->AuxEngineTime * 0.9);
+    search_stats_->AuxEngineTime = std::max(30, int(search_stats_->AuxEngineTime * 0.9));
   }
 
   // Time based queries    
-    LOGFILE << "Summaries per move: (Time based queries) persistent_queue_of_nodes size at the end of search: " << search_stats_->AuxEngineQueueSizeAtMoveSelectionTime
-	    << "Ratio added/total nodes: " << observed_ratio
+  LOGFILE << "Summaries per move: (Time based queries) persistent_queue_of_nodes size at the end of search: " << search_stats_->AuxEngineQueueSizeAtMoveSelectionTime
+	  << " Ratio added/total nodes: " << observed_ratio
       << " Average duration " << (auxengine_num_evals ? (auxengine_total_dur / auxengine_num_evals) : -1.0f) << "ms"
       << " New AuxEngineTime for next iteration " << search_stats_->AuxEngineTime
+      << " New AuxEngineThreshold for next iteration " << search_stats_->AuxEngineThreshold
       << " Number of evals " << auxengine_num_evals
-      << " Number of added nodes " << auxengine_num_updates;
-  
-
-  
-  // if(search_stats_->AuxEngineQueueSizeAtMoveSelectionTime > 100){
-  //   // decrease the number of queued nodes that comes the via the threshold, by increasing the threshold. Don't increase it above the parameter value.
-  //   search_stats_->AuxEngineThreshold = std::min(params_.GetAuxEngineThreshold(), int(search_stats_->AuxEngineThreshold * 1.1));
-  // }
-  // if(search_stats_->AuxEngineQueueSizeAtMoveSelectionTime == 0){
-  //   // increase the number of queued nodes that comes the via the threshold, by decreasing the threshold.
-  //   search_stats_->AuxEngineThreshold = int(search_stats_->AuxEngineThreshold * 0.9);
-  // }
-  
-  // ChessBoard my_board = played_history_.Last().GetBoard();
-  // if((my_board.ours() | my_board.theirs()).count() >= 20){
-  //   if(search_stats_->AuxEngineQueueSizeAtMoveSelectionTime == 0){     
-  //     search_stats_->AuxEngineTime = search_stats_->AuxEngineTime * 1.1;
-  //   }
-  //   if(search_stats_->AuxEngineQueueSizeAtMoveSelectionTime > 100){
-  //     search_stats_->AuxEngineTime = std::max(params_.GetAuxEngineTime(), int(search_stats_->AuxEngineTime * 0.9)); // don't go below the parameter value
-  //   }
-  //   // Time based queries    
-  //   LOGFILE << "Summaries per move: (Time based queries) persistent_queue_of_nodes size at the end of search: " << search_stats_->AuxEngineQueueSizeAtMoveSelectionTime
-  //     << " Average duration " << (auxengine_num_evals ? (auxengine_total_dur / auxengine_num_evals) : -1.0f) << "ms"
-  //     << " New AuxEngineTime for next iteration " << search_stats_->AuxEngineTime
-  //     << " New AuxEngineThreshold for next iteration " << search_stats_->AuxEngineThreshold
-  //     << " Number of evals " << auxengine_num_evals
-  //     << " Number of added nodes " << auxengine_num_updates;
-  // } else {
-  //   // Depth based queries
-  //   LOGFILE << "Summaries per move: (Depth=" << params_.GetAuxEngineDepth() << ") nodes in the query queue at the end of search: " << search_stats_->AuxEngineQueueSizeAtMoveSelectionTime
-  //     << " Average duration " << (auxengine_num_evals ? (auxengine_total_dur / auxengine_num_evals) : -1.0f) << "ms"
-  //     << " New AuxEngineThreshold for next iteration " << search_stats_->AuxEngineThreshold      
-  //     << " Number of evals " << auxengine_num_evals
-  //     << " Number of added nodes " << auxengine_num_updates;
-  // }
+      << " Number of added nodes " << search_stats_->Number_of_nodes_added_by_AuxEngine;
   
   // Empty the other queue.
   fast_track_extend_and_evaluate_queue_mutex_.lock();
@@ -527,8 +520,9 @@ void Search::AuxWait() {
     if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "No PVs in the fast_track_extend_and_evaluate_queue";
   } else {
     if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << fast_track_extend_and_evaluate_queue_.size() << " possibly obsolete PV:s in the queue.";
-    fast_track_extend_and_evaluate_queue_ = {}; // should be faster than pop() but it is safe?
+    fast_track_extend_and_evaluate_queue_ = {};
     while (!fast_track_extend_and_evaluate_queue_.empty()) {
+      // TODO save the PV if it is still relevant
       fast_track_extend_and_evaluate_queue_.pop();
     }
     if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Number of PV:s in the queue=" << fast_track_extend_and_evaluate_queue_.size();

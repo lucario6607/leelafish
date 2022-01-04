@@ -462,37 +462,64 @@ void Search::AuxWait() {
     auxengine_threads_.back().join();
     auxengine_threads_.pop_back();
   }
-  if(search_stats_->AuxEngineQueueSizeAtMoveSelectionTime > 100){
-    // decrease the number of queued nodes that comes the via the threshold, by increasing the threshold. Don't increase it above the parameter value.
-    search_stats_->AuxEngineThreshold = std::min(params_.GetAuxEngineThreshold(), int(search_stats_->AuxEngineThreshold * 1.1));
+
+  // Adjust time so that the ratio of added nodes is about 1/100
+  float ideal_ratio = 0.01f;
+  // before reading N from root node, get a shared lock
+  nodes_mutex_.lock_shared();
+  float observed_ratio = float(auxengine_num_updates) / root_node_->GetN();
+  nodes_mutex_.unlock_shared();  
+  if(observed_ratio > ideal_ratio * 1.1){
+    // increase time so that fewer nodes are added.
+    search_stats_->AuxEngineTime = int(search_stats_->AuxEngineTime * 1.1);
   }
-  if(search_stats_->AuxEngineQueueSizeAtMoveSelectionTime == 0){
-    // increase the number of queued nodes that comes the via the threshold, by decreasing the threshold.
-    search_stats_->AuxEngineThreshold = int(search_stats_->AuxEngineThreshold * 0.9);
+  if(observed_ratio < ideal_ratio * 0.9){
+    // decrease time so that more nodes are added.
+    search_stats_->AuxEngineTime = int(search_stats_->AuxEngineTime * 0.9);
   }
-  ChessBoard my_board = played_history_.Last().GetBoard();
-  if((my_board.ours() | my_board.theirs()).count() >= 20){
-    if(search_stats_->AuxEngineQueueSizeAtMoveSelectionTime == 0){     
-      search_stats_->AuxEngineTime = search_stats_->AuxEngineTime * 1.1;
-    }
-    if(search_stats_->AuxEngineQueueSizeAtMoveSelectionTime > 100){
-      search_stats_->AuxEngineTime = std::max(params_.GetAuxEngineTime(), int(search_stats_->AuxEngineTime * 0.9)); // don't go below the parameter value
-    }
-    // Time based queries    
+
+  // Time based queries    
     LOGFILE << "Summaries per move: (Time based queries) persistent_queue_of_nodes size at the end of search: " << search_stats_->AuxEngineQueueSizeAtMoveSelectionTime
+	    << "Ratio added/total nodes: " << observed_ratio
       << " Average duration " << (auxengine_num_evals ? (auxengine_total_dur / auxengine_num_evals) : -1.0f) << "ms"
       << " New AuxEngineTime for next iteration " << search_stats_->AuxEngineTime
-      << " New AuxEngineThreshold for next iteration " << search_stats_->AuxEngineThreshold
       << " Number of evals " << auxengine_num_evals
       << " Number of added nodes " << auxengine_num_updates;
-  } else {
-    // Depth based queries
-    LOGFILE << "Summaries per move: (Depth=" << params_.GetAuxEngineDepth() << ") nodes in the query queue at the end of search: " << search_stats_->AuxEngineQueueSizeAtMoveSelectionTime
-      << " Average duration " << (auxengine_num_evals ? (auxengine_total_dur / auxengine_num_evals) : -1.0f) << "ms"
-      << " New AuxEngineThreshold for next iteration " << search_stats_->AuxEngineThreshold      
-      << " Number of evals " << auxengine_num_evals
-      << " Number of added nodes " << auxengine_num_updates;
-  }
+  
+
+  
+  // if(search_stats_->AuxEngineQueueSizeAtMoveSelectionTime > 100){
+  //   // decrease the number of queued nodes that comes the via the threshold, by increasing the threshold. Don't increase it above the parameter value.
+  //   search_stats_->AuxEngineThreshold = std::min(params_.GetAuxEngineThreshold(), int(search_stats_->AuxEngineThreshold * 1.1));
+  // }
+  // if(search_stats_->AuxEngineQueueSizeAtMoveSelectionTime == 0){
+  //   // increase the number of queued nodes that comes the via the threshold, by decreasing the threshold.
+  //   search_stats_->AuxEngineThreshold = int(search_stats_->AuxEngineThreshold * 0.9);
+  // }
+  
+  // ChessBoard my_board = played_history_.Last().GetBoard();
+  // if((my_board.ours() | my_board.theirs()).count() >= 20){
+  //   if(search_stats_->AuxEngineQueueSizeAtMoveSelectionTime == 0){     
+  //     search_stats_->AuxEngineTime = search_stats_->AuxEngineTime * 1.1;
+  //   }
+  //   if(search_stats_->AuxEngineQueueSizeAtMoveSelectionTime > 100){
+  //     search_stats_->AuxEngineTime = std::max(params_.GetAuxEngineTime(), int(search_stats_->AuxEngineTime * 0.9)); // don't go below the parameter value
+  //   }
+  //   // Time based queries    
+  //   LOGFILE << "Summaries per move: (Time based queries) persistent_queue_of_nodes size at the end of search: " << search_stats_->AuxEngineQueueSizeAtMoveSelectionTime
+  //     << " Average duration " << (auxengine_num_evals ? (auxengine_total_dur / auxengine_num_evals) : -1.0f) << "ms"
+  //     << " New AuxEngineTime for next iteration " << search_stats_->AuxEngineTime
+  //     << " New AuxEngineThreshold for next iteration " << search_stats_->AuxEngineThreshold
+  //     << " Number of evals " << auxengine_num_evals
+  //     << " Number of added nodes " << auxengine_num_updates;
+  // } else {
+  //   // Depth based queries
+  //   LOGFILE << "Summaries per move: (Depth=" << params_.GetAuxEngineDepth() << ") nodes in the query queue at the end of search: " << search_stats_->AuxEngineQueueSizeAtMoveSelectionTime
+  //     << " Average duration " << (auxengine_num_evals ? (auxengine_total_dur / auxengine_num_evals) : -1.0f) << "ms"
+  //     << " New AuxEngineThreshold for next iteration " << search_stats_->AuxEngineThreshold      
+  //     << " Number of evals " << auxengine_num_evals
+  //     << " Number of added nodes " << auxengine_num_updates;
+  // }
   
   // Empty the other queue.
   fast_track_extend_and_evaluate_queue_mutex_.lock();

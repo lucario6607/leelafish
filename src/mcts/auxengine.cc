@@ -320,11 +320,11 @@ void Search::DoAuxEngine(Node* n) {
   nodes_mutex_.unlock_shared();
   if(observed_ratio > ideal_ratio){
     // increase time so that fewer nodes are added.
-    search_stats_->AuxEngineTime = std::min(params_.GetAuxEngineTime() * 5, int(search_stats_->AuxEngineTime * 1.05));
+    search_stats_->AuxEngineTime = std::min(params_.GetAuxEngineTime() * 5, int(search_stats_->AuxEngineTime * 1.01));
   }
   if(observed_ratio < ideal_ratio){
     // decrease time so that more nodes are added.
-    search_stats_->AuxEngineTime = std::max(30, int(search_stats_->AuxEngineTime * 0.95));
+    search_stats_->AuxEngineTime = std::max(30, int(search_stats_->AuxEngineTime * 0.99));
   }
   if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "observed ratio: " << observed_ratio << " Adjusted AuxEngineTime: " << search_stats_->AuxEngineTime;
   
@@ -489,11 +489,11 @@ void Search::AuxWait() {
   // Adjust threshold so that almost all queued nodes get evaluated before move selection time
   // If the amount of remaining nodes is higher than 10% of the number of nodes actually evaluated, then increase the threshold.
   if(search_stats_->AuxEngineQueueSizeAtMoveSelectionTime > int(auxengine_num_evals * 0.10f)){
-    search_stats_->AuxEngineThreshold = search_stats_->AuxEngineThreshold * 1.1;
+    search_stats_->AuxEngineThreshold = search_stats_->AuxEngineThreshold * 1.05;
   }
   // decrease the threshold if we are in time for 95% of all queued nodes.
   if(search_stats_->AuxEngineQueueSizeAtMoveSelectionTime < int(auxengine_num_evals * 0.5f)){
-    search_stats_->AuxEngineThreshold = search_stats_->AuxEngineThreshold * 0.9;
+    search_stats_->AuxEngineThreshold = search_stats_->AuxEngineThreshold * 0.95;
   }
   
   search_stats_->Number_of_nodes_added_by_AuxEngine = search_stats_->Number_of_nodes_added_by_AuxEngine + auxengine_num_updates;
@@ -508,16 +508,16 @@ void Search::AuxWait() {
   
   if(observed_ratio > ideal_ratio * 1.1){
     // increase time so that fewer nodes are added.
-    search_stats_->AuxEngineTime = int(search_stats_->AuxEngineTime * 1.1);
+    search_stats_->AuxEngineTime = int(search_stats_->AuxEngineTime * 1.05);
   }
   if(observed_ratio < ideal_ratio * 0.9){
     // decrease time so that more nodes are added.
-    search_stats_->AuxEngineTime = std::max(30, int(search_stats_->AuxEngineTime * 0.9));
+    search_stats_->AuxEngineTime = std::max(30, int(search_stats_->AuxEngineTime * 0.95));
   }
 
   // Time based queries    
   LOGFILE << "Summaries per move: (Time based queries) persistent_queue_of_nodes size at the end of search: " << search_stats_->AuxEngineQueueSizeAtMoveSelectionTime
-	  << " Ratio added/total nodes: " << observed_ratio
+	  << " Ratio added/total nodes: " << observed_ratio << " (added=" << search_stats_->Number_of_nodes_added_by_AuxEngine << "; total=" << search_stats_->Total_number_of_nodes << ")."
       << " Average duration " << (auxengine_num_evals ? (auxengine_total_dur / auxengine_num_evals) : -1.0f) << "ms"
       << " New AuxEngineTime for next iteration " << search_stats_->AuxEngineTime
       << " New AuxEngineThreshold for next iteration " << search_stats_->AuxEngineThreshold

@@ -709,6 +709,10 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	      << "kept source two: " << sources_stat[2] << std::endl
 	      << "kept source three: " << sources_stat[3];
 
+    } else {
+      if(params_.GetAuxEngineVerbosity() >= 5)
+	LOGFILE << "No nodes added by the helper engine in the search tree during move selection time. "
+		<< "search_stat is at: " << &search_stats_;
     }
   }
 

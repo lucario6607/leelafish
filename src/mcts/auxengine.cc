@@ -220,6 +220,8 @@ void Search::AuxEngineWorker() {
   auxengine_mutex_.unlock();
   if (params_.GetAuxEngineVerbosity() >= 1) LOGFILE  
     << "AuxEngineWorker done, delivered " << number_of_pvs_delivered << " PVs.";
+  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE  
+    << "AuxEngineWorker done search search_stats_ at: " << &search_stats_ << " PVs.";
 }
 
 void Search::DoAuxEngine(Node* n) {
@@ -529,6 +531,7 @@ void Search::AuxWait() {
   }
   fast_track_extend_and_evaluate_queue_mutex_.unlock();  
   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxWait done";
+  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxWait done search_stats_ at: " << &search_stats_;
 }
 
 }  // namespace lczero

@@ -320,11 +320,11 @@ void Search::DoAuxEngine(Node* n) {
   nodes_mutex_.unlock_shared();
   if(observed_ratio > ideal_ratio){
     // increase time so that fewer nodes are added.
-    search_stats_->AuxEngineTime = std::min(params_.GetAuxEngineTime() * 5, int(search_stats_->AuxEngineTime * 1.01));
+    search_stats_->AuxEngineTime = std::min(params_.GetAuxEngineTime() * 5, int(search_stats_->AuxEngineTime * 1.1));
   }
   if(observed_ratio < ideal_ratio){
     // decrease time so that more nodes are added.
-    search_stats_->AuxEngineTime = std::max(30, int(search_stats_->AuxEngineTime * 0.99));
+    search_stats_->AuxEngineTime = std::max(30, int(search_stats_->AuxEngineTime * 0.9));
   }
   if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "observed ratio: " << observed_ratio << " Adjusted AuxEngineTime: " << search_stats_->AuxEngineTime;
   

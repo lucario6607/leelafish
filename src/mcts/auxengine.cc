@@ -489,11 +489,11 @@ void Search::AuxWait() {
   // Adjust threshold so that almost all queued nodes get evaluated before move selection time
   // If the amount of remaining nodes is higher than 10% of the number of nodes actually evaluated, then increase the threshold.
   if(search_stats_->AuxEngineQueueSizeAtMoveSelectionTime > int(auxengine_num_evals * 0.10f)){
-    search_stats_->AuxEngineThreshold = search_stats_->AuxEngineThreshold * 1.05;
+    search_stats_->AuxEngineThreshold = search_stats_->AuxEngineThreshold * 1.1;
   }
-  // decrease the threshold if we are in time for 95% of all queued nodes.
-  if(search_stats_->AuxEngineQueueSizeAtMoveSelectionTime < int(auxengine_num_evals * 0.5f)){
-    search_stats_->AuxEngineThreshold = search_stats_->AuxEngineThreshold * 0.95;
+  // decrease the threshold if we are in time for 90% of all queued nodes.
+  if(search_stats_->AuxEngineQueueSizeAtMoveSelectionTime < int(auxengine_num_evals * 0.90f)){
+    search_stats_->AuxEngineThreshold = search_stats_->AuxEngineThreshold * 0.90;
   }
   
   search_stats_->Number_of_nodes_added_by_AuxEngine = search_stats_->Number_of_nodes_added_by_AuxEngine + auxengine_num_updates;

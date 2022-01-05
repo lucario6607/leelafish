@@ -504,6 +504,7 @@ void Search::AuxWait() {
   float ideal_ratio = params_.GetAuxEngineIdealRatio();
   if((my_board.ours() | my_board.theirs()).count() < 20){
     ideal_ratio *= 2.0f;
+    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Endgame: using increased ratio=" << ideal_ratio;
   }
   
   if(observed_ratio > ideal_ratio * 1.1){

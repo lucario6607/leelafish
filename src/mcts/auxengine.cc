@@ -125,6 +125,14 @@ void Search::AuxEngineWorker() {
       search_stats_->AuxEngineThreshold = params_.GetAuxEngineThreshold();
       search_stats_->Total_number_of_nodes = 0;
       search_stats_->Number_of_nodes_added_by_AuxEngine = 0;
+
+      // Occasionally, we get a new pointer to search_stats_ between games (not sure when/why that happens). When it happens, make sure the queues are empty, or the purging of them can fail.
+      // Normally, everything works fine without the next four lines.
+      search_stats_->persistent_queue_of_nodes = {}; 
+      search_stats_->nodes_added_by_the_helper = {};
+      search_stats_->source_of_queued_nodes = {};
+      search_stats_->source_of_added_nodes = {};
+      
       if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE
     << "Resetting AuxEngine parameters because a new game started.";
       search_stats_->New_Game = false;

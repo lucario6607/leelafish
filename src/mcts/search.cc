@@ -294,35 +294,38 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
       if (!iter.node()) break;  // Last edge was dangling, cannot continue.
       depth += 1;
 
-      // query the auxillary helper about the nodes in the PV
-      // possibly condition on the number of visits.
-      // possibly only consider the PV and the second best.
-      // possibly condition on depth.
-      if(
-	 multipv == 1 && // only use the best move from root.
-	 params_.GetAuxEngineFile() != "" &&
-	 iter.node()->GetAuxEngineMove() == 0xffff &&
-	 ! iter.node()->IsTerminal()
-	 &&
-	   (depth <= 22 // prioritize 'lower' depth nodes.
-	    ||
-	    5 * iter.node()->GetN() >= (uint32_t) search_stats_->AuxEngineThreshold // don't disturb too much. Times 5 is the first PV bonus.
-   	   )
-	){
+      // I thought this would be bad because it violates the principle
+      // that relevance is simply indicated by number of visits, but
+      // it turned out (SSS testing), that this is actually useful.
 
-	auxengine_stopped_mutex_.lock();
-	if(! auxengine_stopped_){
-	  iter.node()->SetAuxEngineMove(0xfffe); // magic for pending
-	  auxengine_mutex_.lock();
-	  search_stats_->persistent_queue_of_nodes.push(iter.node());
-	  search_stats_->source_of_queued_nodes.push(2);
-	  auxengine_cv_.notify_one();
-	  auxengine_mutex_.unlock();
+      // the auxillary helper about the nodes in the PV possibly
+      // condition on the number of visits. possibly only consider the
+      // PV and the second best. possibly condition on depth.
+      if(
+      	 multipv == 1 && // only use the best move from root.
+      	 params_.GetAuxEngineFile() != "" &&
+      	 iter.node()->GetAuxEngineMove() == 0xffff &&
+      	 ! iter.node()->IsTerminal()
+      	 &&
+      	   (depth <= 22 // prioritize 'lower' depth nodes.
+      	    ||
+      	    5 * iter.node()->GetN() >= (uint32_t) search_stats_->AuxEngineThreshold // don't disturb too much. Times 5 is the first PV bonus.
+      	   )
+      	){
+
+      	auxengine_stopped_mutex_.lock();
+      	if(! auxengine_stopped_){
+      	  iter.node()->SetAuxEngineMove(0xfffe); // magic for pending
+      	  auxengine_mutex_.lock();
+      	  search_stats_->persistent_queue_of_nodes.push(iter.node());
+      	  search_stats_->source_of_queued_nodes.push(2);
+      	  auxengine_cv_.notify_one();
+      	  auxengine_mutex_.unlock();
 	
-	  number_of_times_called_AuxMaybeEnqueueNode_ += 1;
-	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << " Adding this node from the PV (rank: " << multipv << ") at depth " << depth << " and visits: " << iter.node()->GetN() << " to the helper queue" << iter.node()->DebugString();
-	}
-	auxengine_stopped_mutex_.unlock();
+      	  number_of_times_called_AuxMaybeEnqueueNode_ += 1;
+      	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << " Adding this node from the PV (rank: " << multipv << ") at depth " << depth << " and visits: " << iter.node()->GetN() << " to the helper queue" << iter.node()->DebugString();
+      	}
+      	auxengine_stopped_mutex_.unlock();
       }
       
     }

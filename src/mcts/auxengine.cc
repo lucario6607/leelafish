@@ -197,17 +197,24 @@ void Search::AuxEngineWorker() {
   // amount of visits. Except if root is not yet expanded, or lacks
   // edges for any other reason (e.g. being terminal), in which case we
   // should wait.
-  nodes_mutex_.lock(); // write lock
-  if(root_node_->GetNumEdges() > 0){
-    // root is extended.
-    root_node_->SetAuxEngineMove(0xfffe); // mark root as pending and queue it
-    auxengine_mutex_.lock(); 
-    search_stats_->persistent_queue_of_nodes.push(root_node_);
-    search_stats_->source_of_queued_nodes.push(3);
-    auxengine_cv_.notify_one();
-    auxengine_mutex_.unlock();
-  }
-  nodes_mutex_.unlock(); // write unlock
+
+  // About here it occasionally disconnects.
+
+  // TODO only do this when there is a substantial tree (if at all).
+  
+  // nodes_mutex_.lock(); // write lock
+  // if(root_node_->GetNumEdges() > 0){
+  //   // root is extended.
+  //   root_node_->SetAuxEngineMove(0xfffe); // mark root as pending and queue it
+  //   auxengine_mutex_.lock(); 
+  //   search_stats_->persistent_queue_of_nodes.push(root_node_);
+  //   search_stats_->source_of_queued_nodes.push(3);
+  //   auxengine_cv_.notify_one();
+  //   auxengine_mutex_.unlock();
+  // }
+  // nodes_mutex_.unlock(); // write unlock
+  // if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker queued root node";
+  
 
   Node* n;
   while (!stop_.load(std::memory_order_acquire)) {
@@ -228,8 +235,7 @@ void Search::AuxEngineWorker() {
   auxengine_mutex_.unlock();
   if (params_.GetAuxEngineVerbosity() >= 1) LOGFILE  
     << "AuxEngineWorker done, delivered " << number_of_pvs_delivered << " PVs.";
-  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE  
-    << "AuxEngineWorker done search search_stats_ at: " << &search_stats_ << " PVs.";
+  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker done search search_stats_ at: " << &search_stats_ ;
 }
 
 void Search::DoAuxEngine(Node* n) {
@@ -309,24 +315,24 @@ void Search::DoAuxEngine(Node* n) {
   auto auxengine_start_time = std::chrono::steady_clock::now();
   auxengine_os_ << s << std::endl;
 
-  // Adjust time so that the ideal ratio of added nodes is reached.
-  float ideal_ratio = params_.GetAuxEngineIdealRatio();
-  if((my_board.ours() | my_board.theirs()).count() < 20){
-    ideal_ratio *= 2.0f; // Accept more nodes from helper when fewer pieces on the board.
-  }
-  // before reading N from root node, get a shared lock
-  nodes_mutex_.lock_shared();
-  float observed_ratio = float(search_stats_->Number_of_nodes_added_by_AuxEngine) / (search_stats_->Total_number_of_nodes + root_node_->GetN());
-  nodes_mutex_.unlock_shared();
-  if(observed_ratio > ideal_ratio){
-    // increase time so that fewer nodes are added.
-    search_stats_->AuxEngineTime = std::min(params_.GetAuxEngineTime() * 5, int(search_stats_->AuxEngineTime * 1.1));
-  }
-  if(observed_ratio < ideal_ratio){
-    // decrease time so that more nodes are added.
-    search_stats_->AuxEngineTime = std::max(30, int(search_stats_->AuxEngineTime * 0.9));
-  }
-  if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "observed ratio: " << observed_ratio << " Adjusted AuxEngineTime: " << search_stats_->AuxEngineTime;
+  // // // Adjust time so that the ideal ratio of added nodes is reached.
+  // float ideal_ratio = params_.GetAuxEngineIdealRatio();
+  // if((my_board.ours() | my_board.theirs()).count() < 20){
+  //   ideal_ratio *= 2.0f; // Accept more nodes from helper when fewer pieces on the board.
+  // }
+  // // // before reading N from root node, get a shared lock
+  // nodes_mutex_.lock_shared();
+  // float observed_ratio = float(search_stats_->Number_of_nodes_added_by_AuxEngine) / (search_stats_->Total_number_of_nodes + root_node_->GetN());
+  // nodes_mutex_.unlock_shared();
+  // if(observed_ratio > ideal_ratio){
+  //   // increase time so that fewer nodes are added.
+  //   search_stats_->AuxEngineTime = std::min(params_.GetAuxEngineTime() * 5, int(search_stats_->AuxEngineTime * 1.1));
+  // }
+  // if(observed_ratio < ideal_ratio){
+  //   // decrease time so that more nodes are added.
+  //   search_stats_->AuxEngineTime = std::max(30, int(search_stats_->AuxEngineTime * 0.9));
+  // }
+  // if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "observed ratio: " << observed_ratio << " Adjusted AuxEngineTime: " << search_stats_->AuxEngineTime;
   
   auxengine_os_ << "go movetime " << search_stats_->AuxEngineTime << std::endl;
 
@@ -491,30 +497,30 @@ void Search::AuxWait() {
   if(search_stats_->AuxEngineQueueSizeAtMoveSelectionTime > int(auxengine_num_evals * 0.10f)){
     search_stats_->AuxEngineThreshold = search_stats_->AuxEngineThreshold * 1.1;
   }
-  // decrease the threshold if we are in time for 90% of all queued nodes.
-  if(search_stats_->AuxEngineQueueSizeAtMoveSelectionTime < int(auxengine_num_evals * 0.90f)){
+  // decrease the threshold if we are in time for 95% of all queued nodes (worse to have no nodes in the queue than to perform the query on the next move).
+  if(search_stats_->AuxEngineQueueSizeAtMoveSelectionTime < int(auxengine_num_evals * 0.95f)){
     search_stats_->AuxEngineThreshold = search_stats_->AuxEngineThreshold * 0.90;
   }
   
   search_stats_->Number_of_nodes_added_by_AuxEngine = search_stats_->Number_of_nodes_added_by_AuxEngine + auxengine_num_updates;
-    float observed_ratio = float(search_stats_->Number_of_nodes_added_by_AuxEngine) / search_stats_->Total_number_of_nodes;
+  float observed_ratio = float(search_stats_->Number_of_nodes_added_by_AuxEngine) / search_stats_->Total_number_of_nodes;
 
-  ChessBoard my_board = played_history_.Last().GetBoard();
+  // ChessBoard my_board = played_history_.Last().GetBoard();
 
-  float ideal_ratio = params_.GetAuxEngineIdealRatio();
-  if((my_board.ours() | my_board.theirs()).count() < 20){
-    ideal_ratio *= 2.0f;
-    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Endgame: using increased ratio=" << ideal_ratio;
-  }
+  // float ideal_ratio = params_.GetAuxEngineIdealRatio();
+  // if((my_board.ours() | my_board.theirs()).count() < 20){
+  //   ideal_ratio *= 2.0f;
+  //   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Endgame: using increased ratio=" << ideal_ratio;
+  // }
   
-  if(observed_ratio > ideal_ratio * 1.1){
-    // increase time so that fewer nodes are added.
-    search_stats_->AuxEngineTime = int(search_stats_->AuxEngineTime * 1.05);
-  }
-  if(observed_ratio < ideal_ratio * 0.9){
-    // decrease time so that more nodes are added.
-    search_stats_->AuxEngineTime = std::max(30, int(search_stats_->AuxEngineTime * 0.95));
-  }
+  // if(observed_ratio > ideal_ratio * 1.1){
+  //   // increase time so that fewer nodes are added.
+  //   search_stats_->AuxEngineTime = int(search_stats_->AuxEngineTime * 1.05);
+  // }
+  // if(observed_ratio < ideal_ratio * 0.9){
+  //   // decrease time so that more nodes are added.
+  //   search_stats_->AuxEngineTime = std::max(30, int(search_stats_->AuxEngineTime * 0.95));
+  // }
 
   // Time based queries    
   LOGFILE << "Summaries per move: (Time based queries) persistent_queue_of_nodes size at the end of search: " << search_stats_->AuxEngineQueueSizeAtMoveSelectionTime
@@ -524,6 +530,10 @@ void Search::AuxWait() {
       << " New AuxEngineThreshold for next iteration " << search_stats_->AuxEngineThreshold
       << " Number of evals " << auxengine_num_evals
       << " Number of added nodes " << search_stats_->Number_of_nodes_added_by_AuxEngine;
+
+  // Reset counters for the next move:
+  search_stats_->Number_of_nodes_added_by_AuxEngine = 0;
+  search_stats_->Total_number_of_nodes = 0;
   
   // Empty the other queue.
   fast_track_extend_and_evaluate_queue_mutex_.lock();

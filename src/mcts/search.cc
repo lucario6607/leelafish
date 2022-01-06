@@ -624,7 +624,8 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	search_stats_->source_of_queued_nodes.pop(); // remove it from the queue.	
 	for (Node* n2 = n; n2 != root_node_ ; n2 = n2->GetParent()) {
 	  // if purge at search start never happened (because of only one move possible, auxworker() never started), then we can have disconnected nodes in the queue.
-	  if(n2->GetParent() == nullptr || n2->GetParent()->GetParent() == nullptr) break;
+	  // if(n2->GetParent() == nullptr || n2->GetParent()->GetParent() == nullptr) break;
+	  if(n2->GetParent() == nullptr || n2->GetParent()->GetParent() == nullptr || n2->GetParent()->GetOwnEdge() == nullptr) break;	  
 	  if(n2->GetParent()->GetParent() == root_node_){
 	    if(n2->GetParent()->GetOwnEdge()->GetMove(played_history_.IsBlackToMove()) == final_bestmove_){
 	      persistent_queue_of_nodes_temp.push(n);
@@ -656,72 +657,78 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	 << "No nodes in the query queue at move selection time. "
 	 << "Threshold used: " << search_stats_->AuxEngineThreshold;
     }
-  
-    if(search_stats_->nodes_added_by_the_helper.size() > 0){
-      std::queue<Node*> nodes_added_by_the_helper_temp;
-      std::queue<int> source_of_added_nodes_temp;
-      long unsigned int my_size = search_stats_->nodes_added_by_the_helper.size();
-      std::vector<int> sources_stat(4);
-      std::vector<int> sources_purged_stat(4);      
-      for(long unsigned int i=0; i < my_size; i++){
-    	Node * n = search_stats_->nodes_added_by_the_helper.front(); // read the element
-    	search_stats_->nodes_added_by_the_helper.pop(); // remove it from the queue.
-	int source = search_stats_->source_of_added_nodes.front(); // read the element
-	search_stats_->source_of_added_nodes.pop(); // remove it from the queue.
-	if(n->GetParent() == nullptr || n->GetOwnEdge() == nullptr) break;
-	if(n->GetParent() == root_node_ &&
-	   n->GetOwnEdge()->GetMove(played_history_.IsBlackToMove()) == final_bestmove_){
-	  LOGFILE << "OMG the helper engine added the move played! " << n->DebugString() << " " << n->GetOwnEdge()->GetMove(played_history_.IsBlackToMove()).as_string() << " The source was: " << source;
-	}
-	for (Node* n2 = n; n2 != root_node_ ; n2 = n2->GetParent()) {
-	  // if purge at search start never happened (because of only one move possible, auxworker() never started), then we can have disconnected nodes in the queue.
-	  if(n2->GetParent() == nullptr || n2->GetParent()->GetParent() == nullptr) break;	  
-	  if(n2->GetParent()->GetParent() == root_node_){
-	    if(n2->GetParent()->GetOwnEdge()->GetMove(played_history_.IsBlackToMove()) == final_bestmove_){
-	      nodes_added_by_the_helper_temp.push(n);
-	      // in order to be able to purge nodes that became obsolete and deallocated due to the move of the opponent,
-	      // also save the grandparent that will become root at next iteration if this node is still relevant by then.
-	      nodes_added_by_the_helper_temp.push(n2);
-	      source_of_added_nodes_temp.push(source);
-	      sources_stat[source]++;
-	    } else {
-	      sources_purged_stat[source]++;
-	    }
-	    break;
-	  }
-	}
-      }
-      long unsigned int size_kept = source_of_added_nodes_temp.size();
-      for(long unsigned int i=0; i < size_kept; i++){
-    	search_stats_->source_of_added_nodes.push(source_of_added_nodes_temp.front());
-	source_of_added_nodes_temp.pop();
-      }
-      // two nodes per element, thus * 2
-      for(long unsigned int i=0; i < size_kept * 2; i++){      
-    	search_stats_->nodes_added_by_the_helper.push(nodes_added_by_the_helper_temp.front());
-    	nodes_added_by_the_helper_temp.pop();
-      }
-      
-    if(params_.GetAuxEngineVerbosity() >= 5)
-      LOGFILE << "Total number of nodes in the added by the helper engine during this move: " << my_size
-	      << ". Purged " << my_size - size_kept
-	      << " nodes in the added queue based the selected move: " << final_bestmove_.as_string()
-	      << ". " << std::endl
-	      << "purged source zero: " << sources_purged_stat[0] << std::endl
-	      << "purged source one: " << sources_purged_stat[1] << std::endl
-	      << "purged source two: " << sources_purged_stat[2] << std::endl
-	      << "purged source three: " << sources_purged_stat[3] << std::endl
-	      << size_kept << " nodes remain: " << std::endl
-	      << "kept source zero: " << sources_stat[0] << std::endl
-	      << "kept source one: " << sources_stat[1] << std::endl
-	      << "kept source two: " << sources_stat[2] << std::endl
-	      << "kept source three: " << sources_stat[3];
 
-    } else {
-      if(params_.GetAuxEngineVerbosity() >= 5)
-	LOGFILE << "No nodes added by the helper engine in the search tree during move selection time. "
-		<< "search_stat is at: " << &search_stats_;
+    // For now avoid checking since it seems it occasionally crashes for unknown reasons.
+    if(search_stats_->nodes_added_by_the_helper.size() > 0){
+      search_stats_->nodes_added_by_the_helper = {};
+      search_stats_->source_of_added_nodes = {};
     }
+  
+    // if(search_stats_->nodes_added_by_the_helper.size() > 0){
+    //   std::queue<Node*> nodes_added_by_the_helper_temp;
+    //   std::queue<int> source_of_added_nodes_temp;
+    //   long unsigned int my_size = search_stats_->nodes_added_by_the_helper.size();
+    //   std::vector<int> sources_stat(4);
+    //   std::vector<int> sources_purged_stat(4);      
+    //   for(long unsigned int i=0; i < my_size; i++){
+    // 	Node * n = search_stats_->nodes_added_by_the_helper.front(); // read the element
+    // 	search_stats_->nodes_added_by_the_helper.pop(); // remove it from the queue.
+    // 	int source = search_stats_->source_of_added_nodes.front(); // read the element
+    // 	search_stats_->source_of_added_nodes.pop(); // remove it from the queue.
+    // 	if(n->GetParent() == nullptr || n->GetOwnEdge() == nullptr) break;
+    // 	if(n->GetParent() == root_node_ &&
+    // 	   n->GetOwnEdge()->GetMove(played_history_.IsBlackToMove()) == final_bestmove_){
+    // 	  LOGFILE << "OMG the helper engine added the move played! " << n->DebugString() << " " << n->GetOwnEdge()->GetMove(played_history_.IsBlackToMove()).as_string() << " The source was: " << source;
+    // 	}
+    // 	for (Node* n2 = n; n2 != root_node_ ; n2 = n2->GetParent()) {
+    // 	  // if purge at search start never happened (because of only one move possible, auxworker() never started), then we can have disconnected nodes in the queue.
+    // 	  if(n2->GetParent() == nullptr || n2->GetParent()->GetParent() == nullptr) break;	  
+    // 	  if(n2->GetParent()->GetParent() == root_node_){
+    // 	    if(n2->GetParent()->GetOwnEdge()->GetMove(played_history_.IsBlackToMove()) == final_bestmove_){
+    // 	      nodes_added_by_the_helper_temp.push(n);
+    // 	      // in order to be able to purge nodes that became obsolete and deallocated due to the move of the opponent,
+    // 	      // also save the grandparent that will become root at next iteration if this node is still relevant by then.
+    // 	      nodes_added_by_the_helper_temp.push(n2);
+    // 	      source_of_added_nodes_temp.push(source);
+    // 	      sources_stat[source]++;
+    // 	    } else {
+    // 	      sources_purged_stat[source]++;
+    // 	    }
+    // 	    break;
+    // 	  }
+    // 	}
+    //   }
+    //   long unsigned int size_kept = source_of_added_nodes_temp.size();
+    //   for(long unsigned int i=0; i < size_kept; i++){
+    // 	search_stats_->source_of_added_nodes.push(source_of_added_nodes_temp.front());
+    // 	source_of_added_nodes_temp.pop();
+    //   }
+    //   // two nodes per element, thus * 2
+    //   for(long unsigned int i=0; i < size_kept * 2; i++){      
+    // 	search_stats_->nodes_added_by_the_helper.push(nodes_added_by_the_helper_temp.front());
+    // 	nodes_added_by_the_helper_temp.pop();
+    //   }
+      
+    // if(params_.GetAuxEngineVerbosity() >= 5)
+    //   LOGFILE << "Total number of nodes in the added by the helper engine during this move: " << my_size
+    // 	      << ". Purged " << my_size - size_kept
+    // 	      << " nodes in the added queue based the selected move: " << final_bestmove_.as_string()
+    // 	      << ". " << std::endl
+    // 	      << "purged source zero: " << sources_purged_stat[0] << std::endl
+    // 	      << "purged source one: " << sources_purged_stat[1] << std::endl
+    // 	      << "purged source two: " << sources_purged_stat[2] << std::endl
+    // 	      << "purged source three: " << sources_purged_stat[3] << std::endl
+    // 	      << size_kept << " nodes remain: " << std::endl
+    // 	      << "kept source zero: " << sources_stat[0] << std::endl
+    // 	      << "kept source one: " << sources_stat[1] << std::endl
+    // 	      << "kept source two: " << sources_stat[2] << std::endl
+    // 	      << "kept source three: " << sources_stat[3];
+
+    // } else {
+    //   if(params_.GetAuxEngineVerbosity() >= 5)
+    // 	LOGFILE << "No nodes added by the helper engine in the search tree during move selection time. "
+    // 		<< "search_stat is at: " << &search_stats_;
+    // }
     auxengine_mutex_.unlock(); // play nice with Search::AuxEngineWorker()    
 
   }

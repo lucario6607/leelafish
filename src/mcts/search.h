@@ -68,6 +68,7 @@ class Search {
     Move ponder_move; // the move predicted by search().
     float q; // the expected q based on the predicted move.
     bool New_Game = false; // used by EngineController::NewGame in engine.cc to inform search that a new game has started, so it can re-initiate AuxEngineTime to the value given by UCI
+    int size_of_queue_at_start; // used by Search::AuxEngineWorker() to decide how many node to check for purging at the start of each move. Without this, new nodes added by before the purge happened would cause a crash.
   };
 
   Search(const NodeTree& tree, Network* network,

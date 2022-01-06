@@ -125,6 +125,7 @@ void Search::AuxEngineWorker() {
       search_stats_->AuxEngineThreshold = params_.GetAuxEngineThreshold();
       search_stats_->Total_number_of_nodes = 0;
       search_stats_->Number_of_nodes_added_by_AuxEngine = 0;
+      search_stats_->size_of_queue_at_start = 0;      
 
       // Occasionally, we get a new pointer to search_stats_ between games (not sure when/why that happens). When it happens, make sure the queues are empty, or the purging of them can fail.
       // Normally, everything works fine without the next four lines.
@@ -139,11 +140,11 @@ void Search::AuxEngineWorker() {
     }
     
     // purge obsolete nodes in the queue, if any. The even elements are the actual nodes, the odd elements is root if the preceding even element is still a relevant node.
-    if(search_stats_->persistent_queue_of_nodes.size() > 0){
-      int number_of_nodes_before_purging = int(search_stats_->persistent_queue_of_nodes.size() / 2);
+    LOGFILE << "search_stats_->size_of_queue_at_start:" << search_stats_->size_of_queue_at_start;
+    if(search_stats_->size_of_queue_at_start > 0){
+      int number_of_nodes_before_purging = int(search_stats_->size_of_queue_at_start / 2);
       std::queue<Node*> persistent_queue_of_nodes_temp_;
-      long unsigned int my_size = search_stats_->persistent_queue_of_nodes.size();      
-      for(long unsigned int i=0; i < my_size; i = i + 2){
+      for(int i=0; i < search_stats_->size_of_queue_at_start; i = i + 2){
 	Node * n = search_stats_->persistent_queue_of_nodes.front();
 	search_stats_->persistent_queue_of_nodes.pop();
 	Node * n_parent = search_stats_->persistent_queue_of_nodes.front();
@@ -154,8 +155,8 @@ void Search::AuxEngineWorker() {
 	}
       }
       // update search_stats_->persistent_queue_of_nodes
-      my_size = persistent_queue_of_nodes_temp_.size();
-      for(long unsigned int i=0; i < my_size; i++){      
+      int my_size = persistent_queue_of_nodes_temp_.size();
+      for(int i=0; i < my_size; i++){      
     	search_stats_->persistent_queue_of_nodes.push(persistent_queue_of_nodes_temp_.front());
     	persistent_queue_of_nodes_temp_.pop();
       }

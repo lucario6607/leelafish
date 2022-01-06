@@ -176,6 +176,7 @@ Search::Search(const NodeTree& tree, Network* network,
     pending_searchers_.store(params_.GetMaxConcurrentSearchers(),
                              std::memory_order_release);
   }
+  search_stats_->size_of_queue_at_start = search_stats_->persistent_queue_of_nodes.size();
   if (search_stats_->AuxEngineThreshold == 0){
     search_stats_->AuxEngineThreshold = params_.GetAuxEngineThreshold();
   }
@@ -619,6 +620,8 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	int source = search_stats_->source_of_queued_nodes.front(); // read the element
 	search_stats_->source_of_queued_nodes.pop(); // remove it from the queue.	
 	for (Node* n2 = n; n2 != root_node_ ; n2 = n2->GetParent()) {
+	  // if purge at search start never happened (because of only one move possible, auxworker() never started), then we can have disconnected nodes in the queue.
+	  if(n2->GetParent() == nullptr || n2->GetParent()->GetParent() == nullptr) break;
 	  if(n2->GetParent()->GetParent() == root_node_){
 	    if(n2->GetParent()->GetOwnEdge()->GetMove(played_history_.IsBlackToMove()) == final_bestmove_){
 	      persistent_queue_of_nodes_temp.push(n);
@@ -671,6 +674,8 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	  LOGFILE << "OMG the helper engine added the move played! " << n->DebugString() << " " << n->GetOwnEdge()->GetMove(played_history_.IsBlackToMove()).as_string() << " The source was: " << source;
 	}
 	for (Node* n2 = n; n2 != root_node_ ; n2 = n2->GetParent()) {
+	  // if purge at search start never happened (because of only one move possible, auxworker() never started), then we can have disconnected nodes in the queue.
+	  if(n2->GetParent() == nullptr || n2->GetParent()->GetParent() == nullptr) break;
 	  if(n2->GetParent()->GetParent() == root_node_){
 	    if(n2->GetParent()->GetOwnEdge()->GetMove(played_history_.IsBlackToMove()) == final_bestmove_){
 	      nodes_added_by_the_helper_temp.push(n);

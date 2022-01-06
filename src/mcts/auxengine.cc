@@ -113,14 +113,17 @@ void Search::AuxEngineWorker() {
     auxengine_ready_ = true;
     // Initiate some stats and parameters (Threshold needs to be set
     // earlier, see search() in search.cc)
+    auxengine_mutex_.lock(); // play nice with Search::MaybeTriggerStop()    
     search_stats_->AuxEngineTime = params_.GetAuxEngineTime();
     search_stats_->Number_of_nodes_added_by_AuxEngine = 0;
     search_stats_->Total_number_of_nodes = 0;
     if(search_stats_->New_Game){
       search_stats_->New_Game = false;
     }
+    auxengine_mutex_.unlock(); // play nice with Search::MaybeTriggerStop()        
   } else {
     if(search_stats_->New_Game){
+      auxengine_mutex_.lock(); // play nice with Search::MaybeTriggerStop()      
       search_stats_->AuxEngineTime = params_.GetAuxEngineTime();
       search_stats_->AuxEngineThreshold = params_.GetAuxEngineThreshold();
       search_stats_->Total_number_of_nodes = 0;
@@ -137,7 +140,16 @@ void Search::AuxEngineWorker() {
       if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE
     << "Resetting AuxEngine parameters because a new game started.";
       search_stats_->New_Game = false;
+
+      auxengine_mutex_.unlock(); // play nice with Search::MaybeTriggerStop()      
     }
+
+    if(stop_.load(std::memory_order_acquire)){
+      // search is stopped before we even had a chance to do anything.
+      return;
+    }
+
+    auxengine_mutex_.lock(); // play nice with Search::MaybeTriggerStop()
     
     // purge obsolete nodes in the queue, if any. The even elements are the actual nodes, the odd elements is root if the preceding even element is still a relevant node.
     LOGFILE << "search_stats_->size_of_queue_at_start:" << search_stats_->size_of_queue_at_start;
@@ -192,6 +204,8 @@ void Search::AuxEngineWorker() {
 		<< " stale nodes from the queue of nodes added by the auxillary helper due to the move seleted by the opponent. " << search_stats_->nodes_added_by_the_helper.size()
 		<< " nodes remain in the queue of nodes added by the auxillary helper.";
     }
+
+    auxengine_mutex_.unlock();
   }
 
   // Kickstart with the root node, no need to wait for it to get some
@@ -375,7 +389,7 @@ void Search::DoAuxEngine(Node* n) {
 	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine() Stopping the A/B helper Stop";
 	  auxengine_stopped_ = true;
 	}
-	auxengine_stopped_mutex_.unlock();	
+	auxengine_stopped_mutex_.unlock();
       }
     }
   }
@@ -512,7 +526,7 @@ void Search::AuxWait() {
   // Decrease the EngineTime if we're in an endgame.
   ChessBoard my_board = played_history_.Last().GetBoard();
   if((my_board.ours() | my_board.theirs()).count() < 20){
-    search_stats_->AuxEngineTime = params_.GetAuxEngineTime() * 0.75f;
+    search_stats_->AuxEngineTime = std::max(10, int(std::round(params_.GetAuxEngineTime() * 0.75f))); // minimum 10 ms.
   }
 
   // Time based queries    

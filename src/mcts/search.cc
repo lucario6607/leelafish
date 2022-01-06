@@ -176,12 +176,13 @@ Search::Search(const NodeTree& tree, Network* network,
     pending_searchers_.store(params_.GetMaxConcurrentSearchers(),
                              std::memory_order_release);
   }
+  auxengine_mutex_.lock();
   search_stats_->size_of_queue_at_start = search_stats_->persistent_queue_of_nodes.size();
   if (search_stats_->AuxEngineThreshold == 0){
     search_stats_->AuxEngineThreshold = params_.GetAuxEngineThreshold();
   }
   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Search called with search_stats at: " << &search_stats_ << " size of persistent_queue: " << search_stats_->persistent_queue_of_nodes.size() << " threshold=" << search_stats_->AuxEngineThreshold;
-
+  auxengine_mutex_.unlock();
 }
 
 namespace {
@@ -604,6 +605,8 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     bestmove_is_sent_ = true;
     current_best_edge_ = EdgeAndNode();
 
+    auxengine_mutex_.lock(); // play nice with Search::AuxEngineWorker()    
+
     // Store the size of the queue, for adjustment of threshold and time
     search_stats_->AuxEngineQueueSizeAtMoveSelectionTime = search_stats_->persistent_queue_of_nodes.size();
     search_stats_->Total_number_of_nodes = search_stats_->Total_number_of_nodes + root_node_->GetN();
@@ -654,10 +657,6 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	 << "Threshold used: " << search_stats_->AuxEngineThreshold;
     }
   
-    // // Also purge nodes from nodes_added_by_the_helper TODO: generalize this to a function that takes two pointers as input which then can be used both for persistent_queue_of_nodes and nodes_added_by_the_helper.
-    // void purge_stale_nodes (const std::queue<Node*> * pointer_to_nodes, std::queue<int> queue_of_sources){
-    // }
-    
     if(search_stats_->nodes_added_by_the_helper.size() > 0){
       std::queue<Node*> nodes_added_by_the_helper_temp;
       std::queue<int> source_of_added_nodes_temp;
@@ -669,13 +668,14 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     	search_stats_->nodes_added_by_the_helper.pop(); // remove it from the queue.
 	int source = search_stats_->source_of_added_nodes.front(); // read the element
 	search_stats_->source_of_added_nodes.pop(); // remove it from the queue.
+	if(n->GetParent() == nullptr || n->GetOwnEdge() == nullptr) break;
 	if(n->GetParent() == root_node_ &&
 	   n->GetOwnEdge()->GetMove(played_history_.IsBlackToMove()) == final_bestmove_){
 	  LOGFILE << "OMG the helper engine added the move played! " << n->DebugString() << " " << n->GetOwnEdge()->GetMove(played_history_.IsBlackToMove()).as_string() << " The source was: " << source;
 	}
 	for (Node* n2 = n; n2 != root_node_ ; n2 = n2->GetParent()) {
 	  // if purge at search start never happened (because of only one move possible, auxworker() never started), then we can have disconnected nodes in the queue.
-	  if(n2->GetParent() == nullptr || n2->GetParent()->GetParent() == nullptr) break;
+	  if(n2->GetParent() == nullptr || n2->GetParent()->GetParent() == nullptr) break;	  
 	  if(n2->GetParent()->GetParent() == root_node_){
 	    if(n2->GetParent()->GetOwnEdge()->GetMove(played_history_.IsBlackToMove()) == final_bestmove_){
 	      nodes_added_by_the_helper_temp.push(n);
@@ -722,8 +722,9 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	LOGFILE << "No nodes added by the helper engine in the search tree during move selection time. "
 		<< "search_stat is at: " << &search_stats_;
     }
-  }
+    auxengine_mutex_.unlock(); // play nice with Search::AuxEngineWorker()    
 
+  }
   
   // Use a 0 visit cancel score update to clear out any cached best edge, as
   // at the next iteration remaining playouts may be different.
@@ -1400,8 +1401,11 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	
 	// GetOrSpawnNode() does work with the lock on since it does not modify the tree.
 	Node* child_node = edge.GetOrSpawnNode(my_node, nullptr);
+
+	search_->auxengine_mutex_.lock();
 	search_->search_stats_->nodes_added_by_the_helper.push(child_node);
 	search_->search_stats_->source_of_added_nodes.push(source);
+	search_->auxengine_mutex_.unlock();
 
 	nodes_added++;
 

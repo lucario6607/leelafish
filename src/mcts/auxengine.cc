@@ -492,41 +492,33 @@ void Search::AuxWait() {
     auxengine_threads_.pop_back();
   }
 
-  // Adjust threshold so that almost all queued nodes get evaluated before move selection time
-  // If the amount of remaining nodes is higher than 10% of the number of nodes actually evaluated, then increase the threshold.
-  if(search_stats_->AuxEngineQueueSizeAtMoveSelectionTime > int(auxengine_num_evals * 0.10f)){
-    search_stats_->AuxEngineThreshold = search_stats_->AuxEngineThreshold * 1.1;
-  }
-  // decrease the threshold if we are in time for 95% of all queued nodes (worse to have no nodes in the queue than to perform the query on the next move).
-  if(search_stats_->AuxEngineQueueSizeAtMoveSelectionTime < int(auxengine_num_evals * 0.95f)){
-    search_stats_->AuxEngineThreshold = search_stats_->AuxEngineThreshold * 0.90;
-  }
+  // // Adjust threshold so that almost all queued nodes get evaluated before move selection time
+  // // If the amount of remaining nodes is higher than 10% of the number of nodes actually evaluated, then increase the threshold.
+  // if(search_stats_->AuxEngineQueueSizeAtMoveSelectionTime > int(auxengine_num_evals * 0.10f)){
+  //   search_stats_->AuxEngineThreshold = search_stats_->AuxEngineThreshold * 1.1;
+  // }
+  // // decrease the threshold if we are in time for 95% of all queued nodes (worse to have no nodes in the queue than to perform the query on the next move).
+  // if((search_stats_->AuxEngineQueueSizeAtMoveSelectionTime < int(auxengine_num_evals * 0.95f))
+  //     ||
+  //    (search_stats_->AuxEngineQueueSizeAtMoveSelectionTime < 10) // cover cases where auxengine_num_evals == 0
+  //    ){
+  //   search_stats_->AuxEngineThreshold = search_stats_->AuxEngineThreshold * 0.90;
+  // }
   
   search_stats_->Number_of_nodes_added_by_AuxEngine = search_stats_->Number_of_nodes_added_by_AuxEngine + auxengine_num_updates;
   float observed_ratio = float(search_stats_->Number_of_nodes_added_by_AuxEngine) / search_stats_->Total_number_of_nodes;
 
-  // ChessBoard my_board = played_history_.Last().GetBoard();
-
-  // float ideal_ratio = params_.GetAuxEngineIdealRatio();
-  // if((my_board.ours() | my_board.theirs()).count() < 20){
-  //   ideal_ratio *= 2.0f;
-  //   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Endgame: using increased ratio=" << ideal_ratio;
-  // }
-  
-  // if(observed_ratio > ideal_ratio * 1.1){
-  //   // increase time so that fewer nodes are added.
-  //   search_stats_->AuxEngineTime = int(search_stats_->AuxEngineTime * 1.05);
-  // }
-  // if(observed_ratio < ideal_ratio * 0.9){
-  //   // decrease time so that more nodes are added.
-  //   search_stats_->AuxEngineTime = std::max(30, int(search_stats_->AuxEngineTime * 0.95));
-  // }
+  // Decrease the EngineTime if we're in an endgame.
+  ChessBoard my_board = played_history_.Last().GetBoard();
+  if((my_board.ours() | my_board.theirs()).count() < 20){
+    search_stats_->AuxEngineTime = params_.GetAuxEngineTime() * 0.75f;
+  }
 
   // Time based queries    
   LOGFILE << "Summaries per move: (Time based queries) persistent_queue_of_nodes size at the end of search: " << search_stats_->AuxEngineQueueSizeAtMoveSelectionTime
 	  << " Ratio added/total nodes: " << observed_ratio << " (added=" << search_stats_->Number_of_nodes_added_by_AuxEngine << "; total=" << search_stats_->Total_number_of_nodes << ")."
       << " Average duration " << (auxengine_num_evals ? (auxengine_total_dur / auxengine_num_evals) : -1.0f) << "ms"
-      << " New AuxEngineTime for next iteration " << search_stats_->AuxEngineTime
+      << " AuxEngineTime for next iteration " << search_stats_->AuxEngineTime
       << " New AuxEngineThreshold for next iteration " << search_stats_->AuxEngineThreshold
       << " Number of evals " << auxengine_num_evals
       << " Number of added nodes " << search_stats_->Number_of_nodes_added_by_AuxEngine;

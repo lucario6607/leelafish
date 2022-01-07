@@ -241,13 +241,90 @@ void Search::AuxEngineWorker() {
   	  auxengine_mutex_.unlock(); 	
   	  break;
   	}
-  	n = search_stats_->persistent_queue_of_nodes.front();
-  	search_stats_->persistent_queue_of_nodes.pop();
+
+	n = search_stats_->persistent_queue_of_nodes.front();
+	search_stats_->persistent_queue_of_nodes.pop();
+	
+	// TODO: make search_stats_->persistent_queue_of_nodes.empty a priority queue based on depth. Do this efficiently without having to recalculate depth. (substract two at every move)
+	// During search it might be more efficient to keep the information in a vector/array, and use subsetting to directly extract the lowest depth node reference.
+	// Perhaps keep depth in a separate queue (or vector, or array).
+	// send depth info to doAuxEngine() so that depth isn't re-calculated there.
+	
+	// make sure to query the node with the lowest depth. Loop through the queue twice	
+
+	// if(search_stats_->persistent_queue_of_nodes.size() > 1){
+	//   int lowest_depth = 99;
+	//   std::queue<Node*> persistent_queue_of_nodes_temp;
+	//   // LOGFILE << "search_stats_->persistent_queue_of_nodes.size()" << search_stats_->persistent_queue_of_nodes.size();
+	//   // 1. Calculate lowest depth, while saving the nodes in a temporary queue.
+	//   while(search_stats_->persistent_queue_of_nodes.size() > 0){
+	//     n = search_stats_->persistent_queue_of_nodes.front();
+	//     int depth = 0;
+	//     if(n != root_node_){
+	//       if(stop_.load(std::memory_order_acquire)) {
+	// 	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker() caught a stop signal while calculating depth.";
+	// 	auxengine_mutex_.unlock();		
+	// 	return; // todo must we explictly unlock here?
+	//       }
+	//       nodes_mutex_.lock_shared();
+	//       for (Node* n2 = n; n2 != root_node_; n2 = n2->GetParent()) {
+	// 	depth++;
+	//       }
+	//       nodes_mutex_.unlock_shared();    
+	//     }
+	//     if(depth < lowest_depth) lowest_depth = depth;
+	//     persistent_queue_of_nodes_temp.push(n); // save to the temp queue
+	//     search_stats_->persistent_queue_of_nodes.pop();
+	//   }
+	//   if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "lowest depth found: " << lowest_depth << " from a set of " << persistent_queue_of_nodes_temp.size() << " nodes.";	  
+	//   // LOGFILE << "after first loop: search_stats_->persistent_queue_of_nodes.size()" << search_stats_->persistent_queue_of_nodes.size();	  
+	//   // 2. circulate back from the temp queue, but do not put back the first node depth = lowest depth.
+	//   bool best_node_found = false;
+	//   while(persistent_queue_of_nodes_temp.size() > 0){
+	//     if(!best_node_found){
+	//       n = persistent_queue_of_nodes_temp.front();
+	//       int depth = 0;
+	//       if(n != root_node_){
+	// 	if(stop_.load(std::memory_order_acquire)) {
+	// 	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker() caught a stop signal while calculating depth.";
+	// 	  auxengine_mutex_.unlock();
+	// 	  return;
+	// 	}
+	// 	nodes_mutex_.lock_shared();
+	// 	for (Node* n2 = n; n2 != root_node_; n2 = n2->GetParent()) {
+	// 	  depth++;
+	// 	}
+	// 	nodes_mutex_.unlock_shared();    
+	//       }
+	//       if(depth == lowest_depth){
+	// 	best_node_found = true;
+	// 	persistent_queue_of_nodes_temp.pop();
+	// 	LOGFILE << "found the lowest depth node";
+	//       } else {
+	// 	search_stats_->persistent_queue_of_nodes.push(persistent_queue_of_nodes_temp.front()); // save back from the temp queue
+	// 	persistent_queue_of_nodes_temp.pop();
+	// 	LOGFILE << "nodes left to copy back: " << persistent_queue_of_nodes_temp.size();
+	//       }
+	//     } else {
+	//       // don't touch n anymore, it already has the best node
+	//       search_stats_->persistent_queue_of_nodes.push(persistent_queue_of_nodes_temp.front()); // save back from the temp queue
+	//       persistent_queue_of_nodes_temp.pop();
+	//       LOGFILE << "nodes left to copy back: " << persistent_queue_of_nodes_temp.size();
+	//     }
+	//   } // copying back finished.
+	//   LOGFILE << "copying back finished";
+	// } else {
+	//   // only one node in the queue.
+	//   n = search_stats_->persistent_queue_of_nodes.front();
+	//   search_stats_->persistent_queue_of_nodes.pop();
+	// }
+	
     } // release lock
     DoAuxEngine(n);
     ++number_of_pvs_delivered;
   }
-  auxengine_mutex_.unlock();
+  // auxengine_mutex_.unlock();
+  
   if (params_.GetAuxEngineVerbosity() >= 1) LOGFILE  
     << "AuxEngineWorker done, delivered " << number_of_pvs_delivered << " PVs.";
   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker done search search_stats_ at: " << &search_stats_ ;
@@ -276,6 +353,7 @@ void Search::DoAuxEngine(Node* n) {
     }
     nodes_mutex_.unlock_shared();    
   }
+  if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "DoAuxEngine processing a node with depth: " << depth;
 
   std::string s = "";
   bool flip = played_history_.IsBlackToMove() ^ (depth % 2 == 0);

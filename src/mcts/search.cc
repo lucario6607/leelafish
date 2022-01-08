@@ -2719,8 +2719,7 @@ void SearchWorker::DoBackupUpdateSingleNode(
       !n->IsTerminal() &&
        n->HasChildren() &&
        // These last two conditions are rather expensive to evaluate, which is why they must come last
-       params_.GetAuxEngineFile() != "" && 
-       !search_->stop_.load(std::memory_order_acquire)
+       params_.GetAuxEngineFile() != ""
        ){
       AuxMaybeEnqueueNode(n, 1);
       search_->number_of_times_called_AuxMaybeEnqueueNode_ += 1;

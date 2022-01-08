@@ -58,6 +58,10 @@ void Search::OpenAuxEngine() REQUIRES(threads_mutex_) {
 void SearchWorker::AuxMaybeEnqueueNode(Node* n, int source) {
   // the caller (DoBackupUpdate()->DoBackupUpdateSingleNode()) has a lock on search_->nodes_mutex_, so no other thread will change n right now.
 
+  if (search_->stop_.load(std::memory_order_acquire)){
+    return;
+  }
+
   if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE
       << "AuxMaybeEnqueueNode() picked node: " << n->DebugString() 
       << " for the persistent_queue_of_nodes which has size: "

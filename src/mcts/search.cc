@@ -2713,12 +2713,15 @@ void SearchWorker::DoBackupUpdateSingleNode(
 
     // Avoid a full function call unless it will likely actually queue the node.
     // Do nothing if search is interrupted, the node will get picked the next iteration anyway.
-    if(params_.GetAuxEngineFile() != "" &&
-       n->GetN() >= (uint32_t) search_->search_stats_->AuxEngineThreshold &&
+
+    if(n->GetN() >= (uint32_t) search_->search_stats_->AuxEngineThreshold &&
        n->GetAuxEngineMove() == 0xffff &&
-       !n->IsTerminal() &&
+      !n->IsTerminal() &&
        n->HasChildren() &&
-       !search_->stop_.load(std::memory_order_acquire)){
+       // These last two conditions are rather expensive to evaluate, which is why they must come last
+       params_.GetAuxEngineFile() != "" && 
+       !search_->stop_.load(std::memory_order_acquire)
+       ){
       AuxMaybeEnqueueNode(n, 1);
       search_->number_of_times_called_AuxMaybeEnqueueNode_ += 1;
     }

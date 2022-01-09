@@ -290,12 +290,13 @@ void Search::DoAuxEngine(Node* n) {
     nodes_mutex_.unlock_shared();    
   }
 
-  float sample = distribution(generator);
+  // float sample = distribution(generator);
   
-  if(depth > 0 &&
-     depth > params_.GetAuxEngineMaxDepth() &&
-     float(1.0f)/(depth * depth) < sample){
-    // if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "DoAuxEngine ignoring a node with depth: " << depth << " since sample " << sample << " is higher than " << float(1.0f)/(depth * depth);
+  // if(depth > 0 &&
+  //    depth > params_.GetAuxEngineMaxDepth() &&
+  //    float(1.0f)/(depth) < sample){
+  if(depth > params_.GetAuxEngineMaxDepth()){
+    // if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "DoAuxEngine ignoring a node with depth: " << depth << " since sample " << sample << " is higher than " << float(1.0f)/(depth);
     int source = search_stats_->source_of_queued_nodes.front();
     search_stats_->source_of_queued_nodes.pop();
 
@@ -315,7 +316,7 @@ void Search::DoAuxEngine(Node* n) {
   }
   if(depth > 0 &&
      depth > params_.GetAuxEngineMaxDepth()){
-    // if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "DoAuxEngine processing a node with high depth: " << " since sample " << sample << " is less than " << float(1.0f)/(depth * depth);
+    // if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "DoAuxEngine processing a node with high depth: " << " since sample " << sample << " is less than " << float(1.0f)/(depth);
   }
     
   if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "DoAuxEngine processing a node with depth: " << depth;
@@ -531,20 +532,20 @@ void Search::AuxWait() {
     auxengine_threads_.pop_back();
   }
 
-  // Adjust threshold so that time is not wasted queueing nodes that will never be evaluated anyway.
-  // If the amount of remaining nodes is higher than 3 times of the number of nodes actually evaluated, then increase the threshold.
-  if(search_stats_->AuxEngineQueueSizeAtMoveSelectionTime > auxengine_num_evals * 10){
-    search_stats_->AuxEngineThreshold = search_stats_->AuxEngineThreshold * 1.1;
-    if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "Increased Threshold since queue is larger than 3 times the evaluated nodes";
-  }
-  // decrease the threshold if we are in time for 33% of all queued nodes (worse to have no nodes in the queue than to perform the query on the next move).
-  if((search_stats_->AuxEngineQueueSizeAtMoveSelectionTime < auxengine_num_evals * 3)
-      ||
-     (search_stats_->AuxEngineQueueSizeAtMoveSelectionTime < 10) // cover cases where auxengine_num_evals == 0
-     ){
-    search_stats_->AuxEngineThreshold = search_stats_->AuxEngineThreshold * 0.90;
-    if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "Decreased Threshold since queue is less than 3 times the evaluated nodes";    
-  }
+  // // Adjust threshold so that time is not wasted queueing nodes that will never be evaluated anyway.
+  // // If the amount of remaining nodes is higher than 20 times of the number of nodes actually evaluated, then increase the threshold.
+  // if(search_stats_->AuxEngineQueueSizeAtMoveSelectionTime > auxengine_num_evals * 20){
+  //   search_stats_->AuxEngineThreshold = search_stats_->AuxEngineThreshold * 1.1;
+  //   if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "Increased Threshold since queue is larger than 3 times the evaluated nodes";
+  // }
+  // // decrease the threshold if we the amount of remaining nodes is less than 10 times of all queued nodes
+  // if((search_stats_->AuxEngineQueueSizeAtMoveSelectionTime < auxengine_num_evals * 10)
+  //     ||
+  //    (search_stats_->AuxEngineQueueSizeAtMoveSelectionTime < 10) // cover cases where auxengine_num_evals == 0
+  //    ){
+  //   search_stats_->AuxEngineThreshold = search_stats_->AuxEngineThreshold * 0.90;
+  //   if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "Decreased Threshold since queue is less than 3 times the evaluated nodes";    
+  // }
   
   search_stats_->Number_of_nodes_added_by_AuxEngine = search_stats_->Number_of_nodes_added_by_AuxEngine + auxengine_num_updates;
   float observed_ratio = float(search_stats_->Number_of_nodes_added_by_AuxEngine) / search_stats_->Total_number_of_nodes;

@@ -597,18 +597,20 @@ void Search::AuxWait() {
     auxengine_threads_.pop_back();
   }
 
-  // // Adjust threshold so that almost all queued nodes get evaluated before move selection time
-  // // If the amount of remaining nodes is higher than 10% of the number of nodes actually evaluated, then increase the threshold.
-  // if(search_stats_->AuxEngineQueueSizeAtMoveSelectionTime > int(auxengine_num_evals * 0.10f)){
-  //   search_stats_->AuxEngineThreshold = search_stats_->AuxEngineThreshold * 1.1;
-  // }
-  // // decrease the threshold if we are in time for 95% of all queued nodes (worse to have no nodes in the queue than to perform the query on the next move).
-  // if((search_stats_->AuxEngineQueueSizeAtMoveSelectionTime < int(auxengine_num_evals * 0.95f))
-  //     ||
-  //    (search_stats_->AuxEngineQueueSizeAtMoveSelectionTime < 10) // cover cases where auxengine_num_evals == 0
-  //    ){
-  //   search_stats_->AuxEngineThreshold = search_stats_->AuxEngineThreshold * 0.90;
-  // }
+  // Adjust threshold so that time is not wasted queueing nodes that will never be evaluated anyway.
+  // If the amount of remaining nodes is higher than 3 times of the number of nodes actually evaluated, then increase the threshold.
+  if(search_stats_->AuxEngineQueueSizeAtMoveSelectionTime > auxengine_num_evals * 3){
+    search_stats_->AuxEngineThreshold = search_stats_->AuxEngineThreshold * 1.1;
+    if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "Increased Threshold since queue is larger than 3 times the evaluated nodes";
+  }
+  // decrease the threshold if we are in time for 50% of all queued nodes (worse to have no nodes in the queue than to perform the query on the next move).
+  if((search_stats_->AuxEngineQueueSizeAtMoveSelectionTime < auxengine_num_evals * 2)
+      ||
+     (search_stats_->AuxEngineQueueSizeAtMoveSelectionTime < 10) // cover cases where auxengine_num_evals == 0
+     ){
+    search_stats_->AuxEngineThreshold = search_stats_->AuxEngineThreshold * 0.90;
+    if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "Decreased Threshold since queue is less than 2 times the evaluated nodes";    
+  }
   
   search_stats_->Number_of_nodes_added_by_AuxEngine = search_stats_->Number_of_nodes_added_by_AuxEngine + auxengine_num_updates;
   float observed_ratio = float(search_stats_->Number_of_nodes_added_by_AuxEngine) / search_stats_->Total_number_of_nodes;

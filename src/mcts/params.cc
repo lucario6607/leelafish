@@ -324,10 +324,10 @@ const OptionId SearchParams::kAuxEngineOptionsId{
     "Semicolon separated list of UCI options for the auxiliary engine\n"
     "e.g. Hash=1024;Threads=3"};
 const OptionId SearchParams::kAuxEngineMaxDepthId{
-    "auxengine-max-depth", "AuxEngineThreshold",
-    "Only nodes with depth less than this number will be sent to the "
-    "auxiliary engine. This limit is useful to avoid search being too "
-    "narrow."};
+    "auxengine-max-depth", "AuxEngineMaxDepth",
+    "Nodes with depth higher than this number will only be sent to the "
+    "auxiliary engine with a probability inverse to their depth. "
+    "This limit is useful to avoid search being too narrow."};
 const OptionId SearchParams::kAuxEngineThresholdId{
     "auxengine-threshold", "AuxEngineThreshold",
     "The auxiliary engine is intially called when a node reaches this "

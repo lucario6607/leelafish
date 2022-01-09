@@ -43,6 +43,9 @@
 #include "utils/fastmath.h"
 #include "utils/random.h"
 
+std::default_random_engine generator;
+std::uniform_real_distribution<float> distribution(1,0);
+
 namespace lczero {
 
 boost::process::ipstream Search::auxengine_is_;
@@ -81,6 +84,7 @@ void Search::AuxEngineWorker() {
   int number_of_pvs_delivered = 0;
 
   if (!auxengine_ready_) {
+
     auxengine_c_ = boost::process::child(params_.GetAuxEngineFile(), boost::process::std_in < auxengine_os_, boost::process::std_out > auxengine_is_);
     {
       std::istringstream iss(params_.GetAuxEngineOptions());
@@ -251,80 +255,6 @@ void Search::AuxEngineWorker() {
 	n = search_stats_->persistent_queue_of_nodes.front();
 	search_stats_->persistent_queue_of_nodes.pop();
 	
-	// TODO: make search_stats_->persistent_queue_of_nodes.empty a priority queue based on depth. Do this efficiently without having to recalculate depth. (substract two at every move)
-	// During search it might be more efficient to keep the information in a vector/array, and use subsetting to directly extract the lowest depth node reference.
-	// Perhaps keep depth in a separate queue (or vector, or array).
-	// send depth info to doAuxEngine() so that depth isn't re-calculated there.
-	
-	// make sure to query the node with the lowest depth. Loop through the queue twice	
-
-	// if(search_stats_->persistent_queue_of_nodes.size() > 1){
-	//   int lowest_depth = 99;
-	//   std::queue<Node*> persistent_queue_of_nodes_temp;
-	//   // LOGFILE << "search_stats_->persistent_queue_of_nodes.size()" << search_stats_->persistent_queue_of_nodes.size();
-	//   // 1. Calculate lowest depth, while saving the nodes in a temporary queue.
-	//   while(search_stats_->persistent_queue_of_nodes.size() > 0){
-	//     n = search_stats_->persistent_queue_of_nodes.front();
-	//     int depth = 0;
-	//     if(n != root_node_){
-	//       if(stop_.load(std::memory_order_acquire)) {
-	// 	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker() caught a stop signal while calculating depth.";
-	// 	auxengine_mutex_.unlock();		
-	// 	return; // todo must we explictly unlock here?
-	//       }
-	//       nodes_mutex_.lock_shared();
-	//       for (Node* n2 = n; n2 != root_node_; n2 = n2->GetParent()) {
-	// 	depth++;
-	//       }
-	//       nodes_mutex_.unlock_shared();    
-	//     }
-	//     if(depth < lowest_depth) lowest_depth = depth;
-	//     persistent_queue_of_nodes_temp.push(n); // save to the temp queue
-	//     search_stats_->persistent_queue_of_nodes.pop();
-	//   }
-	//   if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "lowest depth found: " << lowest_depth << " from a set of " << persistent_queue_of_nodes_temp.size() << " nodes.";	  
-	//   // LOGFILE << "after first loop: search_stats_->persistent_queue_of_nodes.size()" << search_stats_->persistent_queue_of_nodes.size();	  
-	//   // 2. circulate back from the temp queue, but do not put back the first node depth = lowest depth.
-	//   bool best_node_found = false;
-	//   while(persistent_queue_of_nodes_temp.size() > 0){
-	//     if(!best_node_found){
-	//       n = persistent_queue_of_nodes_temp.front();
-	//       int depth = 0;
-	//       if(n != root_node_){
-	// 	if(stop_.load(std::memory_order_acquire)) {
-	// 	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker() caught a stop signal while calculating depth.";
-	// 	  auxengine_mutex_.unlock();
-	// 	  return;
-	// 	}
-	// 	nodes_mutex_.lock_shared();
-	// 	for (Node* n2 = n; n2 != root_node_; n2 = n2->GetParent()) {
-	// 	  depth++;
-	// 	}
-	// 	nodes_mutex_.unlock_shared();    
-	//       }
-	//       if(depth == lowest_depth){
-	// 	best_node_found = true;
-	// 	persistent_queue_of_nodes_temp.pop();
-	// 	LOGFILE << "found the lowest depth node";
-	//       } else {
-	// 	search_stats_->persistent_queue_of_nodes.push(persistent_queue_of_nodes_temp.front()); // save back from the temp queue
-	// 	persistent_queue_of_nodes_temp.pop();
-	// 	LOGFILE << "nodes left to copy back: " << persistent_queue_of_nodes_temp.size();
-	//       }
-	//     } else {
-	//       // don't touch n anymore, it already has the best node
-	//       search_stats_->persistent_queue_of_nodes.push(persistent_queue_of_nodes_temp.front()); // save back from the temp queue
-	//       persistent_queue_of_nodes_temp.pop();
-	//       LOGFILE << "nodes left to copy back: " << persistent_queue_of_nodes_temp.size();
-	//     }
-	//   } // copying back finished.
-	//   LOGFILE << "copying back finished";
-	// } else {
-	//   // only one node in the queue.
-	//   n = search_stats_->persistent_queue_of_nodes.front();
-	//   search_stats_->persistent_queue_of_nodes.pop();
-	// }
-	
     } // release lock
     DoAuxEngine(n);
     ++number_of_pvs_delivered;
@@ -359,12 +289,35 @@ void Search::DoAuxEngine(Node* n) {
     }
     nodes_mutex_.unlock_shared();    
   }
-  // TODO: Accept the node with a probabilty related to depth, e.g. with the inverse of depth - some constant (under which all nodes are accepted)
-  if(depth > params_.GetAuxEngineMaxDepth()){
-    if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "DoAuxEngine ignoring a node with depth: " << depth;
-    n->SetAuxEngineMove(0xffff); // make this available to be picked again.
+
+  float sample = distribution(generator);
+  
+  if(depth > 0 &&
+     depth > params_.GetAuxEngineMaxDepth() &&
+     float(1.0f)/(depth * depth) < sample){
+    // if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "DoAuxEngine ignoring a node with depth: " << depth << " since sample " << sample << " is higher than " << float(1.0f)/(depth * depth);
+    int source = search_stats_->source_of_queued_nodes.front();
+    search_stats_->source_of_queued_nodes.pop();
+
+    // This is exactly what SearchWorker::AuxMaybeEnqueueNode() does, but we are in class Search:: now, so that function is not available.
+
+    // Since we take a lock below, have to check if search is stopped.
+    if (stop_.load(std::memory_order_acquire)){
+      return;
+    }
+    auxengine_mutex_.lock();  
+    search_stats_->persistent_queue_of_nodes.push(n);
+    search_stats_->source_of_queued_nodes.push(source);
+    auxengine_cv_.notify_one();
+    auxengine_mutex_.unlock();
+    
     return;
   }
+  if(depth > 0 &&
+     depth > params_.GetAuxEngineMaxDepth()){
+    // if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "DoAuxEngine processing a node with high depth: " << " since sample " << sample << " is less than " << float(1.0f)/(depth * depth);
+  }
+    
   if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "DoAuxEngine processing a node with depth: " << depth;
 
   std::string s = "";
@@ -420,25 +373,6 @@ void Search::DoAuxEngine(Node* n) {
   auto auxengine_start_time = std::chrono::steady_clock::now();
   auxengine_os_ << s << std::endl;
 
-  // // // Adjust time so that the ideal ratio of added nodes is reached.
-  // float ideal_ratio = params_.GetAuxEngineIdealRatio();
-  // if((my_board.ours() | my_board.theirs()).count() < 20){
-  //   ideal_ratio *= 2.0f; // Accept more nodes from helper when fewer pieces on the board.
-  // }
-  // // // before reading N from root node, get a shared lock
-  // nodes_mutex_.lock_shared();
-  // float observed_ratio = float(search_stats_->Number_of_nodes_added_by_AuxEngine) / (search_stats_->Total_number_of_nodes + root_node_->GetN());
-  // nodes_mutex_.unlock_shared();
-  // if(observed_ratio > ideal_ratio){
-  //   // increase time so that fewer nodes are added.
-  //   search_stats_->AuxEngineTime = std::min(params_.GetAuxEngineTime() * 5, int(search_stats_->AuxEngineTime * 1.1));
-  // }
-  // if(observed_ratio < ideal_ratio){
-  //   // decrease time so that more nodes are added.
-  //   search_stats_->AuxEngineTime = std::max(30, int(search_stats_->AuxEngineTime * 0.9));
-  // }
-  // if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "observed ratio: " << observed_ratio << " Adjusted AuxEngineTime: " << search_stats_->AuxEngineTime;
-  
   auxengine_os_ << "go movetime " << search_stats_->AuxEngineTime << std::endl;
 
   auxengine_stopped_mutex_.lock();
@@ -599,17 +533,17 @@ void Search::AuxWait() {
 
   // Adjust threshold so that time is not wasted queueing nodes that will never be evaluated anyway.
   // If the amount of remaining nodes is higher than 3 times of the number of nodes actually evaluated, then increase the threshold.
-  if(search_stats_->AuxEngineQueueSizeAtMoveSelectionTime > auxengine_num_evals * 3){
+  if(search_stats_->AuxEngineQueueSizeAtMoveSelectionTime > auxengine_num_evals * 10){
     search_stats_->AuxEngineThreshold = search_stats_->AuxEngineThreshold * 1.1;
     if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "Increased Threshold since queue is larger than 3 times the evaluated nodes";
   }
-  // decrease the threshold if we are in time for 50% of all queued nodes (worse to have no nodes in the queue than to perform the query on the next move).
-  if((search_stats_->AuxEngineQueueSizeAtMoveSelectionTime < auxengine_num_evals * 2)
+  // decrease the threshold if we are in time for 33% of all queued nodes (worse to have no nodes in the queue than to perform the query on the next move).
+  if((search_stats_->AuxEngineQueueSizeAtMoveSelectionTime < auxengine_num_evals * 3)
       ||
      (search_stats_->AuxEngineQueueSizeAtMoveSelectionTime < 10) // cover cases where auxengine_num_evals == 0
      ){
     search_stats_->AuxEngineThreshold = search_stats_->AuxEngineThreshold * 0.90;
-    if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "Decreased Threshold since queue is less than 2 times the evaluated nodes";    
+    if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "Decreased Threshold since queue is less than 3 times the evaluated nodes";    
   }
   
   search_stats_->Number_of_nodes_added_by_AuxEngine = search_stats_->Number_of_nodes_added_by_AuxEngine + auxengine_num_updates;

@@ -303,32 +303,33 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
       // the auxillary helper about the nodes in the PV possibly
       // condition on the number of visits. possibly only consider the
       // PV and the second best. possibly condition on depth.
-      if(
-      	 multipv == 1 && // only use the best move from root.
-      	 params_.GetAuxEngineFile() != "" &&
-      	 iter.node()->GetAuxEngineMove() == 0xffff &&
-      	 ! iter.node()->IsTerminal()
-      	 &&
-      	   (depth <= 22 // prioritize 'lower' depth nodes.
-      	    ||
-      	    5 * iter.node()->GetN() >= (uint32_t) search_stats_->AuxEngineThreshold // don't disturb too much. Times 5 is the first PV bonus.
-      	   )
-      	){
 
-      	auxengine_stopped_mutex_.lock();
-      	if(! auxengine_stopped_){
-      	  iter.node()->SetAuxEngineMove(0xfffe); // magic for pending
-      	  auxengine_mutex_.lock();
-      	  search_stats_->persistent_queue_of_nodes.push(iter.node());
-      	  search_stats_->source_of_queued_nodes.push(2);
-      	  auxengine_cv_.notify_one();
-      	  auxengine_mutex_.unlock();
+      // if(
+      // 	 multipv == 1 && // only use the best move from root.
+      // 	 params_.GetAuxEngineFile() != "" &&
+      // 	 iter.node()->GetAuxEngineMove() == 0xffff &&
+      // 	 ! iter.node()->IsTerminal()
+      // 	 &&
+      // 	   (depth <= 22 // prioritize 'lower' depth nodes.
+      // 	    ||
+      // 	    5 * iter.node()->GetN() >= (uint32_t) search_stats_->AuxEngineThreshold // don't disturb too much. Times 5 is the first PV bonus.
+      // 	   )
+      // 	){
+
+      // 	auxengine_stopped_mutex_.lock();
+      // 	if(! auxengine_stopped_){
+      // 	  iter.node()->SetAuxEngineMove(0xfffe); // magic for pending
+      // 	  auxengine_mutex_.lock();
+      // 	  search_stats_->persistent_queue_of_nodes.push(iter.node());
+      // 	  search_stats_->source_of_queued_nodes.push(2);
+      // 	  auxengine_cv_.notify_one();
+      // 	  auxengine_mutex_.unlock();
 	
-      	  number_of_times_called_AuxMaybeEnqueueNode_ += 1;
-      	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << " Adding this node from the PV (rank: " << multipv << ") at depth " << depth << " and visits: " << iter.node()->GetN() << " to the helper queue" << iter.node()->DebugString();
-      	}
-      	auxengine_stopped_mutex_.unlock();
-      }
+      // 	  number_of_times_called_AuxMaybeEnqueueNode_ += 1;
+      // 	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << " Adding this node from the PV (rank: " << multipv << ") at depth " << depth << " and visits: " << iter.node()->GetN() << " to the helper queue" << iter.node()->DebugString();
+      // 	}
+      // 	auxengine_stopped_mutex_.unlock();
+      // }
       
     }
   }
@@ -1478,16 +1479,20 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	    return; // someone further down has already added visits_in_flight;
 	}
 	
+	search_->auxengine_mutex_.lock();
+	search_->search_stats_->Number_of_nodes_added_by_AuxEngine += nodes_added;
+	search_->auxengine_mutex_.unlock();
+	
 	// Not going deeper now, either because the PV is finished, or because we hit a terminal node.
 	// Aquire a write lock to adjust visits_in_flight.
-	search_->nodes_mutex_.lock();
-	search_->search_stats_->Number_of_nodes_added_by_AuxEngine += nodes_added;
+
 	if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Successfully added a full PV, depth = " << ply << ", number of nodes added = " << nodes_added;
 	// Adjust the visits_in_flight now that we know how many nodes where actually added.
 	// Each node shall have as many visits_in_flight as there are added nodes beneath it.
 	// Increase the number of visits_in_flight to add for each generational step, until the
 	// number is equal to nodes_added.
 	int visits_to_add = 1;
+	search_->nodes_mutex_.lock();
 	for(Node * n = child_node; n != search_->root_node_; n = n->GetParent()){
 	  n->IncrementNInFlight(visits_to_add);  
 	  // LOGFILE << "Added visits_in_flight=" << visits_to_add << " to node " << n->DebugString();
@@ -2714,6 +2719,8 @@ void SearchWorker::DoBackupUpdateSingleNode(
     // Avoid a full function call unless it will likely actually queue the node.
     // Do nothing if search is interrupted, the node will get picked the next iteration anyway.
 
+    // Not taking a lock here since it would be expensive AuxEngineThreshold is never adjusted during search anyway.
+
     if(n->GetN() >= (uint32_t) search_->search_stats_->AuxEngineThreshold &&
        n->GetAuxEngineMove() == 0xffff &&
       !n->IsTerminal() &&
@@ -2722,7 +2729,10 @@ void SearchWorker::DoBackupUpdateSingleNode(
        params_.GetAuxEngineFile() != ""
        ){
       AuxMaybeEnqueueNode(n, 1);
+      // Afford a lock here, but probably not needed.
+      search_->auxengine_mutex_.lock();
       search_->number_of_times_called_AuxMaybeEnqueueNode_ += 1;
+      search_->auxengine_mutex_.unlock();
     }
     
   }

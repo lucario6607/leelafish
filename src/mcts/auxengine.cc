@@ -81,8 +81,6 @@ void SearchWorker::AuxMaybeEnqueueNode(Node* n, int source) {
 }
 
 void Search::AuxEngineWorker() {
-  int number_of_pvs_delivered = 0;
-
   if (!auxengine_ready_) {
 
     auxengine_c_ = boost::process::child(params_.GetAuxEngineFile(), boost::process::std_in < auxengine_os_, boost::process::std_out > auxengine_is_);
@@ -123,6 +121,12 @@ void Search::AuxEngineWorker() {
     auxengine_ready_ = true;
     // Initiate some stats and parameters (Threshold needs to be set
     // earlier, see search() in search.cc)
+
+    // Since we take a lock below, have to check if search is stopped.
+    if (stop_.load(std::memory_order_acquire)){
+      return;
+    }
+
     auxengine_mutex_.lock(); // play nice with Search::MaybeTriggerStop()    
     search_stats_->AuxEngineTime = params_.GetAuxEngineTime();
     search_stats_->Number_of_nodes_added_by_AuxEngine = 0;
@@ -132,8 +136,8 @@ void Search::AuxEngineWorker() {
     }
     auxengine_mutex_.unlock(); // play nice with Search::MaybeTriggerStop()        
   } else {
+    auxengine_mutex_.lock(); // play nice with Search::MaybeTriggerStop()        
     if(search_stats_->New_Game){
-      auxengine_mutex_.lock(); // play nice with Search::MaybeTriggerStop()      
       search_stats_->AuxEngineTime = params_.GetAuxEngineTime();
       search_stats_->AuxEngineThreshold = params_.GetAuxEngineThreshold();
       search_stats_->Total_number_of_nodes = 0;
@@ -150,16 +154,7 @@ void Search::AuxEngineWorker() {
       if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE
     << "Resetting AuxEngine parameters because a new game started.";
       search_stats_->New_Game = false;
-
-      auxengine_mutex_.unlock(); // play nice with Search::MaybeTriggerStop()      
     }
-
-    if(stop_.load(std::memory_order_acquire)){
-      // search is stopped before we even had a chance to do anything.
-      return;
-    }
-
-    auxengine_mutex_.lock(); // play nice with Search::MaybeTriggerStop()
     
     // purge obsolete nodes in the queue, if any. The even elements are the actual nodes, the odd elements is root if the preceding even element is still a relevant node.
     LOGFILE << "search_stats_->size_of_queue_at_start:" << search_stats_->size_of_queue_at_start;
@@ -257,30 +252,25 @@ void Search::AuxEngineWorker() {
 	
     } // release lock
     DoAuxEngine(n);
-    ++number_of_pvs_delivered;
   }
-  // auxengine_mutex_.unlock();
-  
-  if (params_.GetAuxEngineVerbosity() >= 1) LOGFILE  
-    << "AuxEngineWorker done, delivered " << number_of_pvs_delivered << " PVs.";
   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker done search search_stats_ at: " << &search_stats_ ;
 }
 
 void Search::DoAuxEngine(Node* n) {
   // before trying to take a lock on nodes_mutex_, always check if search has stopped, in which we return early
-  if(stop_.load(std::memory_order_acquire)) {
-  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine caught a stop signal beforing doing anything.";
-    return;
-  }
-  nodes_mutex_.lock_shared();
-  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "DoAuxEngine() called for node" << n->DebugString();
-  nodes_mutex_.unlock_shared();  
+  // if(stop_.load(std::memory_order_acquire)) {
+  // if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine caught a stop signal beforing doing anything.";
+  //   return;
+  // }
+  // nodes_mutex_.lock_shared();
+  // if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "DoAuxEngine() called for node" << n->DebugString();
+  // nodes_mutex_.unlock_shared();  
 
   // Calculate depth.
   int depth = 0;
   if(n != root_node_){
     if(stop_.load(std::memory_order_acquire)) {
-      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine caught a stop signal while calculating depth.";
+      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine caught a stop signal before starting to calculate depth.";
       return;
     }
     nodes_mutex_.lock_shared();
@@ -297,8 +287,6 @@ void Search::DoAuxEngine(Node* n) {
   //    float(1.0f)/(depth) < sample){
   if(depth > params_.GetAuxEngineMaxDepth()){
     // if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "DoAuxEngine ignoring a node with depth: " << depth << " since sample " << sample << " is higher than " << float(1.0f)/(depth);
-    int source = search_stats_->source_of_queued_nodes.front();
-    search_stats_->source_of_queued_nodes.pop();
 
     // This is exactly what SearchWorker::AuxMaybeEnqueueNode() does, but we are in class Search:: now, so that function is not available.
 
@@ -306,12 +294,14 @@ void Search::DoAuxEngine(Node* n) {
     if (stop_.load(std::memory_order_acquire)){
       return;
     }
-    auxengine_mutex_.lock();  
+    auxengine_mutex_.lock();
+    int source = search_stats_->source_of_queued_nodes.front();
+    search_stats_->source_of_queued_nodes.pop();
     search_stats_->persistent_queue_of_nodes.push(n);
     search_stats_->source_of_queued_nodes.push(source);
     auxengine_cv_.notify_one();
+    LOGFILE << "size of source_of_queued_nodes: " << search_stats_->source_of_queued_nodes.size() << " size of source_of_queued_nodes: " << search_stats_->source_of_queued_nodes.size();
     auxengine_mutex_.unlock();
-    
     return;
   }
   if(depth > 0 &&
@@ -374,7 +364,10 @@ void Search::DoAuxEngine(Node* n) {
   auto auxengine_start_time = std::chrono::steady_clock::now();
   auxengine_os_ << s << std::endl;
 
+  // Better safe than sorry.
+  auxengine_mutex_.lock();  
   auxengine_os_ << "go movetime " << search_stats_->AuxEngineTime << std::endl;
+  auxengine_mutex_.unlock();    
 
   auxengine_stopped_mutex_.lock();
   if(auxengine_stopped_){
@@ -546,7 +539,8 @@ void Search::AuxWait() {
   //   search_stats_->AuxEngineThreshold = search_stats_->AuxEngineThreshold * 0.90;
   //   if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "Decreased Threshold since queue is less than 3 times the evaluated nodes";    
   // }
-  
+
+  auxengine_mutex_.lock();  
   search_stats_->Number_of_nodes_added_by_AuxEngine = search_stats_->Number_of_nodes_added_by_AuxEngine + auxengine_num_updates;
   float observed_ratio = float(search_stats_->Number_of_nodes_added_by_AuxEngine) / search_stats_->Total_number_of_nodes;
 
@@ -568,6 +562,8 @@ void Search::AuxWait() {
   // Reset counters for the next move:
   search_stats_->Number_of_nodes_added_by_AuxEngine = 0;
   search_stats_->Total_number_of_nodes = 0;
+
+  auxengine_mutex_.unlock();  
   
   // Empty the other queue.
   fast_track_extend_and_evaluate_queue_mutex_.lock();

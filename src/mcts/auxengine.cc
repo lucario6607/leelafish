@@ -58,17 +58,19 @@ void Search::OpenAuxEngine() REQUIRES(threads_mutex_) {
 void SearchWorker::AuxMaybeEnqueueNode(Node* n, int source) {
   // the caller (DoBackupUpdate()->DoBackupUpdateSingleNode()) has a lock on search_->nodes_mutex_, so no other thread will change n right now.
 
+  // Since we take a lock below, have to check if search is stopped.
   if (search_->stop_.load(std::memory_order_acquire)){
     return;
   }
 
-  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE
-      << "AuxMaybeEnqueueNode() picked node: " << n->DebugString() 
-      << " for the persistent_queue_of_nodes which has size: "
-      << search_->search_stats_->persistent_queue_of_nodes.size()
-      << " The source was " << source;
+  // if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE
+  //     << "AuxMaybeEnqueueNode() picked node: " << n->DebugString() 
+  //     << " for the persistent_queue_of_nodes which has size: "
+  //     << search_->search_stats_->persistent_queue_of_nodes.size()
+  //     << " The source was " << source;
 
   n->SetAuxEngineMove(0xfffe); // magic for pending
+  search_->auxengine_mutex_.lock();  
   search_->search_stats_->persistent_queue_of_nodes.push(n);
   search_->search_stats_->source_of_queued_nodes.push(source);
   search_->auxengine_cv_.notify_one();
@@ -217,7 +219,7 @@ void Search::AuxEngineWorker() {
   // edges for any other reason (e.g. being terminal), in which case we
   // should wait.
 
-  // About here it occasionally disconnects.
+  // About here it occasionally disconnects. Should be fixed by checking if search is stopped before trying to take the lock
 
   // TODO only do this when there is a substantial tree (if at all).
   
@@ -356,6 +358,12 @@ void Search::DoAuxEngine(Node* n) {
       depth++;
     }
     nodes_mutex_.unlock_shared();    
+  }
+  // TODO: Accept the node with a probabilty related to depth, e.g. with the inverse of depth - some constant (under which all nodes are accepted)
+  if(depth > params_.GetAuxEngineMaxDepth()){
+    if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "DoAuxEngine ignoring a node with depth: " << depth;
+    n->SetAuxEngineMove(0xffff); // make this available to be picked again.
+    return;
   }
   if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "DoAuxEngine processing a node with depth: " << depth;
 
@@ -608,7 +616,7 @@ void Search::AuxWait() {
   // Decrease the EngineTime if we're in an endgame.
   ChessBoard my_board = played_history_.Last().GetBoard();
   if((my_board.ours() | my_board.theirs()).count() < 20){
-    search_stats_->AuxEngineTime = std::max(10, int(std::round(params_.GetAuxEngineTime() * 0.75f))); // minimum 10 ms.
+    search_stats_->AuxEngineTime = std::max(50, int(std::round(params_.GetAuxEngineTime() * 0.50f))); // minimum 50 ms.
   }
 
   // Time based queries    

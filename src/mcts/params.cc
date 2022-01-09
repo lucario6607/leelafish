@@ -322,17 +322,12 @@ const OptionId SearchParams::kAuxEngineFileId{
 const OptionId SearchParams::kAuxEngineOptionsId{
     "auxengine-options", "AuxEngineOptions",
     "Semicolon separated list of UCI options for the auxiliary engine\n"
-    "e.g. Hash=1024;Threads=1"};
-const OptionId SearchParams::kAuxEngineIdealRatioId{
-    "auxengine-ideal-ratio", "AuxEngineIdealRatio",
-      "The ideal ratio of total number of nodes added from a helper "
-      "PV to the total number of nodes. This value depends on the "
-      "size of the neural net, the strength of the helper engine "
-      "and the relative strength of the CPU compared to the GPU. "
-      "For systems with a relatively strong CPU this ratio is higher "
-      "than for systems with a relatively weak CPU, when the GPU is the "
-      "same. For two systems with identical CPU, this ratio is lower "
-      "on the system with the strongest GPU." };
+    "e.g. Hash=1024;Threads=3"};
+const OptionId SearchParams::kAuxEngineMaxDepthId{
+    "auxengine-max-depth", "AuxEngineThreshold",
+    "Only nodes with depth less than this number will be sent to the "
+    "auxiliary engine. This limit is useful to avoid search being too "
+    "narrow."};
 const OptionId SearchParams::kAuxEngineThresholdId{
     "auxengine-threshold", "AuxEngineThreshold",
     "The auxiliary engine is intially called when a node reaches this "
@@ -448,10 +443,10 @@ void SearchParams::Populate(OptionsParser* options) {
   options->HideOption(kTemperatureVisitOffsetId);
   options->Add<StringOption>(kAuxEngineFileId);
   options->Add<StringOption>(kAuxEngineOptionsId) = "Threads=3;Hash=1024;Ponder=off";
-  options->Add<IntOption>(kAuxEngineThresholdId, 1, 100000000) = 150;
-  options->Add<IntOption>(kAuxEngineTimeId, 10, 10000) = 30;
+  options->Add<IntOption>(kAuxEngineThresholdId, 1, 100000000) = 100;
+  options->Add<IntOption>(kAuxEngineTimeId, 10, 10000) = 125;
   options->Add<IntOption>(kAuxEngineVerbosityId, 0, 10) = 1;
-  options->Add<FloatOption>(kAuxEngineIdealRatioId, 0.0f, 1.0f) = 0.0005f;
+  options->Add<IntOption>(kAuxEngineMaxDepthId, 1, 100) = 6;
 }
 
 SearchParams::SearchParams(const OptionsDict& options)

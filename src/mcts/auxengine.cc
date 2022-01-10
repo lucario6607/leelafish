@@ -280,12 +280,12 @@ void Search::DoAuxEngine(Node* n) {
     nodes_mutex_.unlock_shared();    
   }
 
-  // float sample = distribution(generator);
+  float sample = distribution(generator);
   
-  // if(depth > 0 &&
-  //    depth > params_.GetAuxEngineMaxDepth() &&
-  //    float(1.0f)/(depth) < sample){
-  if(depth > params_.GetAuxEngineMaxDepth()){
+  if(depth > 0 &&
+     depth > params_.GetAuxEngineMaxDepth() &&
+     float(1.0f)/(depth) < sample){
+  // if(depth > params_.GetAuxEngineMaxDepth()){
     // if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "DoAuxEngine ignoring a node with depth: " << depth << " since sample " << sample << " is higher than " << float(1.0f)/(depth);
 
     // This is exactly what SearchWorker::AuxMaybeEnqueueNode() does, but we are in class Search:: now, so that function is not available.
@@ -300,7 +300,7 @@ void Search::DoAuxEngine(Node* n) {
     search_stats_->persistent_queue_of_nodes.push(n);
     search_stats_->source_of_queued_nodes.push(source);
     auxengine_cv_.notify_one();
-    LOGFILE << "size of source_of_queued_nodes: " << search_stats_->source_of_queued_nodes.size() << " size of source_of_queued_nodes: " << search_stats_->source_of_queued_nodes.size();
+    // LOGFILE << "size of source_of_queued_nodes: " << search_stats_->source_of_queued_nodes.size() << " size of source_of_queued_nodes: " << search_stats_->source_of_queued_nodes.size();
     auxengine_mutex_.unlock();
     return;
   }
@@ -547,7 +547,7 @@ void Search::AuxWait() {
   // Decrease the EngineTime if we're in an endgame.
   ChessBoard my_board = played_history_.Last().GetBoard();
   if((my_board.ours() | my_board.theirs()).count() < 20){
-    search_stats_->AuxEngineTime = std::max(50, int(std::round(params_.GetAuxEngineTime() * 0.50f))); // minimum 50 ms.
+    search_stats_->AuxEngineTime = std::max(10, int(std::round(params_.GetAuxEngineTime() * 0.50f))); // minimum 10 ms.
   }
 
   // Time based queries    

@@ -158,61 +158,65 @@ void Search::AuxEngineWorker() {
     
     // purge obsolete nodes in the queue, if any. The even elements are the actual nodes, the odd elements is root if the preceding even element is still a relevant node.
     LOGFILE << "search_stats_->size_of_queue_at_start:" << search_stats_->size_of_queue_at_start;
-    if(search_stats_->size_of_queue_at_start > 0){
-      int number_of_nodes_before_purging = int(search_stats_->size_of_queue_at_start / 2);
-      std::queue<Node*> persistent_queue_of_nodes_temp_;
-      for(int i=0; i < search_stats_->size_of_queue_at_start; i = i + 2){
-	Node * n = search_stats_->persistent_queue_of_nodes.front();
-	search_stats_->persistent_queue_of_nodes.pop();
-	Node * n_parent = search_stats_->persistent_queue_of_nodes.front();
-	search_stats_->persistent_queue_of_nodes.pop();
-	if(n_parent == root_node_){
-	  // node is still relevant
-	  persistent_queue_of_nodes_temp_.push(n);
+    if(search_stats_->final_purge_run){
+      LOGFILE << "Unexpected order of execution, skipping primary purging, since final purging has already taken place";
+    } else {
+      if(search_stats_->size_of_queue_at_start > 0){
+	int number_of_nodes_before_purging = int(search_stats_->size_of_queue_at_start / 2);
+	std::queue<Node*> persistent_queue_of_nodes_temp_;
+	for(int i=0; i < search_stats_->size_of_queue_at_start; i = i + 2){
+	  Node * n = search_stats_->persistent_queue_of_nodes.front();
+	  search_stats_->persistent_queue_of_nodes.pop();
+	  Node * n_parent = search_stats_->persistent_queue_of_nodes.front();
+	  search_stats_->persistent_queue_of_nodes.pop();
+	  if(n_parent == root_node_){
+	    // node is still relevant
+	    persistent_queue_of_nodes_temp_.push(n);
+	  }
 	}
-      }
-      // update search_stats_->persistent_queue_of_nodes
-      int my_size = persistent_queue_of_nodes_temp_.size();
-      for(int i=0; i < my_size; i++){      
-    	search_stats_->persistent_queue_of_nodes.push(persistent_queue_of_nodes_temp_.front());
-    	persistent_queue_of_nodes_temp_.pop();
-      }
-      if (params_.GetAuxEngineVerbosity() >= 5)
-	LOGFILE << "Purged " << number_of_nodes_before_purging - search_stats_->persistent_queue_of_nodes.size()
-		<< " nodes from the query queue due to the move selected by the opponent. " << search_stats_->persistent_queue_of_nodes.size()
-		<< " nodes remain in the queue.";
-    }
-
-    // Also purge stale nodes from the _added_ queue.
-    if(search_stats_->nodes_added_by_the_helper.size() > 0){
-      int number_of_nodes_before_purging = int(search_stats_->nodes_added_by_the_helper.size() / 2);
-      std::queue<Node*> nodes_added_by_the_helper_temp_;
-      long unsigned int my_size = search_stats_->nodes_added_by_the_helper.size();      
-      for(long unsigned int i=0; i < my_size; i = i + 2){
-	Node * n = search_stats_->nodes_added_by_the_helper.front();
-	search_stats_->nodes_added_by_the_helper.pop();
-	Node * n_parent = search_stats_->nodes_added_by_the_helper.front();
-	search_stats_->nodes_added_by_the_helper.pop();
-	if(n_parent == root_node_){
-	  // node is still relevant
-	  nodes_added_by_the_helper_temp_.push(n);
+	// update search_stats_->persistent_queue_of_nodes
+	int my_size = persistent_queue_of_nodes_temp_.size();
+	for(int i=0; i < my_size; i++){      
+	  search_stats_->persistent_queue_of_nodes.push(persistent_queue_of_nodes_temp_.front());
+	  persistent_queue_of_nodes_temp_.pop();
 	}
+	if (params_.GetAuxEngineVerbosity() >= 5)
+	  LOGFILE << "Purged " << number_of_nodes_before_purging - search_stats_->persistent_queue_of_nodes.size()
+		  << " nodes from the query queue due to the move selected by the opponent. " << search_stats_->persistent_queue_of_nodes.size()
+		  << " nodes remain in the queue.";
       }
-      // update search_stats_->nodes_added_by_the_helper
-      my_size = nodes_added_by_the_helper_temp_.size();
-      for(long unsigned int i=0; i < my_size; i++){      
-    	search_stats_->nodes_added_by_the_helper.push(nodes_added_by_the_helper_temp_.front());
-    	nodes_added_by_the_helper_temp_.pop();
+      
+      // Also purge stale nodes from the _added_ queue.
+      if(search_stats_->nodes_added_by_the_helper.size() > 0){
+	int number_of_nodes_before_purging = int(search_stats_->nodes_added_by_the_helper.size() / 2);
+	std::queue<Node*> nodes_added_by_the_helper_temp_;
+	long unsigned int my_size = search_stats_->nodes_added_by_the_helper.size();      
+	for(long unsigned int i=0; i < my_size; i = i + 2){
+	  Node * n = search_stats_->nodes_added_by_the_helper.front();
+	  search_stats_->nodes_added_by_the_helper.pop();
+	  Node * n_parent = search_stats_->nodes_added_by_the_helper.front();
+	  search_stats_->nodes_added_by_the_helper.pop();
+	  if(n_parent == root_node_){
+	    // node is still relevant
+	    nodes_added_by_the_helper_temp_.push(n);
+	  }
+	}
+	// update search_stats_->nodes_added_by_the_helper
+	my_size = nodes_added_by_the_helper_temp_.size();
+	for(long unsigned int i=0; i < my_size; i++){      
+	  search_stats_->nodes_added_by_the_helper.push(nodes_added_by_the_helper_temp_.front());
+	  nodes_added_by_the_helper_temp_.pop();
+	}
+	if (params_.GetAuxEngineVerbosity() >= 5)
+	  LOGFILE << "Purged " << number_of_nodes_before_purging - search_stats_->nodes_added_by_the_helper.size()
+		  << " stale nodes from the queue of nodes added by the auxillary helper due to the move seleted by the opponent. " << search_stats_->nodes_added_by_the_helper.size()
+		  << " nodes remain in the queue of nodes added by the auxillary helper.";
       }
-      if (params_.GetAuxEngineVerbosity() >= 5)
-	LOGFILE << "Purged " << number_of_nodes_before_purging - search_stats_->nodes_added_by_the_helper.size()
-		<< " stale nodes from the queue of nodes added by the auxillary helper due to the move seleted by the opponent. " << search_stats_->nodes_added_by_the_helper.size()
-		<< " nodes remain in the queue of nodes added by the auxillary helper.";
     }
-
-    auxengine_mutex_.unlock();
   }
 
+  auxengine_mutex_.unlock();
+  
   // Kickstart with the root node, no need to wait for it to get some
   // amount of visits. Except if root is not yet expanded, or lacks
   // edges for any other reason (e.g. being terminal), in which case we

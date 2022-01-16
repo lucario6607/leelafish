@@ -70,7 +70,8 @@ class Search {
     bool New_Game = false; // used by EngineController::NewGame in engine.cc to inform search that a new game has started, so it can re-initiate AuxEngineTime to the value given by UCI
     int size_of_queue_at_start; // used by Search::AuxEngineWorker() to decide how many node to check for purging at the start of each move. Without this, new nodes added by before the purge happened would cause a crash.
     int current_depth = 1;
-    bool final_purge_run = false;
+    bool final_purge_run = false; // used by maybetriggerstop() to inform auxworker() that final purge happened before initial purge was started.
+    std::queue<Move*> temporary_queue_of_moves; // 
   };
 
   Search(const NodeTree& tree, Network* network,
@@ -243,6 +244,7 @@ class Search {
   void AuxEngineWorker();
   void AuxWait();
   void DoAuxEngine(Node* n);
+  void AuxEncode_and_Enqueue(std::string pv_as_string, int depth, ChessBoard my_board, Position my_position, std::vector<lczero::Move> my_moves_from_the_white_side);
   void AuxUpdateP(Node* n, std::vector<uint16_t> pv_moves, int ply, ChessBoard my_board);
   static boost::process::ipstream auxengine_is_;
   static boost::process::opstream auxengine_os_;

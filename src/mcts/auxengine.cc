@@ -215,31 +215,28 @@ void Search::AuxEngineWorker() {
     }
   }
 
+  // if there is no node in the queue and search is not stopped, then
+  // kickstart with the root node, no need to wait for it to get some
+  // amount of visits. Except if root is not yet expanded, or lacks
+  // edges for any other reason (e.g. being terminal), in which case
+  // we should wait.
+
+  if(!stop_.load(std::memory_order_acquire) &&
+     search_stats_->persistent_queue_of_nodes.size() == 0){
+    nodes_mutex_.lock(); // write lock
+    if(root_node_->GetNumEdges() > 0){
+      // root is extended.
+      root_node_->SetAuxEngineMove(0xfffe); // mark root as pending and queue it
+      search_stats_->persistent_queue_of_nodes.push(root_node_);
+      search_stats_->source_of_queued_nodes.push(3);
+      auxengine_cv_.notify_one();
+    }
+    nodes_mutex_.unlock(); // write unlock
+    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker queued root node because the queue was empty";
+  }
+  
   auxengine_mutex_.unlock();
   
-  // Kickstart with the root node, no need to wait for it to get some
-  // amount of visits. Except if root is not yet expanded, or lacks
-  // edges for any other reason (e.g. being terminal), in which case we
-  // should wait.
-
-  // About here it occasionally disconnects. Should be fixed by checking if search is stopped before trying to take the lock
-
-  // TODO only do this when there is a substantial tree (if at all).
-  
-  // nodes_mutex_.lock(); // write lock
-  // if(root_node_->GetNumEdges() > 0){
-  //   // root is extended.
-  //   root_node_->SetAuxEngineMove(0xfffe); // mark root as pending and queue it
-  //   auxengine_mutex_.lock(); 
-  //   search_stats_->persistent_queue_of_nodes.push(root_node_);
-  //   search_stats_->source_of_queued_nodes.push(3);
-  //   auxengine_cv_.notify_one();
-  //   auxengine_mutex_.unlock();
-  // }
-  // nodes_mutex_.unlock(); // write unlock
-  // if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker queued root node";
-  
-
   Node* n;
   while (!stop_.load(std::memory_order_acquire)) {
     {
@@ -260,12 +257,105 @@ void Search::AuxEngineWorker() {
   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker done search search_stats_ at: " << &search_stats_ ;
 }
 
+  void Search::AuxEncode_and_Enqueue(std::string pv_as_string, int depth, ChessBoard my_board, Position my_position, std::vector<lczero::Move> my_moves_from_the_white_side) {
+  // Take a string recieved from a helper engine, turn it into a vector with elements of type Move and queue that vector.
+
+  std::istringstream iss(pv_as_string);  
+  std::string pv;
+  std::vector<uint16_t> pv_moves;
+
+  std::string s = "position fen " + GetFen(my_position); // for informational purposes only.
+  std::string token;
+
+  // To get the moves in UCI format, we have to construct a board, starting from root and then apply the moves.
+  // Traverse up to root, and store the moves in a vector.
+  // When we internally use the moves to extend nodes in the search tree, always use move as seen from the white side.
+  // Apply the moves in reversed order to get the proper board state from which we can then make moves in legacy format.
+  // std::vector<lczero::Move> my_moves;
+  // std::vector<lczero::Move> my_moves_from_the_white_side;  
+    
+  bool flip = played_history_.IsBlackToMove() ^ (depth % 2 == 0);
+
+  // auto bestmove_packed_int = Move(token, !flip).as_packed_int();
+  // depth is distance between root and the starting point for the
+  // auxengine.
+  // depth_reached records the depth the helper claim to have search.
+  // The PV is capped at this length (and can be shortened again in PreExt..()
+
+  fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before starting to modify it
+
+  int pv_length = 1;
+  int depth_reached = 0;
+
+  while(iss >> pv >> std::ws) {
+    if (pv == "depth") {
+      // Figure out which depth was reached (can be zero).
+      iss >> depth_reached >> std::ws;
+      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Reached depth: " << depth_reached << " for node with depth: " << depth;
+    }
+    if (pv == "pv") {
+      while(iss >> pv >> std::ws &&
+	    pv_length < depth_reached) {
+	Move m;
+	if (!Move::ParseMove(&m, pv, !flip)) {	
+	  if (params_.GetAuxEngineVerbosity() >= 1) LOGFILE << "Ignoring bad pv move: " << pv;
+	  break;
+	}
+	// convert to Modern encoding, update the board and the position
+	// For the conversion never flip the board. Only flip the board when you need to apply the move!
+	Move m_in_modern_encoding = my_board.GetModernMove(m);
+
+	if (my_board.flipped()) m_in_modern_encoding.Mirror();
+	// Should the move applied be modern or legacy, or does it not matter?
+	m_in_modern_encoding = my_board.GetModernMove(m_in_modern_encoding);
+	// my_board.ApplyMove(m_in_modern_encoding); // Todo verify the correctness here, e.g. by printing a FEN.
+	my_board.ApplyMove(m); // Todo verify the correctness here, e.g. by printing a FEN.	
+	my_position = Position(my_position, m_in_modern_encoding);
+
+	if (my_board.flipped()) m_in_modern_encoding.Mirror();
+	my_board.Mirror();
+
+	// my_moves.push_back(m); // Add the PV to the queue
+	my_moves_from_the_white_side.push_back(m_in_modern_encoding); // Add the PV to the queue	
+	pv_moves.push_back(m_in_modern_encoding.as_packed_int());
+	flip = !flip;
+	pv_length++;
+      }
+    }
+  }
+
+  if (pv_moves.size() == 0) {
+    if (params_.GetAuxEngineVerbosity() >= 1) LOGFILE << "Warning: the helper did not give a PV. Will not add the single bestmove";
+    // if (params_.GetAuxEngineVerbosity() >= 1) LOGFILE << "Warning: the helper did not give a PV, will only use bestmove:" << bestmove_packed_int;
+    // pv_moves.push_back(bestmove_packed_int);
+  }
+
+  if (params_.GetAuxEngineVerbosity() >= 9){
+    std::string debug_string;
+    for(int i = 0; i < (int) my_moves_from_the_white_side.size(); i++){
+      debug_string = debug_string + my_moves_from_the_white_side[i].as_string() + " ";
+    }
+    if(played_history_.IsBlackToMove()){
+      LOGFILE << "debug info: length of PV given to helper engine: " << depth << " position given to helper: " << s << " black to move at root, length of my_moves_from_the_white_side " << my_moves_from_the_white_side.size() << " my_moves_from_the_white_side: " << debug_string;
+    } else {
+      LOGFILE << "debug info: length of PV given to helper engine: " << depth << " position given to helper: " << s << " white to move at root, length of my_moves_from_the_white_side " << my_moves_from_the_white_side.size() << " my_moves_from_the_white_side: " << debug_string;
+    }
+  }
+
+  fast_track_extend_and_evaluate_queue_.push(my_moves_from_the_white_side); // I think push() means push_back for queues.
+  fast_track_extend_and_evaluate_queue_mutex_.unlock();
+
+  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Returning from DoAuxEngine()";
+
+}
+  
+
 void Search::DoAuxEngine(Node* n) {
   // before trying to take a lock on nodes_mutex_, always check if search has stopped, in which we return early
-  // if(stop_.load(std::memory_order_acquire)) {
-  // if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine caught a stop signal beforing doing anything.";
-  //   return;
-  // }
+  if(stop_.load(std::memory_order_acquire)) {
+  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine caught a stop signal beforing doing anything.";
+    return;
+  }
   // nodes_mutex_.lock_shared();
   // if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "DoAuxEngine() called for node" << n->DebugString();
   // nodes_mutex_.unlock_shared();  
@@ -289,9 +379,6 @@ void Search::DoAuxEngine(Node* n) {
   if(depth > 0 &&
      depth > params_.GetAuxEngineMaxDepth() &&
      float(1.0f)/(depth) < sample){
-  // if(depth > params_.GetAuxEngineMaxDepth()){
-    // if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "DoAuxEngine ignoring a node with depth: " << depth << " since sample " << sample << " is higher than " << float(1.0f)/(depth);
-
     // This is exactly what SearchWorker::AuxMaybeEnqueueNode() does, but we are in class Search:: now, so that function is not available.
 
     // Since we take a lock below, have to check if search is stopped.
@@ -304,7 +391,6 @@ void Search::DoAuxEngine(Node* n) {
     search_stats_->persistent_queue_of_nodes.push(n);
     search_stats_->source_of_queued_nodes.push(source);
     auxengine_cv_.notify_one();
-    // LOGFILE << "size of source_of_queued_nodes: " << search_stats_->source_of_queued_nodes.size() << " size of source_of_queued_nodes: " << search_stats_->source_of_queued_nodes.size();
     auxengine_mutex_.unlock();
     return;
   }
@@ -380,15 +466,44 @@ void Search::DoAuxEngine(Node* n) {
   auxengine_stopped_mutex_.unlock();
 
   std::string prev_line;
+  std::string my_line;
   std::string line;
   std::string token;
+  std::string my_token;  
   bool stopping = false;
   while(std::getline(auxengine_is_, line)) {
     if (params_.GetAuxEngineVerbosity() >= 9) {
       LOGFILE << "auxe:" << line;
     }
+
     std::istringstream iss(line);
     iss >> token >> std::ws;
+
+    // // parse the line, and if it is deep enough, queue it
+    // if (token == "info"){
+    //   bool reached_pv_token = false;
+    //   // LOGFILE << "found a info line";
+    //   my_line = line; // make a copy, don't disturb the main pipeline
+    //   // parse my_line
+    //   std::istringstream my_iss(my_line);
+    //   int my_depth;
+    //   while(my_iss >> my_token >> std::ws) {
+    // 	if(my_token == "depth"){
+    // 	  my_iss >> my_depth;
+    // 	}
+    // 	if(depth < 15) break; // Don't bother until depth is high enough
+    // 	if(reached_pv_token){
+    // 	  // found a move in the pv
+    // 	  LOGFILE << "found a move in the current pv: " << my_token;
+    // 	}
+    // 	if(my_token == "pv"){
+    // 	  reached_pv_token = true;
+    // 	}
+    //   }
+    // }
+    // ChessBoard my_board = played_history_.Last().GetBoard();
+    // Position my_position = played_history_.Last();
+      
     if (token == "bestmove") {
       iss >> token;
       break;
@@ -442,81 +557,9 @@ void Search::DoAuxEngine(Node* n) {
       .count();
   auxengine_total_dur += auxengine_dur;
   auxengine_num_evals++;
-  std::istringstream iss(prev_line);
-  std::string pv;
-  std::vector<uint16_t> pv_moves;
 
-  flip = played_history_.IsBlackToMove() ^ (depth % 2 == 0);
+  AuxEncode_and_Enqueue(prev_line, depth, my_board, my_position, my_moves_from_the_white_side);  
 
-  auto bestmove_packed_int = Move(token, !flip).as_packed_int();
-  // depth is distance between root and the starting point for the
-  // auxengine.
-  // depth_reached records the depth the helper claim to have search.
-  // The PV is capped at this length (and can be shortened again in PreExt..()
-
-  fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before starting to modify it
-
-  int pv_length = 1;
-  int depth_reached = 0;
-
-  while(iss >> pv >> std::ws) {
-    if (pv == "depth") {
-      // Figure out which depth was reached (can be zero).
-      iss >> depth_reached >> std::ws;
-      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Reached depth: " << depth_reached << " for node with depth: " << depth;
-    }
-    if (pv == "pv") {
-      while(iss >> pv >> std::ws &&
-	    pv_length < depth_reached) {
-        Move m;
-        if (!Move::ParseMove(&m, pv, !flip)) {	
-          if (params_.GetAuxEngineVerbosity() >= 1) LOGFILE << "Ignoring bad pv move: " << pv;
-          break;
-        }
-	// convert to Modern encoding, update the board and the position
-	// For the conversion never flip the board. Only flip the board when you need to apply the move!
-	Move m_in_modern_encoding = my_board.GetModernMove(m);
-
-	if (my_board.flipped()) m_in_modern_encoding.Mirror();
-	// Should the move applied be modern or legacy, or does it not matter?
-	m_in_modern_encoding = my_board.GetModernMove(m_in_modern_encoding);
-	// my_board.ApplyMove(m_in_modern_encoding); // Todo verify the correctness here, e.g. by printing a FEN.
-	my_board.ApplyMove(m); // Todo verify the correctness here, e.g. by printing a FEN.	
-	my_position = Position(my_position, m_in_modern_encoding);
-
-	if (my_board.flipped()) m_in_modern_encoding.Mirror();
-	my_board.Mirror();
-
-	// my_moves.push_back(m); // Add the PV to the queue
-	my_moves_from_the_white_side.push_back(m_in_modern_encoding); // Add the PV to the queue	
-        pv_moves.push_back(m_in_modern_encoding.as_packed_int());
-        flip = !flip;
-	pv_length++;
-      }
-    }
-  }
-
-  if (pv_moves.size() == 0) {
-    if (params_.GetAuxEngineVerbosity() >= 1) LOGFILE << "Warning: the helper did not give a PV, will only use bestmove:" << bestmove_packed_int;
-    pv_moves.push_back(bestmove_packed_int);
-  }
-
-  if (params_.GetAuxEngineVerbosity() >= 9){
-    std::string debug_string;
-    for(int i = 0; i < (int) my_moves_from_the_white_side.size(); i++){
-      debug_string = debug_string + my_moves_from_the_white_side[i].as_string() + " ";
-    }
-    if(played_history_.IsBlackToMove()){
-      LOGFILE << "debug info: length of PV given to helper engine: " << depth << " position given to helper: " << s << " black to move at root, length of my_moves_from_the_white_side " << my_moves_from_the_white_side.size() << " my_moves_from_the_white_side: " << debug_string;
-    } else {
-      LOGFILE << "debug info: length of PV given to helper engine: " << depth << " position given to helper: " << s << " white to move at root, length of my_moves_from_the_white_side " << my_moves_from_the_white_side.size() << " my_moves_from_the_white_side: " << debug_string;
-    }
-  }
-  
-  fast_track_extend_and_evaluate_queue_.push(my_moves_from_the_white_side); // I think push() means push_back for queues.
-  fast_track_extend_and_evaluate_queue_mutex_.unlock();
-
-  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Returning from DoAuxEngine()";
 }
 
 void Search::AuxWait() {  

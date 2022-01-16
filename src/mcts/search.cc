@@ -180,6 +180,7 @@ Search::Search(const NodeTree& tree, Network* network,
   }
   auxengine_mutex_.lock();
   search_stats_->size_of_queue_at_start = search_stats_->persistent_queue_of_nodes.size();
+  search_stats_->final_purge_run = false;
   if (search_stats_->AuxEngineThreshold == 0){
     search_stats_->AuxEngineThreshold = params_.GetAuxEngineThreshold();
   }
@@ -572,6 +573,8 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
                               StoppersHints* hints) {
   hints->Reset();
 
+  LOGFILE << "MaybeTriggerStop() about to aquire a lock on nodes.";
+
   SharedMutex::Lock nodes_lock(nodes_mutex_);
   Mutex::Lock lock(counters_mutex_);
   // Already responded bestmove, nothing to do here.
@@ -741,6 +744,9 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     // 	LOGFILE << "No nodes added by the helper engine in the search tree during move selection time. "
     // 		<< "search_stat is at: " << &search_stats_;
     // }
+
+    search_stats_->final_purge_run = true; // Inform Search::AuxEngineWorker(), which can start *AFTER* us, that we have already purged stuff. If they also do it, things will break badly.
+    
     auxengine_mutex_.unlock(); // play nice with Search::AuxEngineWorker()    
 
   }

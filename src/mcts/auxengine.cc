@@ -282,18 +282,33 @@ void Search::AuxEngineWorker() {
   // depth_reached records the depth the helper claim to have search.
   // The PV is capped at this length (and can be shortened again in PreExt..()
 
-  fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before starting to modify it
-
   int pv_length = 1;
   int depth_reached = 0;
 
   while(iss >> pv >> std::ws) {
+    // LOGFILE << "Parsing input line: found token: " << pv;
+    if (pv == "info"){
+      continue;
+    }
+    if (pv == "string"){
+      // not for us.
+      return;
+    }
     if (pv == "depth") {
       // Figure out which depth was reached (can be zero).
       iss >> depth_reached >> std::ws;
-      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Reached depth: " << depth_reached << " for node with depth: " << depth;
+      // if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Reached depth: " << depth_reached << " for node with depth: " << depth;
     }
-    if (pv == "pv") {
+
+    // // if the PV is too short, ignore it.
+    // if (depth_reached < 10){
+    //   // if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Ignoring PV that only reached depth: " << depth_reached << " for node with depth: " << depth;	
+    //   return;
+    // } else {
+    //   if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Accepting PV that reached depth: " << depth_reached << " for node with depth: " << depth;		
+    // }
+
+    if (pv == "pv" && depth_reached > 14) {
       while(iss >> pv >> std::ws &&
 	    pv_length < depth_reached) {
 	Move m;
@@ -324,41 +339,40 @@ void Search::AuxEngineWorker() {
     }
   }
 
-  if (pv_moves.size() == 0) {
-    if (params_.GetAuxEngineVerbosity() >= 1) LOGFILE << "Warning: the helper did not give a PV. Will not add the single bestmove";
-    // if (params_.GetAuxEngineVerbosity() >= 1) LOGFILE << "Warning: the helper did not give a PV, will only use bestmove:" << bestmove_packed_int;
-    // pv_moves.push_back(bestmove_packed_int);
+  if (pv_moves.size() > 0){
+    if (params_.GetAuxEngineVerbosity() >= 9){
+      std::string debug_string;
+      for(int i = 0; i < (int) my_moves_from_the_white_side.size(); i++){
+	debug_string = debug_string + my_moves_from_the_white_side[i].as_string() + " ";
+      }
+      if(played_history_.IsBlackToMove()){
+	LOGFILE << "debug info: length of PV given to helper engine: " << depth << " position given to helper: " << s << " black to move at root, length of my_moves_from_the_white_side " << my_moves_from_the_white_side.size() << " my_moves_from_the_white_side: " << debug_string;
+      } else {
+	LOGFILE << "debug info: length of PV given to helper engine: " << depth << " position given to helper: " << s << " white to move at root, length of my_moves_from_the_white_side " << my_moves_from_the_white_side.size() << " my_moves_from_the_white_side: " << debug_string;
+      }
+    }
+    fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before starting to modify it
+    fast_track_extend_and_evaluate_queue_.push(my_moves_from_the_white_side);
+    fast_track_extend_and_evaluate_queue_mutex_.unlock();
   }
 
-  if (params_.GetAuxEngineVerbosity() >= 9){
-    std::string debug_string;
-    for(int i = 0; i < (int) my_moves_from_the_white_side.size(); i++){
-      debug_string = debug_string + my_moves_from_the_white_side[i].as_string() + " ";
-    }
-    if(played_history_.IsBlackToMove()){
-      LOGFILE << "debug info: length of PV given to helper engine: " << depth << " position given to helper: " << s << " black to move at root, length of my_moves_from_the_white_side " << my_moves_from_the_white_side.size() << " my_moves_from_the_white_side: " << debug_string;
-    } else {
-      LOGFILE << "debug info: length of PV given to helper engine: " << depth << " position given to helper: " << s << " white to move at root, length of my_moves_from_the_white_side " << my_moves_from_the_white_side.size() << " my_moves_from_the_white_side: " << debug_string;
-    }
-  }
-
-  fast_track_extend_and_evaluate_queue_.push(my_moves_from_the_white_side); // I think push() means push_back for queues.
-  fast_track_extend_and_evaluate_queue_mutex_.unlock();
-
-  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Returning from DoAuxEngine()";
+  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Returning from AuxEncode_and_Enqueue()";
 
 }
   
 
 void Search::DoAuxEngine(Node* n) {
-  // before trying to take a lock on nodes_mutex_, always check if search has stopped, in which we return early
+  // before trying to take a lock on nodes_mutex_, always check if search has stopped, in which case we return early
   if(stop_.load(std::memory_order_acquire)) {
   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine caught a stop signal beforing doing anything.";
     return;
   }
-  // nodes_mutex_.lock_shared();
-  // if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "DoAuxEngine() called for node" << n->DebugString();
-  // nodes_mutex_.unlock_shared();  
+
+  if (params_.GetAuxEngineVerbosity() >= 9){
+    nodes_mutex_.lock_shared();
+    LOGFILE << "DoAuxEngine() called for node" << n->DebugString();
+    nodes_mutex_.unlock_shared();
+  }
 
   // Calculate depth.
   int depth = 0;
@@ -479,31 +493,13 @@ void Search::DoAuxEngine(Node* n) {
     std::istringstream iss(line);
     iss >> token >> std::ws;
 
-    // // parse the line, and if it is deep enough, queue it
-    // if (token == "info"){
-    //   bool reached_pv_token = false;
-    //   // LOGFILE << "found a info line";
-    //   my_line = line; // make a copy, don't disturb the main pipeline
-    //   // parse my_line
-    //   std::istringstream my_iss(my_line);
-    //   int my_depth;
-    //   while(my_iss >> my_token >> std::ws) {
-    // 	if(my_token == "depth"){
-    // 	  my_iss >> my_depth;
-    // 	}
-    // 	if(depth < 15) break; // Don't bother until depth is high enough
-    // 	if(reached_pv_token){
-    // 	  // found a move in the pv
-    // 	  LOGFILE << "found a move in the current pv: " << my_token;
-    // 	}
-    // 	if(my_token == "pv"){
-    // 	  reached_pv_token = true;
-    // 	}
-    //   }
-    // }
-    // ChessBoard my_board = played_history_.Last().GetBoard();
-    // Position my_position = played_history_.Last();
-      
+    // parse and queue PV:s even before the search is finished, if the depth is high enough (which will be determined by AuxEncode_and_Enqueue().
+    if (token == "info") {
+      // if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "found line: " << line;
+      AuxEncode_and_Enqueue(line, depth, my_board, my_position, my_moves_from_the_white_side);
+      // if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Check that line is unchanged: " << line;      
+    }
+
     if (token == "bestmove") {
       iss >> token;
       break;
@@ -571,21 +567,6 @@ void Search::AuxWait() {
     auxengine_threads_.back().join();
     auxengine_threads_.pop_back();
   }
-
-  // // Adjust threshold so that time is not wasted queueing nodes that will never be evaluated anyway.
-  // // If the amount of remaining nodes is higher than 20 times of the number of nodes actually evaluated, then increase the threshold.
-  // if(search_stats_->AuxEngineQueueSizeAtMoveSelectionTime > auxengine_num_evals * 20){
-  //   search_stats_->AuxEngineThreshold = search_stats_->AuxEngineThreshold * 1.1;
-  //   if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "Increased Threshold since queue is larger than 3 times the evaluated nodes";
-  // }
-  // // decrease the threshold if we the amount of remaining nodes is less than 10 times of all queued nodes
-  // if((search_stats_->AuxEngineQueueSizeAtMoveSelectionTime < auxengine_num_evals * 10)
-  //     ||
-  //    (search_stats_->AuxEngineQueueSizeAtMoveSelectionTime < 10) // cover cases where auxengine_num_evals == 0
-  //    ){
-  //   search_stats_->AuxEngineThreshold = search_stats_->AuxEngineThreshold * 0.90;
-  //   if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "Decreased Threshold since queue is less than 3 times the evaluated nodes";    
-  // }
 
   auxengine_mutex_.lock();  
   search_stats_->Number_of_nodes_added_by_AuxEngine = search_stats_->Number_of_nodes_added_by_AuxEngine + auxengine_num_updates;

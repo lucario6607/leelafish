@@ -573,7 +573,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
                               StoppersHints* hints) {
   hints->Reset();
 
-  LOGFILE << "MaybeTriggerStop() about to aquire a lock on nodes.";
+  // LOGFILE << "MaybeTriggerStop() about to aquire a lock on nodes.";
 
   SharedMutex::Lock nodes_lock(nodes_mutex_);
   Mutex::Lock lock(counters_mutex_);

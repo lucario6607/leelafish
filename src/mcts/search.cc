@@ -618,18 +618,18 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     current_best_edge_ = EdgeAndNode();
     this_edge_has_higher_expected_q_than_the_most_visited_child = -1;
 
-    auxengine_mutex_.lock(); // play nice with Search::AuxEngineWorker()    
+    auxengine_mutex_.lock(); // play nice with Search::AuxEngineWorker()
 
     // Store the size of the queue, for adjustment of threshold and time
     search_stats_->AuxEngineQueueSizeAtMoveSelectionTime = search_stats_->persistent_queue_of_nodes.size();
     search_stats_->Total_number_of_nodes = search_stats_->Total_number_of_nodes + root_node_->GetN();
+    if(params_.GetAuxEngineVerbosity() >= 5) LOGFILE << search_stats_->AuxEngineQueueSizeAtMoveSelectionTime << " nodes left in the query queue at move selection time. Threshold used: " << search_stats_->AuxEngineThreshold;
 
     // purge obsolete nodes in the helper queues. Note that depending on the move of the opponent more nodes can become obsolete.
     if(search_stats_->persistent_queue_of_nodes.size() > 0){
       std::queue<Node*> persistent_queue_of_nodes_temp;
       std::queue<int> source_of_queued_nodes_temp;
       long unsigned int my_size = search_stats_->persistent_queue_of_nodes.size();
-      if(params_.GetAuxEngineVerbosity() >= 5) LOGFILE << my_size << " nodes left in the query queue at move selection time. Threshold used: " << search_stats_->AuxEngineThreshold;
       for(long unsigned int i=0; i < my_size; i++){
     	Node * n = search_stats_->persistent_queue_of_nodes.front(); // read the element
     	search_stats_->persistent_queue_of_nodes.pop(); // remove it from the queue.
@@ -665,10 +665,6 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	LOGFILE << "Purged " << my_size - size_kept
 	      << " nodes in the query queue based the selected move: " << final_bestmove_.as_string()
 	      << ". " << size_kept << " nodes remain.";
-    } else {
-      if(params_.GetAuxEngineVerbosity() >= 5) LOGFILE
-	 << "No nodes in the query queue at move selection time. "
-	 << "Threshold used: " << search_stats_->AuxEngineThreshold;
     }
 
     // For now avoid checking since it seems it occasionally crashes for unknown reasons.
@@ -745,7 +741,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 
     search_stats_->final_purge_run = true; // Inform Search::AuxEngineWorker(), which can start *AFTER* us, that we have already purged stuff. If they also do it, things will break badly.
     
-    auxengine_mutex_.unlock(); // play nice with Search::AuxEngineWorker()    
+    auxengine_mutex_.unlock(); // play nice with Search::AuxEngineWorker()
 
   }
   
@@ -753,6 +749,12 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
   // at the next iteration remaining playouts may be different.
   // TODO(crem) Is it really needed?
   root_node_->CancelScoreUpdate(0);
+
+  // Confirm that this function exited successfully when stop was triggered.
+  if (stop_.load(std::memory_order_acquire) && ok_to_respond_bestmove_ &&
+      !bestmove_is_sent_) {
+    LOGFILE << "Finished MaybeTriggerStop(): stopped search and successfully shutdown.";
+  }
 
 }
 
@@ -1203,6 +1205,7 @@ void Search::CancelSharedCollisions() REQUIRES(nodes_mutex_) {
 }
 
 Search::~Search() {
+  LOGFILE << "about to destroy search.";
   Abort();
   Wait();
   {
@@ -1507,7 +1510,6 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 				 std::move(minibatch_[minibatch_.size()-1].probabilities_to_cache));
 
 	} else {
-	  // TODO: this is not tested yet. In particular I've never seen it being backpropagated by DoBackupUpdateSingleNode() even though I expected to see that.
 	  minibatch_.push_back(NodeToProcess::Visit(child_node, 1)); // Only one visit, since this is a terminal
 	  minibatch_[minibatch_.size()-1].nn_queried = false;
 	  minibatch_[minibatch_.size()-1].ooo_completed = false;
@@ -1593,44 +1595,41 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation() {
   // lock the queue before reading from it
   // Check if search is stopped before trying to take a lock
 
-  // if (!search_->stop_.load(std::memory_order_acquire)){
-
-  //   // // Put a limit to the number of PV:s added per batch.
-  //   int max_number_of_PVs_added = 1;
-  //   int number_of_PVs_added = 0;
-
-    // std::lock_guard<std::mutex> lock(search_->fast_track_extend_and_evaluate_queue_mutex_);
-    LOGFILE << "About to aquire a lock using fast_track_extend_and_evaluate_queue_mutex_ PreExtendTreeAndFastTrackForNNEvaluation()";
-    search_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before starting to modify it
-    if(search_->fast_track_extend_and_evaluate_queue_.size() > 0){
-      while(search_->fast_track_extend_and_evaluate_queue_.size() > 0
-	    // && number_of_PVs_added < max_number_of_PVs_added
-	    ){
-	if (params_.GetAuxEngineVerbosity() >= 9) {
-	  LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: size of minibatch_ is " << minibatch_.size();
-	  LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: size of fast_track_extend_and_evaluate_queue_ is " << search_->fast_track_extend_and_evaluate_queue_.size();
-	}
-	std::vector<lczero::Move> my_moves = search_->fast_track_extend_and_evaluate_queue_.front(); // read the element
-	search_->fast_track_extend_and_evaluate_queue_.pop(); // remove it from the queue.
-	int source = search_->search_stats_->source_of_queued_nodes.front();
-	search_->search_stats_->source_of_queued_nodes.pop();
+  search_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before reading from it.
+  if(search_->fast_track_extend_and_evaluate_queue_.size() > 0){
+    while(search_->fast_track_extend_and_evaluate_queue_.size() > 0){
+      if (params_.GetAuxEngineVerbosity() >= 9) {
+	LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: size of minibatch_ is " << minibatch_.size();
+	LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: size of fast_track_extend_and_evaluate_queue_ is " << search_->fast_track_extend_and_evaluate_queue_.size();
+      }
+      std::vector<lczero::Move> my_moves = search_->fast_track_extend_and_evaluate_queue_.front(); // read the element
+      search_->fast_track_extend_and_evaluate_queue_.pop(); // remove it from the queue.
+      int source = search_->search_stats_->source_of_PVs.front();
+      search_->search_stats_->source_of_PVs.pop();
+      // Finished modifying the queue, release the lock, so that others can add more PVs to it while we extend nodes.
+      search_->fast_track_extend_and_evaluate_queue_mutex_.unlock(); // unlock
+      
+      if (params_.GetAuxEngineVerbosity() >= 9) {	
 	// show full my_moves
 	std::string s;
-	for(int i = 0; i < (int) my_moves.size(); i++){
-	  s = s + my_moves[i].as_string() + " ";
+	if(my_moves.size() > 0){
+	  for(int i = 0; i < (int) my_moves.size(); i++){
+	    s = s + my_moves[i].as_string() + " ";
+	  }
+	  LOGFILE << "Length of PV to add: " << my_moves.size() << " my_moves: " << s << " source: " << source;	    
 	}
-	if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Length of PV to add: " << my_moves.size() << " my_moves: " << s << " source: " << source;
 	PreExtendTreeAndFastTrackForNNEvaluation_inner(search_->root_node_, my_moves, 0, 0, source);
 	if (params_.GetAuxEngineVerbosity() >= 9) {
 	  LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: finished one iteration, size of minibatch_ is " << minibatch_.size();
 	  LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: finished one iteration, size of fast_track_extend_and_evaluate_queue_ is " << search_->fast_track_extend_and_evaluate_queue_.size();
 	}
-	// number_of_PVs_added++;
       }
-    }
-    search_->fast_track_extend_and_evaluate_queue_mutex_.unlock(); // unlock
-    LOGFILE << "About to exit PreExtendTreeAndFastTrackForNNEvaluation()";
-  // }
+
+      // While we extended nodes, someone could have added more PV:s, update our belief about the current size of the queue.
+      search_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before reading from it again.
+    } // Always end the while loop with the lock on. 
+  }
+  search_->fast_track_extend_and_evaluate_queue_mutex_.unlock(); // unlock
 }
   
 // 2. Gather minibatch.

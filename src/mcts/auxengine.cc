@@ -66,18 +66,19 @@ void SearchWorker::AuxMaybeEnqueueNode(Node* n, int source) {
     return;
   }
 
-  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE
-      << "AuxMaybeEnqueueNode() picked node: " << n->DebugString() 
-      << " for the persistent_queue_of_nodes which has size: "
-      << search_->search_stats_->persistent_queue_of_nodes.size()
-      << " The source was " << source;
+  // if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE
+  //     << "AuxMaybeEnqueueNode() picked node: " << n->DebugString() 
+  //     << " for the persistent_queue_of_nodes which has size: "
+  //     << search_->search_stats_->persistent_queue_of_nodes.size()
+  //     << " The source was " << source;
 
   n->SetAuxEngineMove(0xfffe); // magic for pending
   search_->auxengine_mutex_.lock();  
   search_->search_stats_->persistent_queue_of_nodes.push(n);
   search_->search_stats_->source_of_queued_nodes.push(source);
-  search_->auxengine_cv_.notify_one();
   search_->auxengine_mutex_.unlock();
+  search_->auxengine_cv_.notify_one();
+
 }
 
 void Search::AuxEngineWorker() {
@@ -148,6 +149,7 @@ void Search::AuxEngineWorker() {
       // Normally, everything works fine without the next four lines.
       search_stats_->persistent_queue_of_nodes = {}; 
       search_stats_->nodes_added_by_the_helper = {};
+      search_stats_->source_of_PVs = {};
       search_stats_->source_of_queued_nodes = {};
       search_stats_->source_of_added_nodes = {};
       
@@ -257,7 +259,7 @@ void Search::AuxEngineWorker() {
   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker done search search_stats_ at: " << &search_stats_ ;
 }
 
-  void Search::AuxEncode_and_Enqueue(std::string pv_as_string, int depth, ChessBoard my_board, Position my_position, std::vector<lczero::Move> my_moves_from_the_white_side, int source) {
+  void Search::AuxEncode_and_Enqueue(std::string pv_as_string, int depth, ChessBoard my_board, Position my_position, std::vector<lczero::Move> my_moves_from_the_white_side, int source, bool require_some_depth) {
   // Take a string recieved from a helper engine, turn it into a vector with elements of type Move and queue that vector.
 
   // Quit early if search has stopped
@@ -293,7 +295,6 @@ void Search::AuxEngineWorker() {
   int max_pv_length = 99; // Dirty work around for too many levels of recursion.
 
   while(iss >> pv >> std::ws) {
-    // LOGFILE << "Parsing input line: found token: " << pv;
     if (pv == "info"){
       continue;
     }
@@ -304,10 +305,11 @@ void Search::AuxEngineWorker() {
     if (pv == "depth") {
       // Figure out which depth was reached (can be zero).
       iss >> depth_reached >> std::ws;
-      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Reached depth: " << depth_reached << " for node with depth: " << depth;
+      // if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Reached depth: " << depth_reached << " for node with depth: " << depth;
     }
 
-    if (pv == "pv" && depth_reached > 16) {
+    // Either "don't require depth" or depth > 14
+    if (pv == "pv" && (! require_some_depth || depth_reached > 14)) {
       while(iss >> pv >> std::ws &&
 	    pv_length < depth_reached &&
 	    pv_length < max_pv_length) {
@@ -342,6 +344,7 @@ void Search::AuxEngineWorker() {
   if (pv_moves.size() > 0){
     if (params_.GetAuxEngineVerbosity() >= 9){
       std::string debug_string;
+      // No lock required here, my_moves_from_the_white_side is only a simple queue of Moves, it has nothing to do with the searchtree.
       for(int i = 0; i < (int) my_moves_from_the_white_side.size(); i++){
 	debug_string = debug_string + my_moves_from_the_white_side[i].as_string() + " ";
       }
@@ -351,10 +354,11 @@ void Search::AuxEngineWorker() {
 	LOGFILE << "debug info: length of PV given to helper engine: " << depth << " position given to helper: " << s << " white to move at root, length of my_moves_from_the_white_side " << my_moves_from_the_white_side.size() << " my_moves_from_the_white_side: " << debug_string;
       }
     }
-    LOGFILE << "About to aquire a lock using fast_track_extend_and_evaluate_queue_mutex_ AuxEncode_and_Enqueue()";    
+    // LOGFILE << "About to aquire a lock using fast_track_extend_and_evaluate_queue_mutex_ AuxEncode_and_Enqueue()";    
     fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before starting to modify it
     fast_track_extend_and_evaluate_queue_.push(my_moves_from_the_white_side);
-    search_stats_->source_of_queued_nodes.push(source);
+    search_stats_->source_of_PVs.push(source);
+    // LOGFILE << "Sanity check: size of PV source queue: " << search_stats_->source_of_PVs.size() << " size of PV queue: " << fast_track_extend_and_evaluate_queue_.size();
     fast_track_extend_and_evaluate_queue_mutex_.unlock();
   }
 
@@ -389,34 +393,37 @@ void Search::DoAuxEngine(Node* n) {
     }
     nodes_mutex_.unlock_shared();    
   }
-  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "DoAuxEngine calculated depth: " << depth;
+  // if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "DoAuxEngine calculated depth: " << depth;
 
-  float sample = distribution(generator);
-  
-  if(depth > 0 &&
-     depth > params_.GetAuxEngineMaxDepth() &&
-     float(1.0f)/(depth) < sample){
-    // This is exactly what SearchWorker::AuxMaybeEnqueueNode() does, but we are in class Search:: now, so that function is not available.
-
-    // Since we take a lock below, have to check if search is stopped.
-    if (stop_.load(std::memory_order_acquire)){
+  // // Since we take a lock below, have to check if search is stopped.
+  // if (stop_.load(std::memory_order_acquire)){
+  //   return;
+  // }
+  // if there is no node in the queue then accept unconditionally.
+  auxengine_mutex_.lock();
+  if (search_stats_->persistent_queue_of_nodes.size() > 0){
+    float sample = distribution(generator);
+    if(depth > 0 &&
+       depth > params_.GetAuxEngineMaxDepth() &&
+       float(1.0f)/(depth) < sample){
+      // This is exactly what SearchWorker::AuxMaybeEnqueueNode() does, but we are in class Search:: now, so that function is not available.
+      int source = search_stats_->source_of_queued_nodes.front();
+      search_stats_->source_of_queued_nodes.pop();
+      search_stats_->persistent_queue_of_nodes.push(n);
+      search_stats_->source_of_queued_nodes.push(source);
+      auxengine_cv_.notify_one(); // unnecessary?
+      auxengine_mutex_.unlock();
       return;
     }
-    auxengine_mutex_.lock();
-    int source = search_stats_->source_of_queued_nodes.front();
-    search_stats_->source_of_queued_nodes.pop();
-    search_stats_->persistent_queue_of_nodes.push(n);
-    search_stats_->source_of_queued_nodes.push(source);
-    auxengine_cv_.notify_one();
-    auxengine_mutex_.unlock();
-    return;
   }
+  auxengine_mutex_.unlock();  
+  
   if(depth > 0 &&
      depth > params_.GetAuxEngineMaxDepth()){
     // if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "DoAuxEngine processing a node with high depth: " << " since sample " << sample << " is less than " << float(1.0f)/(depth);
   }
     
-  if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "DoAuxEngine processing a node with depth: " << depth;
+  // if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "DoAuxEngine processing a node with depth: " << depth;
 
   std::string s = "";
   bool flip = played_history_.IsBlackToMove() ^ (depth % 2 == 0);
@@ -500,7 +507,7 @@ void Search::DoAuxEngine(Node* n) {
     if (token == "info") {
       // Since we (possibly) now create multiple PV:s per node, also (possibly) add a source.
       int source = search_stats_->source_of_queued_nodes.front();
-      AuxEncode_and_Enqueue(line, depth, my_board, my_position, my_moves_from_the_white_side, source);
+      AuxEncode_and_Enqueue(line, depth, my_board, my_position, my_moves_from_the_white_side, source, true);
     }
 
     if (token == "bestmove") {
@@ -530,8 +537,9 @@ void Search::DoAuxEngine(Node* n) {
     }
   }
   if (stopping) {
-    // Don't use results of a search that was stopped.
-    if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "AUX Search was interrupted, the results will not be used";
+    // // Don't use results of a search that was stopped.
+    // if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "AUX Search was interrupted, the results will not be used";
+    // Not because the are unreliable, but we simply want to shut down as fast as possible.
     return;
   }
   auxengine_stopped_mutex_.lock();
@@ -562,7 +570,7 @@ void Search::DoAuxEngine(Node* n) {
   search_stats_->source_of_queued_nodes.pop();
   auxengine_mutex_.unlock();
   
-  AuxEncode_and_Enqueue(prev_line, depth, my_board, my_position, my_moves_from_the_white_side, source);  
+  AuxEncode_and_Enqueue(prev_line, depth, my_board, my_position, my_moves_from_the_white_side, source, false);  
 
 }
 
@@ -602,7 +610,7 @@ void Search::AuxWait() {
   auxengine_mutex_.unlock();  
   
   // Empty the other queue.
-  LOGFILE << "About to aquire a lock using fast_track_extend_and_evaluate_queue_mutex_ AuxWait()";      
+  // LOGFILE << "About to aquire a lock using fast_track_extend_and_evaluate_queue_mutex_ AuxWait()";      
   fast_track_extend_and_evaluate_queue_mutex_.lock();
   if(fast_track_extend_and_evaluate_queue_.empty()){
     if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "No PVs in the fast_track_extend_and_evaluate_queue";
@@ -610,13 +618,8 @@ void Search::AuxWait() {
     if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << fast_track_extend_and_evaluate_queue_.size() << " possibly obsolete PV:s in the queue.";
     fast_track_extend_and_evaluate_queue_ = {};
     // Also empty the source queue
-    search_stats_->source_of_queued_nodes = {};
-    
-    //   // TODO save the PV if it is still relevant
-    // while (!fast_track_extend_and_evaluate_queue_.empty()) {
-    //   fast_track_extend_and_evaluate_queue_.pop();
-    // }
-    
+    search_stats_->source_of_PVs = {};    
+    // TODO save the PV if it is still relevant
     if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Number of PV:s in the queue=" << fast_track_extend_and_evaluate_queue_.size();
   }
   fast_track_extend_and_evaluate_queue_mutex_.unlock();  

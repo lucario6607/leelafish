@@ -58,6 +58,8 @@ class Search {
   struct SearchStats {
     std::queue<Node*> persistent_queue_of_nodes; // the query queue for the auxillary helper engine.
     std::queue<int> source_of_queued_nodes; // 0 = SearchWorker::PickNodesToExtendTask(); 1 = Search::DoBackupUpdateSingleNode(); 2 = Search::SendUciInfo(); 3 = Search::AuxEngineWorker() node is root
+    std::queue<int> source_of_PVs; // 0 = SearchWorker::PickNodesToExtendTask(); 1 = Search::DoBackupUpdateSingleNode(); 2 = Search::SendUciInfo(); 3 = Search::AuxEngineWorker() node is root. Whenever k (=1 or more) PVs are created from a single node, add k elements with value source from source_of_queued_nodes into this queue.
+
     std::queue<Node*> nodes_added_by_the_helper; // this is useful only to assess how good the different sources are, it does not affect search
     std::queue<int> source_of_added_nodes; // 0 = SearchWorker::PickNodesToExtendTask(); 1 = Search::DoBackupUpdateSingleNode(); 2 = Search::SendUciInfo(); 3 = Search::AuxEngineWorker() node is root
     int AuxEngineTime; // dynamic version of the UCI option AuxEngineTime.
@@ -244,7 +246,7 @@ class Search {
   void AuxEngineWorker();
   void AuxWait();
   void DoAuxEngine(Node* n);
-  void AuxEncode_and_Enqueue(std::string pv_as_string, int depth, ChessBoard my_board, Position my_position, std::vector<lczero::Move> my_moves_from_the_white_side, int source);
+  void AuxEncode_and_Enqueue(std::string pv_as_string, int depth, ChessBoard my_board, Position my_position, std::vector<lczero::Move> my_moves_from_the_white_side, int source, bool require_some_depth);
   void AuxUpdateP(Node* n, std::vector<uint16_t> pv_moves, int ply, ChessBoard my_board);
   static boost::process::ipstream auxengine_is_;
   static boost::process::opstream auxengine_os_;

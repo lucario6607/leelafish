@@ -244,7 +244,7 @@ class Search {
   void AuxEngineWorker();
   void AuxWait();
   void DoAuxEngine(Node* n);
-  void AuxEncode_and_Enqueue(std::string pv_as_string, int depth, ChessBoard my_board, Position my_position, std::vector<lczero::Move> my_moves_from_the_white_side);
+  void AuxEncode_and_Enqueue(std::string pv_as_string, int depth, ChessBoard my_board, Position my_position, std::vector<lczero::Move> my_moves_from_the_white_side, int source);
   void AuxUpdateP(Node* n, std::vector<uint16_t> pv_moves, int ply, ChessBoard my_board);
   static boost::process::ipstream auxengine_is_;
   static boost::process::opstream auxengine_os_;

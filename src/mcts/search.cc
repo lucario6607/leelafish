@@ -573,8 +573,6 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
                               StoppersHints* hints) {
   hints->Reset();
 
-  // LOGFILE << "MaybeTriggerStop() about to aquire a lock on nodes.";
-
   SharedMutex::Lock nodes_lock(nodes_mutex_);
   Mutex::Lock lock(counters_mutex_);
   // Already responded bestmove, nothing to do here.
@@ -636,7 +634,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     	Node * n = search_stats_->persistent_queue_of_nodes.front(); // read the element
     	search_stats_->persistent_queue_of_nodes.pop(); // remove it from the queue.
 	int source = search_stats_->source_of_queued_nodes.front(); // read the element
-	search_stats_->source_of_queued_nodes.pop(); // remove it from the queue.	
+	search_stats_->source_of_queued_nodes.pop(); // remove it from the queue.
 	for (Node* n2 = n; n2 != root_node_ ; n2 = n2->GetParent()) {
 	  // if purge at search start never happened (because of only one move possible, auxworker() never started), then we can have disconnected nodes in the queue.
 	  // if(n2->GetParent() == nullptr || n2->GetParent()->GetParent() == nullptr) break;
@@ -647,7 +645,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	      // in order to be able to purge nodes that became obsolete and deallocated due to the move of the opponent,
 	      // also save the grandparent that will become root at next iteration if this node is still relevant by then.
 	      persistent_queue_of_nodes_temp.push(n2);
-	      source_of_queued_nodes_temp.push(source);	      
+	      source_of_queued_nodes_temp.push(source);
 	    }
 	    break;
 	  }
@@ -1593,30 +1591,46 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation() {
   // input: a PV starting from root in form of a vector of Moves (the vectors are stored in a global queue called fast_track_extend_and_evaluate_queue_)
   // LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation() for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
   // lock the queue before reading from it
-  std::lock_guard<std::mutex> lock(search_->fast_track_extend_and_evaluate_queue_mutex_);
-  if(search_->fast_track_extend_and_evaluate_queue_.size() > 0){
-    while(search_->fast_track_extend_and_evaluate_queue_.size() > 0){
-      if (params_.GetAuxEngineVerbosity() >= 9) {
-	LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: size of minibatch_ is " << minibatch_.size();
-	LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: size of fast_track_extend_and_evaluate_queue_ is " << search_->fast_track_extend_and_evaluate_queue_.size();
-      }
-      std::vector<lczero::Move> my_moves = search_->fast_track_extend_and_evaluate_queue_.front(); // read the element
-      search_->fast_track_extend_and_evaluate_queue_.pop(); // remove it from the queue.
-      int source = search_->search_stats_->source_of_queued_nodes.front();
-      search_->search_stats_->source_of_queued_nodes.pop();      
-      // show full my_moves
-      std::string s;
-      for(int i = 0; i < (int) my_moves.size(); i++){
-	s = s + my_moves[i].as_string() + " ";
-      }
-      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Length of PV to add: " << my_moves.size() << " my_moves: " << s << " source: " << source;
-      PreExtendTreeAndFastTrackForNNEvaluation_inner(search_->root_node_, my_moves, 0, 0, source);
-      if (params_.GetAuxEngineVerbosity() >= 9) {
-	LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: finished one iteration, size of minibatch_ is " << minibatch_.size();
-	LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: finished one iteration, size of fast_track_extend_and_evaluate_queue_ is " << search_->fast_track_extend_and_evaluate_queue_.size();
+  // Check if search is stopped before trying to take a lock
+
+  // if (!search_->stop_.load(std::memory_order_acquire)){
+
+  //   // // Put a limit to the number of PV:s added per batch.
+  //   int max_number_of_PVs_added = 1;
+  //   int number_of_PVs_added = 0;
+
+    // std::lock_guard<std::mutex> lock(search_->fast_track_extend_and_evaluate_queue_mutex_);
+    LOGFILE << "About to aquire a lock using fast_track_extend_and_evaluate_queue_mutex_ PreExtendTreeAndFastTrackForNNEvaluation()";
+    search_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before starting to modify it
+    if(search_->fast_track_extend_and_evaluate_queue_.size() > 0){
+      while(search_->fast_track_extend_and_evaluate_queue_.size() > 0
+	    // && number_of_PVs_added < max_number_of_PVs_added
+	    ){
+	if (params_.GetAuxEngineVerbosity() >= 9) {
+	  LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: size of minibatch_ is " << minibatch_.size();
+	  LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: size of fast_track_extend_and_evaluate_queue_ is " << search_->fast_track_extend_and_evaluate_queue_.size();
+	}
+	std::vector<lczero::Move> my_moves = search_->fast_track_extend_and_evaluate_queue_.front(); // read the element
+	search_->fast_track_extend_and_evaluate_queue_.pop(); // remove it from the queue.
+	int source = search_->search_stats_->source_of_queued_nodes.front();
+	search_->search_stats_->source_of_queued_nodes.pop();
+	// show full my_moves
+	std::string s;
+	for(int i = 0; i < (int) my_moves.size(); i++){
+	  s = s + my_moves[i].as_string() + " ";
+	}
+	if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Length of PV to add: " << my_moves.size() << " my_moves: " << s << " source: " << source;
+	PreExtendTreeAndFastTrackForNNEvaluation_inner(search_->root_node_, my_moves, 0, 0, source);
+	if (params_.GetAuxEngineVerbosity() >= 9) {
+	  LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: finished one iteration, size of minibatch_ is " << minibatch_.size();
+	  LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: finished one iteration, size of fast_track_extend_and_evaluate_queue_ is " << search_->fast_track_extend_and_evaluate_queue_.size();
+	}
+	// number_of_PVs_added++;
       }
     }
-  }
+    search_->fast_track_extend_and_evaluate_queue_mutex_.unlock(); // unlock
+    LOGFILE << "About to exit PreExtendTreeAndFastTrackForNNEvaluation()";
+  // }
 }
   
 // 2. Gather minibatch.

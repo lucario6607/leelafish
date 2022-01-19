@@ -217,6 +217,8 @@ void Search::AuxEngineWorker() {
     }
   }
 
+  LOGFILE << "AuxEngineWorker() finished purging/initiating, will now check if root can be queued";
+  
   // if there is no node in the queue and search is not stopped, then
   // kickstart with the root node, no need to wait for it to get some
   // amount of visits. Except if root is not yet expanded, or lacks
@@ -225,9 +227,11 @@ void Search::AuxEngineWorker() {
 
   if(!stop_.load(std::memory_order_acquire) &&
      search_stats_->persistent_queue_of_nodes.size() == 0){
+    LOGFILE << "AuxEngineWorker() about to lock nodes_mutex_ in order to read root";
     nodes_mutex_.lock(); // write lock
     if(root_node_->GetNumEdges() > 0){
       // root is extended.
+      LOGFILE << "AuxEngineWorker() about to enqueue root";      
       root_node_->SetAuxEngineMove(0xfffe); // mark root as pending and queue it
       search_stats_->persistent_queue_of_nodes.push(root_node_);
       search_stats_->source_of_queued_nodes.push(3);
@@ -238,6 +242,8 @@ void Search::AuxEngineWorker() {
   }
   
   auxengine_mutex_.unlock();
+
+  LOGFILE << "AuxEngineWorker() about to enter final while loop.";  
   
   Node* n;
   while (!stop_.load(std::memory_order_acquire)) {
@@ -362,7 +368,7 @@ void Search::AuxEngineWorker() {
     fast_track_extend_and_evaluate_queue_mutex_.unlock();
   }
 
-  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Returning from AuxEncode_and_Enqueue()";
+  // if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Returning from AuxEncode_and_Enqueue()";
 
 }
   

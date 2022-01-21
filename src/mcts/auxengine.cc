@@ -586,6 +586,26 @@ void Search::DoAuxEngine(Node* n, int index){
       LOGFILE << "thread: " << index << " auxe:" << line;
     }
 
+    // Don't send a second stop command
+    if (!stopping) {
+      stopping = stop_.load(std::memory_order_acquire);
+      if (stopping) {
+	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine(), thread=" << index << " caught a stop signal 2.";	
+        // (unless someone else already has sent stop) send stop,
+	// stay in loop to get best response, otherwise it
+        // will disturb the next iteration.
+	// only send stop if we are the first to detect that search has stopped.
+	auxengine_stopped_mutex_.lock();
+	if(!auxengine_stopped_[index]){
+	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine(), thread=" << index << " Stopping the A/B helper Start";
+	  *vector_of_opstreams[index] << "stop" << std::endl; // stop the A/B helper	  
+	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine(), thread=" << index << " Stopping the A/B helper Stop";
+	  auxengine_stopped_[index] = true;
+	}
+	auxengine_stopped_mutex_.unlock();
+      }
+    }
+
     std::istringstream iss(line);
     iss >> token >> std::ws;
 
@@ -602,26 +622,6 @@ void Search::DoAuxEngine(Node* n, int index){
     }
     prev_line = line;
 
-    // Don't send a second stop command
-    if (!stopping) {
-      stopping = stop_.load(std::memory_order_acquire);
-      if (stopping) {
-	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine(), thread=" << index << " caught a stop signal 2.";	
-        // (unless someone else already has sent stop) send stop,
-	// stay in loop to get best response, otherwise it
-        // will disturb the next iteration.
-	// only send stop if we are the first to detect that search has stopped.
-	auxengine_stopped_mutex_.lock();
-	if(!auxengine_stopped_[index]){
-	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine(), thread=" << index << " Stopping the A/B helper Start";
-	  // auxengine_os_ << "stop" << std::endl; // stop the A/B helper
-	  *vector_of_opstreams[index] << "stop" << std::endl; // stop the A/B helper	  
-	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine(), thread=" << index << " Stopping the A/B helper Stop";
-	  auxengine_stopped_[index] = true;
-	}
-	auxengine_stopped_mutex_.unlock();
-      }
-    }
   }
   if (stopping) {
     // Don't use results of a search that was stopped.

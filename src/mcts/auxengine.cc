@@ -178,10 +178,12 @@ void Search::AuxEngineWorker() {
       // Initiate some stats and parameters (Threshold needs to be set
       // earlier, see search() in search.cc)
 
-      // Since we take a lock below, have to check if search is stopped.
-      if (stop_.load(std::memory_order_acquire)){
-	return;
-      }
+      // // Since we take a lock below, have to check if search is stopped.
+      // if (stop_.load(std::memory_order_acquire)){
+      // 	auxengine_mutex_.unlock();
+      // 	return;
+      // }
+
       search_stats_->AuxEngineTime = params_.GetAuxEngineTime();
       search_stats_->Number_of_nodes_added_by_AuxEngine = 0;
       search_stats_->Total_number_of_nodes = 0;
@@ -586,6 +588,9 @@ void Search::DoAuxEngine(Node* n, int index){
       LOGFILE << "thread: " << index << " auxe:" << line;
     }
 
+    std::istringstream iss(line);
+    iss >> token >> std::ws;
+
     // Don't send a second stop command
     if (!stopping) {
       stopping = stop_.load(std::memory_order_acquire);
@@ -603,25 +608,22 @@ void Search::DoAuxEngine(Node* n, int index){
 	  auxengine_stopped_[index] = true;
 	}
 	auxengine_stopped_mutex_.unlock();
+      } else {
+	// Since we are not stopping, do the ordinary stuff
+
+	// parse and queue PV:s even before the search is finished, if the depth is high enough (which will be determined by AuxEncode_and_Enqueue().
+	if (token == "info") {
+	  // Since we (possibly) now create multiple PV:s per node, also (possibly) add a source.
+	  int source = search_stats_->source_of_queued_nodes.front();
+	  AuxEncode_and_Enqueue(line, depth, my_board, my_position, my_moves_from_the_white_side, source, true);
+	}
       }
     }
-
-    std::istringstream iss(line);
-    iss >> token >> std::ws;
-
-    // parse and queue PV:s even before the search is finished, if the depth is high enough (which will be determined by AuxEncode_and_Enqueue().
-    if (token == "info") {
-      // Since we (possibly) now create multiple PV:s per node, also (possibly) add a source.
-      int source = search_stats_->source_of_queued_nodes.front();
-      AuxEncode_and_Enqueue(line, depth, my_board, my_position, my_moves_from_the_white_side, source, true);
-    }
-
     if (token == "bestmove") {
       iss >> token;
       break;
     }
     prev_line = line;
-
   }
   if (stopping) {
     // Don't use results of a search that was stopped.

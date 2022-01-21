@@ -582,6 +582,7 @@ void Search::DoAuxEngine(Node* n, int index){
   std::string token;
   std::string my_token;  
   bool stopping = false;
+  bool second_stopping = false;  
   // while(std::getline(auxengine_is_, line)) {  
   while(std::getline(*vector_of_ipstreams[index], line)) {
     if (params_.GetAuxEngineVerbosity() >= 9) {
@@ -625,11 +626,14 @@ void Search::DoAuxEngine(Node* n, int index){
 	}
       }
     } else {
-      LOGFILE << "We found that search is stopped, but the next line from the helper was not 'bestmove'";
-      // We were stopping already before going into this iteration, but the helper did not respond "bestmove", as it ought to have done. Send stop again
-      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine(), thread=" << index << " Stopping for the second time the A/B helper Start";
-      *vector_of_opstreams[index] << "stop" << std::endl; // stop the A/B helper	  
-      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine(), thread=" << index << " Stopping for the second time the A/B helper Stop";
+      if(!second_stopping){
+	LOGFILE << "We found that search is stopped, but the next line from the helper was not 'bestmove'. Weird! As a workaround send yet another stop";
+	// We were stopping already before going into this iteration, but the helper did not respond "bestmove", as it ought to have done. Send stop again
+	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine(), thread=" << index << " Stopping for the second time the A/B helper Start";
+	*vector_of_opstreams[index] << "stop" << std::endl; // stop the A/B helper	  
+	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine(), thread=" << index << " Stopping for the second time the A/B helper Stop";
+	second_stopping = true;
+      }
     }
   }
   if (stopping) {

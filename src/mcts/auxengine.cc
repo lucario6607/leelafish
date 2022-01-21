@@ -591,6 +591,12 @@ void Search::DoAuxEngine(Node* n, int index){
     std::istringstream iss(line);
     iss >> token >> std::ws;
 
+    if (token == "bestmove") {
+      iss >> token;
+      break;
+    }
+    prev_line = line;
+
     // Don't send a second stop command
     if (!stopping) {
       stopping = stop_.load(std::memory_order_acquire);
@@ -618,12 +624,13 @@ void Search::DoAuxEngine(Node* n, int index){
 	  AuxEncode_and_Enqueue(line, depth, my_board, my_position, my_moves_from_the_white_side, source, true);
 	}
       }
+    } else {
+      LOGFILE << "We found that search is stopped, but the next line from the helper was not 'bestmove'";
+      // We were stopping already before going into this iteration, but the helper did not respond "bestmove", as it ought to have done. Send stop again
+      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine(), thread=" << index << " Stopping for the second time the A/B helper Start";
+      *vector_of_opstreams[index] << "stop" << std::endl; // stop the A/B helper	  
+      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine(), thread=" << index << " Stopping for the second time the A/B helper Stop";
     }
-    if (token == "bestmove") {
-      iss >> token;
-      break;
-    }
-    prev_line = line;
   }
   if (stopping) {
     // Don't use results of a search that was stopped.

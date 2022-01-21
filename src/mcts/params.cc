@@ -321,8 +321,16 @@ const OptionId SearchParams::kAuxEngineFileId{
     "Path to auxiliary chess engine."};
 const OptionId SearchParams::kAuxEngineOptionsId{
     "auxengine-options", "AuxEngineOptions",
-    "Semicolon separated list of UCI options for the auxiliary engine\n"
-    "e.g. Hash=1024;Threads=3"};
+    "Semicolon separated list of UCI options for in-tree exploration "
+    "by the auxiliary engine. It is recommended to use one thread per "
+    "instance for the in-tree exploration, \n"
+    "e.g. Hash=32;Threads=1"};
+const OptionId SearchParams::kAuxEngineOptionsOnRootId{
+    "auxengine-options-onroot", "AuxEngineOptionsOnRoot",
+    "Semicolon separated list of UCI options for root node exploration "
+    "by the auxiliary engine. The root node exploration is managed by "
+    "a special lc0 thread which ignores the AuxEngineOptions parameter. "
+    "\n e.g. Hash=128;Threads=12"};
 const OptionId SearchParams::kAuxEngineMaxDepthId{
     "auxengine-max-depth", "AuxEngineMaxDepth",
     "Nodes with depth higher than this number will only be sent to the "
@@ -333,6 +341,11 @@ const OptionId SearchParams::kAuxEngineThresholdId{
     "The auxiliary engine is intially called when a node reaches this "
       "many visits. Between moves this value is adjusted "
       "automatically."};
+const OptionId SearchParams::kAuxEngineInstancesId{
+    "auxengine-instances", "AuxEngineInstances",
+    "This many instances of the auxiliary engine will be used. "
+    "The first instance will continously explore root while any "
+     "remaining instances will be used for in-tree exploration."};
 const OptionId SearchParams::kAuxEngineTimeId{
     "auxengine-time", "AuxEngineTime",
     "Time (in milliseconds) for the auxiliary engine to search. "
@@ -462,8 +475,10 @@ void SearchParams::Populate(OptionsParser* options) {
   options->HideOption(kTemperatureWinpctCutoffId);
   options->HideOption(kTemperatureVisitOffsetId);
   options->Add<StringOption>(kAuxEngineFileId);
-  options->Add<StringOption>(kAuxEngineOptionsId) = "Threads=3;Hash=1024;Ponder=off";
+  options->Add<StringOption>(kAuxEngineOptionsId) = "Threads=1;Hash=32;Ponder=off";
+  options->Add<StringOption>(kAuxEngineOptionsOnRootId) = "Threads=2;Hash=128;Ponder=off";  
   options->Add<IntOption>(kAuxEngineThresholdId, 1, 100000000) = 100;
+  options->Add<IntOption>(kAuxEngineInstancesId, 1, 1024) = 2;  
   options->Add<IntOption>(kAuxEngineTimeId, 10, 100000000) = 125;
   options->Add<IntOption>(kAuxEngineVerbosityId, 0, 10) = 1;
   options->Add<IntOption>(kAuxEngineMaxDepthId, 1, 100) = 6;

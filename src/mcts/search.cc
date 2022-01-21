@@ -181,10 +181,14 @@ Search::Search(const NodeTree& tree, Network* network,
   auxengine_mutex_.lock();
   search_stats_->size_of_queue_at_start = search_stats_->persistent_queue_of_nodes.size();
   search_stats_->final_purge_run = false;
+  search_stats_->thread_counter = 0;  
   if (search_stats_->AuxEngineThreshold == 0){
     search_stats_->AuxEngineThreshold = params_.GetAuxEngineThreshold();
   }
-  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Search called with search_stats at: " << &search_stats_ << " size of persistent_queue: " << search_stats_->persistent_queue_of_nodes.size() << " threshold=" << search_stats_->AuxEngineThreshold;
+  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE
+       << "Search called with search_stats at: " << &search_stats_
+       << " size of persistent_queue: " << search_stats_->persistent_queue_of_nodes.size()
+       << " threshold=" << search_stats_->AuxEngineThreshold;
   auxengine_mutex_.unlock();
 }
 
@@ -597,14 +601,19 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
       !bestmove_is_sent_) {
 
     auxengine_stopped_mutex_.lock();
-    if(!auxengine_stopped_){
-      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "MaybeTriggerStop() Stopping the A/B helper Start";
-      auxengine_os_ << "stop" << std::endl; // stop the A/B helper
-      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "MaybeTriggerStop() Stopping the A/B helper Stop";
-      auxengine_stopped_ = true;
-    } else {
-      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "MaybeTriggerStop() Not stopping the A/B helper.";      
+    // Check the status for each thread, and act accordingly
+    // use thread_counter instead of params_.GetAuxEngineInstances() because the threads may not be in place yet.
+    for(int i = 0; i < search_stats_->thread_counter; i++){
+      if(!auxengine_stopped_[i]){
+	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "MaybeTriggerStop() Stopping the A/B helper Start for thread=" << i << " Start.";
+	*vector_of_opstreams[i] << "stop" << std::endl; // stop the A/B helper
+	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "MaybeTriggerStop() Stopping the A/B helper for thread=" << i << " Stop.";
+	auxengine_stopped_[i] = true;
+      } else {
+	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "MaybeTriggerStop() Not stopping the A/B helper for thread=" << i << ".";      	
+      }
     }
+    
     auxengine_stopped_mutex_.unlock();
     if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Called AuxMaybeEnqueueNode() " << number_of_times_called_AuxMaybeEnqueueNode_ << " times.";
 
@@ -1607,6 +1616,7 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation() {
       int source = search_->search_stats_->source_of_PVs.front();
       search_->search_stats_->source_of_PVs.pop();
       // Finished modifying the queue, release the lock, so that others can add more PVs to it while we extend nodes.
+      // long unsigned int queue_size = search_->fast_track_extend_and_evaluate_queue_.size();
       search_->fast_track_extend_and_evaluate_queue_mutex_.unlock(); // unlock
       
       if (params_.GetAuxEngineVerbosity() >= 9) {	
@@ -1618,15 +1628,21 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation() {
 	  }
 	  LOGFILE << "Length of PV to add: " << my_moves.size() << " my_moves: " << s << " source: " << source;	    
 	}
-	PreExtendTreeAndFastTrackForNNEvaluation_inner(search_->root_node_, my_moves, 0, 0, source);
-	if (params_.GetAuxEngineVerbosity() >= 9) {
+      }
+      PreExtendTreeAndFastTrackForNNEvaluation_inner(search_->root_node_, my_moves, 0, 0, source);
+      if (params_.GetAuxEngineVerbosity() >= 9) {
 	  LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: finished one iteration, size of minibatch_ is " << minibatch_.size();
 	  LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: finished one iteration, size of fast_track_extend_and_evaluate_queue_ is " << search_->fast_track_extend_and_evaluate_queue_.size();
-	}
       }
 
       // While we extended nodes, someone could have added more PV:s, update our belief about the current size of the queue.
       search_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before reading from it again.
+
+      // // Check if we are truly multithreaded:
+      // if(queue_size < search_->fast_track_extend_and_evaluate_queue_.size()){
+      // 	LOGFILE << "Someone added a PV while we added an earlier one, isn't that great?";
+      // }
+      
     } // Always end the while loop with the lock on. 
   }
   search_->fast_track_extend_and_evaluate_queue_mutex_.unlock(); // unlock

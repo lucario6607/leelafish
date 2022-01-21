@@ -153,8 +153,14 @@ class SearchParams {
   std::string GetAuxEngineOptions() const {
     return options_.Get<std::string>(kAuxEngineOptionsId);
   }
+  std::string GetAuxEngineOptionsOnRoot() const {
+    return options_.Get<std::string>(kAuxEngineOptionsOnRootId);
+  }
   int GetAuxEngineThreshold() const {
     return options_.Get<int>(kAuxEngineThresholdId);
+  }
+  int GetAuxEngineInstances() const {
+    return options_.Get<int>(kAuxEngineInstancesId);
   }
   int GetAuxEngineTime() const {
     return options_.Get<int>(kAuxEngineTimeId);
@@ -230,8 +236,10 @@ class SearchParams {
   static const OptionId kMaxCollisionVisitsScalingPowerId;
   static const OptionId kAuxEngineFileId;
   static const OptionId kAuxEngineOptionsId;
+  static const OptionId kAuxEngineOptionsOnRootId;
   static const OptionId kAuxEngineThresholdId;
   static const OptionId kAuxEngineMaxDepthId;
+  static const OptionId kAuxEngineInstancesId;  
   static const OptionId kAuxEngineTimeId;
   static const OptionId kAuxEngineVerbosityId;
   static const OptionId kMoveSelectionVisitsScalingPowerId;

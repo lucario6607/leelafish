@@ -60,6 +60,12 @@ class Search {
     std::queue<int> source_of_queued_nodes; // 0 = SearchWorker::PickNodesToExtendTask(); 1 = Search::DoBackupUpdateSingleNode(); 2 = Search::SendUciInfo(); 3 = Search::AuxEngineWorker() node is root
     std::queue<int> source_of_PVs; // 0 = SearchWorker::PickNodesToExtendTask(); 1 = Search::DoBackupUpdateSingleNode(); 2 = Search::SendUciInfo(); 3 = Search::AuxEngineWorker() node is root. Whenever k (=1 or more) PVs are created from a single node, add k elements with value source from source_of_queued_nodes into this queue.
 
+    std::vector<std::shared_ptr<boost::process::ipstream>> vector_of_ipstreams;
+    std::vector<std::shared_ptr<boost::process::opstream>> vector_of_opstreams;
+    std::vector<std::shared_ptr<boost::process::child>> vector_of_children;
+    std::vector<bool> vector_of_auxengine_ready_;
+    int thread_counter;
+
     std::queue<Node*> nodes_added_by_the_helper; // this is useful only to assess how good the different sources are, it does not affect search
     std::queue<int> source_of_added_nodes; // 0 = SearchWorker::PickNodesToExtendTask(); 1 = Search::DoBackupUpdateSingleNode(); 2 = Search::SendUciInfo(); 3 = Search::AuxEngineWorker() node is root
     int AuxEngineTime; // dynamic version of the UCI option AuxEngineTime.
@@ -209,6 +215,9 @@ class Search {
   const std::chrono::steady_clock::time_point start_time_;
   std::queue<Node*>* persistent_queue_of_nodes_;
   const std::shared_ptr<SearchStats> search_stats_;
+  // const std::shared_ptr<boost::process::ipstream> my_ip_ptr_;
+  // std::shared_ptr<boost::process::opstream> my_op_ptr_;
+  // const std::shared_ptr<boost::process::child> my_children_ptr_;      
   int64_t initial_visits_;
   // root_is_in_dtz_ must be initialized before root_move_filter_.
   bool root_is_in_dtz_ = false;
@@ -245,9 +254,18 @@ class Search {
   void OpenAuxEngine();
   void AuxEngineWorker();
   void AuxWait();
-  void DoAuxEngine(Node* n);
+  void DoAuxEngine(Node* n, int index);
   void AuxEncode_and_Enqueue(std::string pv_as_string, int depth, ChessBoard my_board, Position my_position, std::vector<lczero::Move> my_moves_from_the_white_side, int source, bool require_some_depth);
   void AuxUpdateP(Node* n, std::vector<uint16_t> pv_moves, int ply, ChessBoard my_board);
+
+  // static std::vector<std::shared_ptr<boost::process::ipstream>> vector_of_ipstreams;
+  // static std::vector<std::shared_ptr<boost::process::opstream>> vector_of_opstreams;
+  // static std::vector<std::shared_ptr<boost::process::child>> vector_of_children;
+  static std::vector<std::unique_ptr<boost::process::ipstream>> vector_of_ipstreams;
+  static std::vector<std::unique_ptr<boost::process::opstream>> vector_of_opstreams;
+  static std::vector<std::unique_ptr<boost::process::child>> vector_of_children;
+  static std::vector<bool> vector_of_auxengine_ready_;
+  
   static boost::process::ipstream auxengine_is_;
   static boost::process::opstream auxengine_os_;
   static boost::process::child auxengine_c_;
@@ -260,9 +278,9 @@ class Search {
   int64_t auxengine_total_dur = 0;
   int64_t auxengine_num_evals = 0;
   int64_t auxengine_num_updates = 0;
-  // when stop_ is issued, only send "Stop" via UCI to once, either from MaybeTriggerStop() or from DoAuxNode().
-  bool auxengine_stopped_ = true;
+  // when stop_ is issued, only send "Stop" via UCI to once, either from MaybeTriggerStop() or from DoAuxNode(). Once for every thread.
   std::mutex auxengine_stopped_mutex_;
+  std::vector<bool> auxengine_stopped_;
 
   friend class SearchWorker;
 };

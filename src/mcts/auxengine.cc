@@ -48,14 +48,30 @@ std::uniform_real_distribution<float> distribution(1,0);
 
 namespace lczero {
 
-boost::process::ipstream Search::auxengine_is_;
-boost::process::opstream Search::auxengine_os_;
-boost::process::child Search::auxengine_c_;
-bool Search::auxengine_ready_ = false;
+  // Plan to go multithreaded with 1 + k instances of the helper
+  // make 1 + k instances of auxengine_is_, auxengine_os_ and auxengine_c_
+  // rewrite DoAuxEngine() so that it takes pointers to the specific auxengine_is_ and auxengine_os_.
+  // Let the first thread/instance continuosly query root.
+  // Let the subsequent threads/instances pop nodes from the shared queue and process them as they see fit.
+
+  // std::vector<std::shared_ptr<boost::process::ipstream>> Search::vector_of_ipstreams;
+  // std::vector<std::shared_ptr<boost::process::opstream>> Search::vector_of_opstreams;
+  // std::vector<std::shared_ptr<boost::process::child>> Search::vector_of_children;
+  std::vector<std::unique_ptr<boost::process::ipstream>> Search::vector_of_ipstreams;
+  std::vector<std::unique_ptr<boost::process::opstream>> Search::vector_of_opstreams;
+  std::vector<std::unique_ptr<boost::process::child>> Search::vector_of_children;
+  std::vector<bool> Search::vector_of_auxengine_ready_;
+
+// boost::process::ipstream Search::auxengine_is_;
+// boost::process::opstream Search::auxengine_os_;
+// boost::process::child Search::auxengine_c_;
+// bool Search::auxengine_ready_ = false;
 
 void Search::OpenAuxEngine() REQUIRES(threads_mutex_) {
   if (params_.GetAuxEngineFile() == "") return;
-  auxengine_threads_.emplace_back([this]() { AuxEngineWorker(); });
+  for(int i = 0; i < params_.GetAuxEngineInstances(); i++){
+    auxengine_threads_.emplace_back([this]() { AuxEngineWorker(); });
+  }
 }
 
 void SearchWorker::AuxMaybeEnqueueNode(Node* n, int source) {
@@ -72,8 +88,8 @@ void SearchWorker::AuxMaybeEnqueueNode(Node* n, int source) {
   //     << search_->search_stats_->persistent_queue_of_nodes.size()
   //     << " The source was " << source;
 
+  search_->auxengine_mutex_.lock();    
   n->SetAuxEngineMove(0xfffe); // magic for pending
-  search_->auxengine_mutex_.lock();  
   search_->search_stats_->persistent_queue_of_nodes.push(n);
   search_->search_stats_->source_of_queued_nodes.push(source);
   search_->auxengine_mutex_.unlock();
@@ -82,11 +98,93 @@ void SearchWorker::AuxMaybeEnqueueNode(Node* n, int source) {
 }
 
 void Search::AuxEngineWorker() {
-  if (!auxengine_ready_) {
 
-    auxengine_c_ = boost::process::child(params_.GetAuxEngineFile(), boost::process::std_in < auxengine_os_, boost::process::std_out > auxengine_is_);
+  // aquire a lock auxengine_mutex_ to ensure no other thread is
+  // modifying search_stats_->thread_counter or the vector_of_*
+  // vectors
+  auxengine_mutex_.lock();
+
+  // Find out which thread we are by reading the thread_counter, and
+  // then increment the thread counter.
+  long unsigned int our_index = search_stats_->thread_counter;
+  search_stats_->thread_counter++;
+
+  // no longer needed debugging code
+  // // If this is not the first move, check that the auxengine is running.
+  // if(vector_of_auxengine_ready_.size() > our_index){
+  //   if(vector_of_children[our_index]->running()){
+
+  //     // Can we still talk to the engine after a move was made?
+  //     *vector_of_opstreams[our_index] << "isready" << std::endl;
+  //     std::string line;
+  //     while(std::getline(*vector_of_ipstreams[our_index], line)) {
+  //     	LOGFILE << line;
+  //     	std::istringstream iss(line);
+  //     	std::string token;
+  //     	iss >> token >> std::ws;
+  //     	if (token == "readyok") {
+  // 	  LOGFILE << "Recieved readyok for thread: " << our_index << " Sent readyok to opstream at: " << &vector_of_opstreams[our_index];
+  //     	  break;
+  // 	}
+  //     }
+  //   } else {
+  //     LOGFILE << "Thread: " << our_index << " Found the auxengine not running at: " << &vector_of_children[our_index];      
+  //   }
+  // }
+
+  // if our_index is greater than the size of the vectors then we now for sure we must start/initiate everything.
+  // if our_index + 1 is equal to, or smaller than the size of the vectors then we can safely check search_stats_->vector_of_auxengine_ready_[our_index] and act if it is false
+
+  if(our_index + 1 > vector_of_auxengine_ready_.size() ||
+     (
+      our_index + 1 <= vector_of_auxengine_ready_.size() &&
+      ! vector_of_auxengine_ready_[our_index]
+     )
+   ) {
+  
+    // if(our_index + 1 > vector_of_auxengine_ready_.size()) {
+    //   LOGFILE << "Initiating stuff for thread number: " << our_index << " since our_index + 1= " << our_index + 1 << " is more than vector_of_auxengine_ready_.size() which is " << vector_of_auxengine_ready_.size();
+    // } else {
+    //   LOGFILE << "Initiating stuff for thread number: " << our_index << " since our_index + 1= " << our_index + 1 << " is less than or equal to vector_of_auxengine_ready_.size() which is " << vector_of_auxengine_ready_.size() << " and the value of vector_of_auxengine_ready_[our_index] is false.";
+    // }
+
+    // populate the global vectors. 
+
+    // Need dynamically allocated objects, a local variable will die at the end of this block.
+    // A unique_ptr must be moved, it cannot be copied
+    // TODO: try emplace_back(new boost::process:ipstream)
+
+    std::unique_ptr<boost::process::ipstream> my_ip_ptr_(new boost::process::ipstream);
+    vector_of_ipstreams.push_back(std::move(my_ip_ptr_));
+    // LOGFILE << "Thread " << our_index << " has ipstream at: " << &vector_of_ipstreams[our_index];
+
+    std::unique_ptr<boost::process::opstream> my_op_ptr_(new boost::process::opstream);
+    vector_of_opstreams.push_back(std::move(my_op_ptr_));
+    // LOGFILE << "Thread " << our_index << " has opstream at: " << &vector_of_opstreams[our_index];    
+
+    std::unique_ptr<boost::process::child> my_child_ptr_(new boost::process::child);
+    vector_of_children.push_back(std::move(my_child_ptr_));
+    // LOGFILE << "Thread " << our_index << " about to start the helper engine";
+    
+    *vector_of_children[our_index] = boost::process::child(params_.GetAuxEngineFile(), boost::process::std_in < *vector_of_opstreams[our_index], boost::process::std_out > *vector_of_ipstreams[our_index]);
+
+    vector_of_auxengine_ready_.push_back(false);
+
+    auxengine_stopped_mutex_.lock();  
+    auxengine_stopped_.push_back(true);
+    auxengine_stopped_mutex_.unlock();      
+    
     {
-      std::istringstream iss(params_.GetAuxEngineOptions());
+      std::string bar;
+      // Thread zero uses a different parameter than the other threads
+      if(our_index == 0){
+	// at root, infinite exploration
+	bar = params_.GetAuxEngineOptionsOnRoot();
+      } else {
+	// in-tree time based evaluations
+	bar = params_.GetAuxEngineOptions();
+      }
+      std::istringstream iss(bar);
       std::string token;
       while(std::getline(iss, token, '=')) {
         std::ostringstream oss;
@@ -94,12 +192,12 @@ void Search::AuxEngineWorker() {
         std::getline(iss, token, ';');
         oss << " value " << token;
         LOGFILE << oss.str();
-        auxengine_os_ << oss.str() << std::endl;
+	*vector_of_opstreams[our_index] << oss.str() << std::endl;
       }
-      auxengine_os_ << "uci" << std::endl;
+      *vector_of_opstreams[our_index] << "uci" << std::endl;      
     }
     std::string line;
-    while(std::getline(auxengine_is_, line)) {
+    while(std::getline(*vector_of_ipstreams[our_index], line)) {
       LOGFILE << line;
       std::istringstream iss(line);
       std::string token;
@@ -114,155 +212,172 @@ void Search::AuxEngineWorker() {
             std::ostringstream oss;
             oss << "setoption name SyzygyPath value " << syzygy_tb_->get_paths();
             LOGFILE << oss.str();
-            auxengine_os_ << oss.str() << std::endl;
+            *vector_of_opstreams[our_index] << oss.str() << std::endl;	    
           }
         }
       }
     }
-    auxengine_ready_ = true;
-    // Initiate some stats and parameters (Threshold needs to be set
-    // earlier, see search() in search.cc)
+    vector_of_auxengine_ready_[our_index] = true;
 
-    // Since we take a lock below, have to check if search is stopped.
-    if (stop_.load(std::memory_order_acquire)){
-      return;
-    }
+    if(our_index == 0){
+      // Initiate some stats and parameters (Threshold needs to be set
+      // earlier, see search() in search.cc)
 
-    auxengine_mutex_.lock(); // play nice with Search::MaybeTriggerStop()    
-    search_stats_->AuxEngineTime = params_.GetAuxEngineTime();
-    search_stats_->Number_of_nodes_added_by_AuxEngine = 0;
-    search_stats_->Total_number_of_nodes = 0;
-    if(search_stats_->New_Game){
-      search_stats_->New_Game = false;
-    }
-    auxengine_mutex_.unlock(); // play nice with Search::MaybeTriggerStop()        
-  } else {
-    auxengine_mutex_.lock(); // play nice with Search::MaybeTriggerStop()        
-    if(search_stats_->New_Game){
+      // Since we take a lock below, have to check if search is stopped.
+      if (stop_.load(std::memory_order_acquire)){
+	return;
+      }
       search_stats_->AuxEngineTime = params_.GetAuxEngineTime();
-      search_stats_->AuxEngineThreshold = params_.GetAuxEngineThreshold();
-      search_stats_->Total_number_of_nodes = 0;
       search_stats_->Number_of_nodes_added_by_AuxEngine = 0;
-      search_stats_->size_of_queue_at_start = 0;      
-
-      // Occasionally, we get a new pointer to search_stats_ between games (not sure when/why that happens). When it happens, make sure the queues are empty, or the purging of them can fail.
-      // Normally, everything works fine without the next four lines.
-      search_stats_->persistent_queue_of_nodes = {}; 
-      search_stats_->nodes_added_by_the_helper = {};
-      search_stats_->source_of_PVs = {};
-      search_stats_->source_of_queued_nodes = {};
-      search_stats_->source_of_added_nodes = {};
-      
-      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE
-    << "Resetting AuxEngine parameters because a new game started.";
-      search_stats_->New_Game = false;
+      search_stats_->Total_number_of_nodes = 0;
+      if(search_stats_->New_Game){
+	search_stats_->New_Game = false;
+      }
     }
     
-    // purge obsolete nodes in the queue, if any. The even elements are the actual nodes, the odd elements is root if the preceding even element is still a relevant node.
-    LOGFILE << "search_stats_->size_of_queue_at_start:" << search_stats_->size_of_queue_at_start;
-    if(search_stats_->final_purge_run){
-      LOGFILE << "Unexpected order of execution, skipping primary purging, since final purging has already taken place";
-    } else {
-      if(search_stats_->size_of_queue_at_start > 0){
-	int number_of_nodes_before_purging = int(search_stats_->size_of_queue_at_start / 2);
-	std::queue<Node*> persistent_queue_of_nodes_temp_;
-	for(int i=0; i < search_stats_->size_of_queue_at_start; i = i + 2){
-	  Node * n = search_stats_->persistent_queue_of_nodes.front();
-	  search_stats_->persistent_queue_of_nodes.pop();
-	  Node * n_parent = search_stats_->persistent_queue_of_nodes.front();
-	  search_stats_->persistent_queue_of_nodes.pop();
-	  if(n_parent == root_node_){
-	    // node is still relevant
-	    persistent_queue_of_nodes_temp_.push(n);
-	  }
-	}
-	// update search_stats_->persistent_queue_of_nodes
-	int my_size = persistent_queue_of_nodes_temp_.size();
-	for(int i=0; i < my_size; i++){      
-	  search_stats_->persistent_queue_of_nodes.push(persistent_queue_of_nodes_temp_.front());
-	  persistent_queue_of_nodes_temp_.pop();
-	}
-	if (params_.GetAuxEngineVerbosity() >= 5)
-	  LOGFILE << "Purged " << number_of_nodes_before_purging - search_stats_->persistent_queue_of_nodes.size()
-		  << " nodes from the query queue due to the move selected by the opponent. " << search_stats_->persistent_queue_of_nodes.size()
-		  << " nodes remain in the queue.";
-      }
-      
-      // Also purge stale nodes from the _added_ queue.
-      if(search_stats_->nodes_added_by_the_helper.size() > 0){
-	int number_of_nodes_before_purging = int(search_stats_->nodes_added_by_the_helper.size() / 2);
-	std::queue<Node*> nodes_added_by_the_helper_temp_;
-	long unsigned int my_size = search_stats_->nodes_added_by_the_helper.size();      
-	for(long unsigned int i=0; i < my_size; i = i + 2){
-	  Node * n = search_stats_->nodes_added_by_the_helper.front();
-	  search_stats_->nodes_added_by_the_helper.pop();
-	  Node * n_parent = search_stats_->nodes_added_by_the_helper.front();
-	  search_stats_->nodes_added_by_the_helper.pop();
-	  if(n_parent == root_node_){
-	    // node is still relevant
-	    nodes_added_by_the_helper_temp_.push(n);
-	  }
-	}
-	// update search_stats_->nodes_added_by_the_helper
-	my_size = nodes_added_by_the_helper_temp_.size();
-	for(long unsigned int i=0; i < my_size; i++){      
-	  search_stats_->nodes_added_by_the_helper.push(nodes_added_by_the_helper_temp_.front());
-	  nodes_added_by_the_helper_temp_.pop();
-	}
-	if (params_.GetAuxEngineVerbosity() >= 5)
-	  LOGFILE << "Purged " << number_of_nodes_before_purging - search_stats_->nodes_added_by_the_helper.size()
-		  << " stale nodes from the queue of nodes added by the auxillary helper due to the move seleted by the opponent. " << search_stats_->nodes_added_by_the_helper.size()
-		  << " nodes remain in the queue of nodes added by the auxillary helper.";
-      }
-    }
-  }
+  } else {
 
-  LOGFILE << "AuxEngineWorker() finished purging/initiating, will now check if root can be queued";
-  
-  // if there is no node in the queue and search is not stopped, then
-  // kickstart with the root node, no need to wait for it to get some
-  // amount of visits. Except if root is not yet expanded, or lacks
-  // edges for any other reason (e.g. being terminal), in which case
-  // we should wait.
+    // AuxEngine(s) were already started. If we are thread zero then (1) Purge the queue(s) and (2) kickstart root if the queue is empty.
 
-  if(!stop_.load(std::memory_order_acquire) &&
-     search_stats_->persistent_queue_of_nodes.size() == 0){
-    LOGFILE << "AuxEngineWorker() about to lock nodes_mutex_ in order to read root";
-    nodes_mutex_.lock(); // write lock
-    if(root_node_->GetNumEdges() > 0){
-      // root is extended.
-      LOGFILE << "AuxEngineWorker() about to enqueue root";      
-      root_node_->SetAuxEngineMove(0xfffe); // mark root as pending and queue it
-      search_stats_->persistent_queue_of_nodes.push(root_node_);
-      search_stats_->source_of_queued_nodes.push(3);
-      auxengine_cv_.notify_one();
-    }
-    nodes_mutex_.unlock(); // write unlock
-    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker queued root node because the queue was empty";
-  }
+    if(our_index == 0){
+
+      if(search_stats_->New_Game){
+	search_stats_->AuxEngineTime = params_.GetAuxEngineTime();
+	search_stats_->AuxEngineThreshold = params_.GetAuxEngineThreshold();
+	search_stats_->Total_number_of_nodes = 0;
+	search_stats_->Number_of_nodes_added_by_AuxEngine = 0;
+	search_stats_->size_of_queue_at_start = 0;      
+
+	// Occasionally, we get a new pointer to search_stats_ between games (not sure when/why that happens). When it happens, make sure the queues are empty, or the purging of them can fail.
+	// Normally, everything works fine without the next four lines.
+	search_stats_->persistent_queue_of_nodes = {}; 
+	search_stats_->nodes_added_by_the_helper = {};
+	search_stats_->source_of_PVs = {};
+	search_stats_->source_of_queued_nodes = {};
+	search_stats_->source_of_added_nodes = {};
+	
+	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Resetting AuxEngine parameters because a new game started.";
+	search_stats_->New_Game = false;
+      }
+    
+      // purge obsolete nodes in the queue, if any. The even elements are the actual nodes, the odd elements is root if the preceding even element is still a relevant node.
+      LOGFILE << "search_stats_->size_of_queue_at_start:" << search_stats_->size_of_queue_at_start;
+      if(search_stats_->final_purge_run){
+	LOGFILE << "Either we are not the first thread, or there is an unexpected order of execution, and final purging has already taken place. In either case not purging now.";
+      } else {
+	if(search_stats_->size_of_queue_at_start > 0){
+	  int number_of_nodes_before_purging = int(search_stats_->size_of_queue_at_start / 2);
+	  std::queue<Node*> persistent_queue_of_nodes_temp_;
+	  for(int i=0; i < search_stats_->size_of_queue_at_start; i = i + 2){
+	    Node * n = search_stats_->persistent_queue_of_nodes.front();
+	    search_stats_->persistent_queue_of_nodes.pop();
+	    Node * n_parent = search_stats_->persistent_queue_of_nodes.front();
+	    search_stats_->persistent_queue_of_nodes.pop();
+	    if(n_parent == root_node_){
+	      // node is still relevant
+	      persistent_queue_of_nodes_temp_.push(n);
+	    }
+	  }
+	  // update search_stats_->persistent_queue_of_nodes
+	  int my_size = persistent_queue_of_nodes_temp_.size();
+	  for(int i=0; i < my_size; i++){      
+	    search_stats_->persistent_queue_of_nodes.push(persistent_queue_of_nodes_temp_.front());
+	    persistent_queue_of_nodes_temp_.pop();
+	  }
+	  if (params_.GetAuxEngineVerbosity() >= 5)
+	    LOGFILE << "Purged " << number_of_nodes_before_purging - search_stats_->persistent_queue_of_nodes.size()
+		    << " nodes from the query queue due to the move selected by the opponent. " << search_stats_->persistent_queue_of_nodes.size()
+		    << " nodes remain in the queue.";
+	}
+	
+	// Also purge stale nodes from the _added_ queue.
+	if(search_stats_->nodes_added_by_the_helper.size() > 0){
+	  int number_of_nodes_before_purging = int(search_stats_->nodes_added_by_the_helper.size() / 2);
+	  std::queue<Node*> nodes_added_by_the_helper_temp_;
+	  long unsigned int my_size = search_stats_->nodes_added_by_the_helper.size();      
+	  for(long unsigned int i=0; i < my_size; i = i + 2){
+	    Node * n = search_stats_->nodes_added_by_the_helper.front();
+	    search_stats_->nodes_added_by_the_helper.pop();
+	    Node * n_parent = search_stats_->nodes_added_by_the_helper.front();
+	    search_stats_->nodes_added_by_the_helper.pop();
+	    if(n_parent == root_node_){
+	      // node is still relevant
+	      nodes_added_by_the_helper_temp_.push(n);
+	    }
+	  }
+	  // update search_stats_->nodes_added_by_the_helper
+	  my_size = nodes_added_by_the_helper_temp_.size();
+	  for(long unsigned int i=0; i < my_size; i++){      
+	    search_stats_->nodes_added_by_the_helper.push(nodes_added_by_the_helper_temp_.front());
+	    nodes_added_by_the_helper_temp_.pop();
+	  }
+	  if (params_.GetAuxEngineVerbosity() >= 5)
+	    LOGFILE << "Purged " << number_of_nodes_before_purging - search_stats_->nodes_added_by_the_helper.size()
+		    << " stale nodes from the queue of nodes added by the auxillary helper due to the move seleted by the opponent. " << search_stats_->nodes_added_by_the_helper.size()
+		    << " nodes remain in the queue of nodes added by the auxillary helper.";
+	}
+      }
+
+      // More stuff for thread zero only
+      LOGFILE << "AuxEngineWorker() finished purging/initiating, will now check if root can be queued";
+      search_stats_->final_purge_run; // Inform other threads that they should not purge.
   
+    } // Thread zero
+
+    // This vector does not survive between moves, so it has to be
+    // instantiated every move.
+    auxengine_stopped_mutex_.lock();  
+    auxengine_stopped_.push_back(true);
+    auxengine_stopped_mutex_.unlock();      
+    
+  } // Not starting from scratch
+    
   auxengine_mutex_.unlock();
 
-  LOGFILE << "AuxEngineWorker() about to enter final while loop.";  
+  // LOGFILE << "AuxEngineWorker() id=" << our_index << " about to enter final while loop.";
   
   Node* n;
   while (!stop_.load(std::memory_order_acquire)) {
-    {
-  	std::unique_lock<std::mutex> lock(auxengine_mutex_);
-  	// Wait until there's some work to compute.
-  	auxengine_cv_.wait(lock, [&] { return stop_.load(std::memory_order_acquire) || !search_stats_->persistent_queue_of_nodes.empty(); });
-  	if (stop_.load(std::memory_order_acquire)) {
-  	  auxengine_mutex_.unlock(); 	
-  	  break;
-  	}
+    // if we are thread zero, don't read from the queue, just take the root node.
+    if(our_index == 0){
+      // kickstart with the root node, no need to wait for it to get some
+      // amount of visits. Except if root is not yet expanded, or lacks
+      // edges for any other reason (e.g. being terminal), in which case
+      // we should wait.
 
+      // LOGFILE << "AuxEngineWorker() thread 0 about to lock nodes_mutex_ in order to read root";
+      nodes_mutex_.lock_shared(); // only neede to read GetNumEdges(), SetAuxEngineMove(0xfffe) is already protected by auxengine_mutex_.lock();
+      if(root_node_->GetNumEdges() > 0){
+	// root is extended.
+	root_node_->SetAuxEngineMove(0xfffe); // mark root as pending and queue it
+	nodes_mutex_.unlock_shared(); // unlock the read-lock on noodes.
+	auxengine_mutex_.lock();
+    	search_stats_->source_of_queued_nodes.push(3); // inform DoAuxEngine() -> where this node came from.
+	auxengine_mutex_.unlock(); // We will be in DoAuxEngine() until search is stopped, so unlock first.
+	// LOGFILE << "AuxEngineWorker() about to DoAuxEngine() for the root node";      
+	DoAuxEngine(root_node_, our_index);
+	// LOGFILE << "AuxWorker thread 0 is finished with the root node.";
+      } else {
+	nodes_mutex_.unlock_shared(); // unlock, nothing more to do until root gets edges.
+      }
+    } else {
+      // Not thread 0
+      {
+	std::unique_lock<std::mutex> lock(auxengine_mutex_);
+	// Wait until there's some work to compute.
+	auxengine_cv_.wait(lock, [&] { return stop_.load(std::memory_order_acquire) || !search_stats_->persistent_queue_of_nodes.empty(); });
+	if (stop_.load(std::memory_order_acquire)) {
+	  auxengine_mutex_.unlock(); // does this work with unique_lock ??
+	  LOGFILE << "AuxWorker(), thread " << our_index << " caught a stop signal, will break the while loop now.";
+	  break;
+	}
 	n = search_stats_->persistent_queue_of_nodes.front();
 	search_stats_->persistent_queue_of_nodes.pop();
-	
-    } // release lock
-    DoAuxEngine(n);
-  }
-  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker done search search_stats_ at: " << &search_stats_ ;
+      } // release the lock
+      DoAuxEngine(n, our_index);    
+    } // end of not thread zero
+  } // end of while loop
+  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker thread " << our_index << " done.";
 }
 
   void Search::AuxEncode_and_Enqueue(std::string pv_as_string, int depth, ChessBoard my_board, Position my_position, std::vector<lczero::Move> my_moves_from_the_white_side, int source, bool require_some_depth) {
@@ -371,12 +486,11 @@ void Search::AuxEngineWorker() {
   // if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Returning from AuxEncode_and_Enqueue()";
 
 }
-  
 
-void Search::DoAuxEngine(Node* n) {
+void Search::DoAuxEngine(Node* n, int index){
   // before trying to take a lock on nodes_mutex_, always check if search has stopped, in which case we return early
   if(stop_.load(std::memory_order_acquire)) {
-  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine caught a stop signal beforing doing anything.";
+    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine, thread " << index << " caught a stop signal beforing doing anything.";
     return;
   }
 
@@ -399,8 +513,6 @@ void Search::DoAuxEngine(Node* n) {
     }
     nodes_mutex_.unlock_shared();    
   }
-  // if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "DoAuxEngine calculated depth: " << depth;
-
   // // Since we take a lock below, have to check if search is stopped.
   // if (stop_.load(std::memory_order_acquire)){
   //   return;
@@ -482,16 +594,27 @@ void Search::DoAuxEngine(Node* n) {
   }
 
   auto auxengine_start_time = std::chrono::steady_clock::now();
-  auxengine_os_ << s << std::endl;
+  // auxengine_os_ << s << std::endl;
+  *vector_of_opstreams[index] << s << std::endl;  
 
-  // Better safe than sorry.
-  auxengine_mutex_.lock();  
-  auxengine_os_ << "go movetime " << search_stats_->AuxEngineTime << std::endl;
-  auxengine_mutex_.unlock();    
+  // // Better safe than sorry.
+  // auxengine_mutex_.lock();
+  // auxengine_os_ << "go movetime " << search_stats_->AuxEngineTime << std::endl;
+  if(index == 0){
+    LOGFILE << "Starting infinite query for thread 0";
+    LOGFILE << "opstream for thread 0 at: " << &vector_of_opstreams[index] ;    
+    *vector_of_opstreams[index] << "go infinite " << std::endl;
+  } else {
+    LOGFILE << "Starting time limited query for thread " << index;
+    LOGFILE << "opstream for thread " << index << " at: " << &vector_of_opstreams[index] ;        
+    *vector_of_opstreams[index] << "go movetime " << search_stats_->AuxEngineTime << std::endl;
+  }
+  // auxengine_mutex_.unlock();    
 
   auxengine_stopped_mutex_.lock();
-  if(auxengine_stopped_){
-    auxengine_stopped_ = false;    
+  if(auxengine_stopped_[index]){
+    LOGFILE << "Setting auxengine_stopped_ to false for thread " << index;
+    auxengine_stopped_[index] = false;    
   }
   auxengine_stopped_mutex_.unlock();
 
@@ -501,9 +624,10 @@ void Search::DoAuxEngine(Node* n) {
   std::string token;
   std::string my_token;  
   bool stopping = false;
-  while(std::getline(auxengine_is_, line)) {
+  // while(std::getline(auxengine_is_, line)) {  
+  while(std::getline(*vector_of_ipstreams[index], line)) {
     if (params_.GetAuxEngineVerbosity() >= 9) {
-      LOGFILE << "auxe:" << line;
+      LOGFILE << "thread: " << index << " auxe:" << line;
     }
 
     std::istringstream iss(line);
@@ -526,30 +650,30 @@ void Search::DoAuxEngine(Node* n) {
     if (!stopping) {
       stopping = stop_.load(std::memory_order_acquire);
       if (stopping) {
-	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine caught a stop signal 2.";	
+	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine(), thread=" << index << " caught a stop signal 2.";	
         // (unless someone else already has sent stop) send stop,
 	// stay in loop to get best response, otherwise it
         // will disturb the next iteration.
 	// only send stop if we are the first to detect that search has stopped.
 	auxengine_stopped_mutex_.lock();
-	if(!auxengine_stopped_){
-	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine() Stopping the A/B helper Start";
-	  auxengine_os_ << "stop" << std::endl; // stop the A/B helper
-	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine() Stopping the A/B helper Stop";
-	  auxengine_stopped_ = true;
+	if(!auxengine_stopped_[index]){
+	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine(), thread=" << index << " Stopping the A/B helper Start";
+	  // auxengine_os_ << "stop" << std::endl; // stop the A/B helper
+	  *vector_of_opstreams[index] << "stop" << std::endl; // stop the A/B helper	  
+	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine(), thread=" << index << " Stopping the A/B helper Stop";
+	  auxengine_stopped_[index] = true;
 	}
 	auxengine_stopped_mutex_.unlock();
       }
     }
   }
   if (stopping) {
-    // // Don't use results of a search that was stopped.
-    // if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "AUX Search was interrupted, the results will not be used";
+    // Don't use results of a search that was stopped.
     // Not because the are unreliable, but we simply want to shut down as fast as possible.
     return;
   }
   auxengine_stopped_mutex_.lock();
-  auxengine_stopped_ = true; // stopped means "not running". It does not mean it was stopped prematurely.
+  auxengine_stopped_[index] = true; // stopped means "not running". It does not mean it was stopped prematurely.
   auxengine_stopped_mutex_.unlock();
   
   if (params_.GetAuxEngineVerbosity() >= 9) {
@@ -560,7 +684,8 @@ void Search::DoAuxEngine(Node* n) {
     if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Empty PV, returning early from doAuxEngine().";
     return;
   }
-  if (!auxengine_c_.running()) {
+  // if (!auxengine_c_.running()) {  
+  if (! vector_of_children[index]->running()) {
     LOGFILE << "AuxEngine died!";
     throw Exception("AuxEngine died!");
   }
@@ -581,11 +706,9 @@ void Search::DoAuxEngine(Node* n) {
 }
 
 void Search::AuxWait() {  
-  if (params_.GetAuxEngineVerbosity() >= 7) LOGFILE << "AuxWait start for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
-
   while (!auxengine_threads_.empty()) {
     Mutex::Lock lock(threads_mutex_);
-    if (params_.GetAuxEngineVerbosity() >= 7) LOGFILE << "AuxWait about to pop threads";
+    if (params_.GetAuxEngineVerbosity() >= 7) LOGFILE << "AuxWait about to pop AuxEngineWorker() threads";
     auxengine_threads_.back().join();
     auxengine_threads_.pop_back();
   }
@@ -616,7 +739,6 @@ void Search::AuxWait() {
   auxengine_mutex_.unlock();  
   
   // Empty the other queue.
-  // LOGFILE << "About to aquire a lock using fast_track_extend_and_evaluate_queue_mutex_ AuxWait()";      
   fast_track_extend_and_evaluate_queue_mutex_.lock();
   if(fast_track_extend_and_evaluate_queue_.empty()){
     if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "No PVs in the fast_track_extend_and_evaluate_queue";
@@ -629,7 +751,6 @@ void Search::AuxWait() {
     if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Number of PV:s in the queue=" << fast_track_extend_and_evaluate_queue_.size();
   }
   fast_track_extend_and_evaluate_queue_mutex_.unlock();  
-  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxWait done";
   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxWait done search_stats_ at: " << &search_stats_;
 }
 

@@ -54,18 +54,10 @@ namespace lczero {
   // Let the first thread/instance continuosly query root.
   // Let the subsequent threads/instances pop nodes from the shared queue and process them as they see fit.
 
-  // std::vector<std::shared_ptr<boost::process::ipstream>> Search::vector_of_ipstreams;
-  // std::vector<std::shared_ptr<boost::process::opstream>> Search::vector_of_opstreams;
-  // std::vector<std::shared_ptr<boost::process::child>> Search::vector_of_children;
   std::vector<std::unique_ptr<boost::process::ipstream>> Search::vector_of_ipstreams;
   std::vector<std::unique_ptr<boost::process::opstream>> Search::vector_of_opstreams;
   std::vector<std::unique_ptr<boost::process::child>> Search::vector_of_children;
   std::vector<bool> Search::vector_of_auxengine_ready_;
-
-// boost::process::ipstream Search::auxengine_is_;
-// boost::process::opstream Search::auxengine_os_;
-// boost::process::child Search::auxengine_c_;
-// bool Search::auxengine_ready_ = false;
 
 void Search::OpenAuxEngine() REQUIRES(threads_mutex_) {
   if (params_.GetAuxEngineFile() == "") return;
@@ -104,33 +96,13 @@ void Search::AuxEngineWorker() {
   // vectors
   auxengine_mutex_.lock();
 
-  // Find out which thread we are by reading the thread_counter, and
-  // then increment the thread counter.
+  // Find out which thread we are by reading the thread_counter.
+
+  // Don't increment the thread_counter before all global vectors are
+  // initiated, or MaybeTriggerStop() in search.cc will try to write
+  // to uninitiated adresses.
+  
   long unsigned int our_index = search_stats_->thread_counter;
-  search_stats_->thread_counter++;
-
-  // no longer needed debugging code
-  // // If this is not the first move, check that the auxengine is running.
-  // if(vector_of_auxengine_ready_.size() > our_index){
-  //   if(vector_of_children[our_index]->running()){
-
-  //     // Can we still talk to the engine after a move was made?
-  //     *vector_of_opstreams[our_index] << "isready" << std::endl;
-  //     std::string line;
-  //     while(std::getline(*vector_of_ipstreams[our_index], line)) {
-  //     	LOGFILE << line;
-  //     	std::istringstream iss(line);
-  //     	std::string token;
-  //     	iss >> token >> std::ws;
-  //     	if (token == "readyok") {
-  // 	  LOGFILE << "Recieved readyok for thread: " << our_index << " Sent readyok to opstream at: " << &vector_of_opstreams[our_index];
-  //     	  break;
-  // 	}
-  //     }
-  //   } else {
-  //     LOGFILE << "Thread: " << our_index << " Found the auxengine not running at: " << &vector_of_children[our_index];      
-  //   }
-  // }
 
   // if our_index is greater than the size of the vectors then we now for sure we must start/initiate everything.
   // if our_index + 1 is equal to, or smaller than the size of the vectors then we can safely check search_stats_->vector_of_auxengine_ready_[our_index] and act if it is false
@@ -142,32 +114,15 @@ void Search::AuxEngineWorker() {
      )
    ) {
   
-    // if(our_index + 1 > vector_of_auxengine_ready_.size()) {
-    //   LOGFILE << "Initiating stuff for thread number: " << our_index << " since our_index + 1= " << our_index + 1 << " is more than vector_of_auxengine_ready_.size() which is " << vector_of_auxengine_ready_.size();
-    // } else {
-    //   LOGFILE << "Initiating stuff for thread number: " << our_index << " since our_index + 1= " << our_index + 1 << " is less than or equal to vector_of_auxengine_ready_.size() which is " << vector_of_auxengine_ready_.size() << " and the value of vector_of_auxengine_ready_[our_index] is false.";
-    // }
-
     // populate the global vectors. 
+    vector_of_ipstreams.emplace_back(new boost::process::ipstream);
+    vector_of_opstreams.emplace_back(new boost::process::opstream);
+    vector_of_children.emplace_back(new boost::process::child);
 
-    // Need dynamically allocated objects, a local variable will die at the end of this block.
-    // A unique_ptr must be moved, it cannot be copied
-    // TODO: try emplace_back(new boost::process:ipstream)
-
-    std::unique_ptr<boost::process::ipstream> my_ip_ptr_(new boost::process::ipstream);
-    vector_of_ipstreams.push_back(std::move(my_ip_ptr_));
-    // LOGFILE << "Thread " << our_index << " has ipstream at: " << &vector_of_ipstreams[our_index];
-
-    std::unique_ptr<boost::process::opstream> my_op_ptr_(new boost::process::opstream);
-    vector_of_opstreams.push_back(std::move(my_op_ptr_));
-    // LOGFILE << "Thread " << our_index << " has opstream at: " << &vector_of_opstreams[our_index];    
-
-    std::unique_ptr<boost::process::child> my_child_ptr_(new boost::process::child);
-    vector_of_children.push_back(std::move(my_child_ptr_));
-    // LOGFILE << "Thread " << our_index << " about to start the helper engine";
-    
+    // Start the helper
     *vector_of_children[our_index] = boost::process::child(params_.GetAuxEngineFile(), boost::process::std_in < *vector_of_opstreams[our_index], boost::process::std_out > *vector_of_ipstreams[our_index]);
 
+    // Record that we have started, so that we can skip this on the next invocation.
     vector_of_auxengine_ready_.push_back(false);
 
     auxengine_stopped_mutex_.lock();  
@@ -331,10 +286,11 @@ void Search::AuxEngineWorker() {
     auxengine_stopped_mutex_.unlock();      
     
   } // Not starting from scratch
+
+  // now that auxengine_stopped_[x] is initiated, we can safely increase the thread_counter.
+  search_stats_->thread_counter++;
     
   auxengine_mutex_.unlock();
-
-  // LOGFILE << "AuxEngineWorker() id=" << our_index << " about to enter final while loop.";
   
   Node* n;
   while (!stop_.load(std::memory_order_acquire)) {

@@ -604,8 +604,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     this_tread_triggered_stop = true;
     auxengine_stopped_mutex_.lock();
     // Check the status for each thread, and act accordingly
-    // use thread_counter instead of params_.GetAuxEngineInstances() because the threads may not be in place yet.
-    for(int i = 0; i < search_stats_->thread_counter; i++){
+    for(long unsigned int i = 0; i < auxengine_stopped_.size() ; i++){
       if(!auxengine_stopped_[i]){
 	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "MaybeTriggerStop() Stopping the A/B helper Start for thread=" << i << " Start.";
 	*vector_of_opstreams[i] << "stop" << std::endl; // stop the A/B helper
@@ -631,14 +630,18 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 
     // Make sure all AuxEngineWorker() threads are done before start purging the queue
     // TODO use wait/interrupts instead of polling.
+    int max_iterations_to_wait = 4;
+    int iteration_counter = 0;
     auxengine_mutex_.lock();
     using namespace std::chrono_literals;
-    while(search_stats_->thread_counter > 0){
+    while(search_stats_->thread_counter > 0 &&
+	  iteration_counter < max_iterations_to_wait){
       auxengine_mutex_.unlock();
       // wait
       if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "MaybeTriggerStop() waiting for all AuxEngineWorker() threads to be finished before purging the persistent queue based on the move we selected.";
       std::this_thread::sleep_for(250ms);      
-      auxengine_mutex_.lock();      
+      auxengine_mutex_.lock();
+      iteration_counter++;
     } // lock if not evaluated and lock at exit
 
     // Store the size of the queue, for possible adjustment of threshold and time

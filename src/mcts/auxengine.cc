@@ -295,6 +295,7 @@ void Search::AuxEngineWorker() {
   auxengine_mutex_.unlock();
   
   Node* n;
+  bool not_yet_notified = true;
   while (!stop_.load(std::memory_order_acquire)) {
     // if we are thread zero, don't read from the queue, just take the root node.
     if(our_index == 0){
@@ -320,6 +321,11 @@ void Search::AuxEngineWorker() {
       }
     } else {
       // Not thread 0
+      if (not_yet_notified &&
+	  params_.GetAuxEngineVerbosity() >= 5){
+	LOGFILE << "AuxEngineWorker() thread: " << our_index << " entered main loop.";
+	not_yet_notified = false;
+      }
       {
 	std::unique_lock<std::mutex> lock(auxengine_mutex_);
 	// Wait until there's some work to compute.
@@ -339,8 +345,8 @@ void Search::AuxEngineWorker() {
   // Decrement the thread counter so that purge in search.cc does not start before all threads are done.
   auxengine_mutex_.lock();
   search_stats_->thread_counter--;
-  auxengine_mutex_.unlock();  
-  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker thread " << our_index << " done.";
+  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker thread " << our_index << " done. The thread counter is now " << search_stats_->thread_counter;
+  auxengine_mutex_.unlock();
 }
 
   void Search::AuxEncode_and_Enqueue(std::string pv_as_string, int depth, ChessBoard my_board, Position my_position, std::vector<lczero::Move> my_moves_from_the_white_side, int source, bool require_some_depth) {
@@ -348,8 +354,9 @@ void Search::AuxEngineWorker() {
 
   // Quit early if search has stopped
  if(stop_.load(std::memory_order_acquire)) {
-   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Quitting early from AuxEncode_and_Enqueue() since search has stopped.";
-   return;
+   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Would have quit early from AuxEncode_and_Enqueue() since search has stopped, but decided to take the risk and go on.";   
+   // if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Quitting early from AuxEncode_and_Enqueue() since search has stopped.";
+   // return;
  }
 
   std::istringstream iss(pv_as_string);  
@@ -401,6 +408,7 @@ void Search::AuxEngineWorker() {
 	if (!Move::ParseMove(&m, pv, !flip)) {	
 	  if (params_.GetAuxEngineVerbosity() >= 1) LOGFILE << "Ignoring bad pv move: " << pv;
 	  break;
+	  // why not return instead of break?
 	}
 	// convert to Modern encoding, update the board and the position
 	// For the conversion never flip the board. Only flip the board when you need to apply the move!
@@ -440,8 +448,10 @@ void Search::AuxEngineWorker() {
     }
     fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before starting to modify it
     fast_track_extend_and_evaluate_queue_.push(my_moves_from_the_white_side);
-    search_stats_->source_of_PVs.push(source);
     fast_track_extend_and_evaluate_queue_mutex_.unlock();
+    auxengine_mutex_.lock();
+    search_stats_->source_of_PVs.push(source);
+    auxengine_mutex_.unlock();
   }
 
 }
@@ -560,6 +570,7 @@ void Search::DoAuxEngine(Node* n, int index){
     if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Starting infinite query from root node for thread 0";
     *vector_of_opstreams[index] << "go infinite " << std::endl;
   } else {
+    // This is a read of search_stats_ without a lock, is that OK?
     *vector_of_opstreams[index] << "go movetime " << search_stats_->AuxEngineTime << std::endl;
   }
 
@@ -620,11 +631,12 @@ void Search::DoAuxEngine(Node* n, int index){
 	auxengine_stopped_mutex_.unlock();
       } else {
 	// Since we are not stopping, do the ordinary stuff
-
 	// parse and queue PV:s even before the search is finished, if the depth is high enough (which will be determined by AuxEncode_and_Enqueue().
 	if (token == "info") {
 	  // Since we (possibly) now create multiple PV:s per node, also (possibly) add a source.
+	  auxengine_mutex_.lock(); // take a lock even if we are just reading
 	  int source = search_stats_->source_of_queued_nodes.front();
+	  auxengine_mutex_.unlock();
 	  AuxEncode_and_Enqueue(line, depth, my_board, my_position, my_moves_from_the_white_side, source, true);
 	}
       }
@@ -656,7 +668,6 @@ void Search::DoAuxEngine(Node* n, int index){
     if (params_.GetAuxEngineVerbosity() >= 1) LOGFILE << "Empty PV, returning early from doAuxEngine().";
     return;
   }
-  // if (!auxengine_c_.running()) {  
   if (! vector_of_children[index]->running()) {
     LOGFILE << "AuxEngine died!";
     throw Exception("AuxEngine died!");

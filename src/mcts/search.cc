@@ -185,7 +185,7 @@ Search::Search(const NodeTree& tree, Network* network,
   if (search_stats_->AuxEngineThreshold == 0){
     search_stats_->AuxEngineThreshold = params_.GetAuxEngineThreshold();
   }
-  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE
+  if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE
        << "Search called with search_stats at: " << &search_stats_
        << " size of persistent_queue: " << search_stats_->persistent_queue_of_nodes.size()
        << " threshold=" << search_stats_->AuxEngineThreshold;
@@ -596,10 +596,12 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     }
   }
 
+  bool this_tread_triggered_stop = false;
   // If we are the first to see that stop is needed.
   if (stop_.load(std::memory_order_acquire) && ok_to_respond_bestmove_ &&
       !bestmove_is_sent_) {
 
+    this_tread_triggered_stop = true;
     auxengine_stopped_mutex_.lock();
     // Check the status for each thread, and act accordingly
     // use thread_counter instead of params_.GetAuxEngineInstances() because the threads may not be in place yet.
@@ -615,7 +617,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     }
     
     auxengine_stopped_mutex_.unlock();
-    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Called AuxMaybeEnqueueNode() " << number_of_times_called_AuxMaybeEnqueueNode_ << " times.";
+    if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Called AuxMaybeEnqueueNode() " << number_of_times_called_AuxMaybeEnqueueNode_ << " times.";
 
     SendUciInfo();
     EnsureBestMoveKnown();
@@ -634,15 +636,15 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     while(search_stats_->thread_counter > 0){
       auxengine_mutex_.unlock();
       // wait
-      LOGFILE << "MaybeTriggerStop() waiting for all AuxEngineWorker() threads to be finished before purging the persistent queue based on the move we selected.";
+      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "MaybeTriggerStop() waiting for all AuxEngineWorker() threads to be finished before purging the persistent queue based on the move we selected.";
       std::this_thread::sleep_for(250ms);      
       auxengine_mutex_.lock();      
     } // lock if not evaluated and lock at exit
 
-    // Store the size of the queue, for adjustment of threshold and time
+    // Store the size of the queue, for possible adjustment of threshold and time
     search_stats_->AuxEngineQueueSizeAtMoveSelectionTime = search_stats_->persistent_queue_of_nodes.size();
     search_stats_->Total_number_of_nodes = search_stats_->Total_number_of_nodes + root_node_->GetN();
-    if(params_.GetAuxEngineVerbosity() >= 5) LOGFILE << search_stats_->AuxEngineQueueSizeAtMoveSelectionTime << " nodes left in the query queue at move selection time. Threshold used: " << search_stats_->AuxEngineThreshold;
+    if(params_.GetAuxEngineVerbosity() >= 4) LOGFILE << search_stats_->AuxEngineQueueSizeAtMoveSelectionTime << " nodes left in the query queue at move selection time. Threshold used: " << search_stats_->AuxEngineThreshold;
 
     // purge obsolete nodes in the helper queues. Note that depending on the move of the opponent more nodes can become obsolete.
     if(search_stats_->persistent_queue_of_nodes.size() > 0){
@@ -680,7 +682,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     	persistent_queue_of_nodes_temp.pop();
       }
       
-      if(params_.GetAuxEngineVerbosity() >= 5)
+      if(params_.GetAuxEngineVerbosity() >= 4)
 	LOGFILE << "Purged " << my_size - size_kept
 	      << " nodes in the query queue based the selected move: " << final_bestmove_.as_string()
 	      << ". " << size_kept << " nodes remain.";
@@ -770,9 +772,8 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
   root_node_->CancelScoreUpdate(0);
 
   // Confirm that this function exited successfully when stop was triggered.
-  if (stop_.load(std::memory_order_acquire) && ok_to_respond_bestmove_ &&
-      !bestmove_is_sent_) {
-    LOGFILE << "Finished MaybeTriggerStop(): stopped search and successfully shutdown.";
+  if (this_tread_triggered_stop) {
+    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Finished MaybeTriggerStop(): stopped search and successfully shutdown.";
   }
 
 }
@@ -1187,10 +1188,13 @@ void Search::Stop() {
   Mutex::Lock lock(counters_mutex_);
   ok_to_respond_bestmove_ = true;
   FireStopInternal();
-  LOGFILE << "Stopping search due to `stop` uci command.";
-  LOGFILE << "from Stop() About to enter AuxWait()";
+  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Stopping search due to `stop` uci command.";
+  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "from Stop() About to enter AuxWait()";
   AuxWait();  // This can take some time during which we are not ready to respond readyok, so for now increase timemargin.
-  LOGFILE << "from Stop() AuxWait() returned";  
+  // When would AuxWait() actually take long time? if MaybetriggerStop() somehow fails to detect that a AuxEngingeWorker-thread actually should be stopped,
+  // or if sending `stop` to the helper engine somehow does not actually stop it, but both of these should never happen, so I don't think AuxWait() takes
+  // substantial time any more. The AuxEngineWorker threads should all be idle at this point (since MaybeTriggerStop() now waits for them before exiting).
+  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "from Stop() AuxWait() returned";  
 
 }
 
@@ -1224,7 +1228,7 @@ void Search::CancelSharedCollisions() REQUIRES(nodes_mutex_) {
 }
 
 Search::~Search() {
-  LOGFILE << "about to destroy search.";
+  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "About to destroy search.";
   Abort();
   Wait();
   {
@@ -1313,7 +1317,6 @@ void SearchWorker::RunTasks(int tid) {
 }
 
 void SearchWorker::ExecuteOneIteration() {
-  // LOGFILE << "ExecuteOneIteration() started for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
   // 1. Initialize internal structures.
   InitializeIteration(search_->network_->NewComputation());
 
@@ -1347,11 +1350,9 @@ void SearchWorker::ExecuteOneIteration() {
   GatherMinibatch2();
   task_count_.store(-1, std::memory_order_release);
   search_->backend_waiting_counter_.fetch_add(1, std::memory_order_relaxed);
-  // LOGFILE << "GatherMinibatch2() finished for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
 
   // 2b. Collect collisions.
   CollectCollisions();
-  // LOGFILE << "CollectCollisions() finished for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
 
   // 3. Prefetch into cache.
   MaybePrefetchIntoCache();
@@ -1359,27 +1360,19 @@ void SearchWorker::ExecuteOneIteration() {
   if (params_.GetMaxConcurrentSearchers() != 0) {
     search_->pending_searchers_.fetch_add(1, std::memory_order_acq_rel);
   }
-  // LOGFILE << "MaybePrefetchIntoCache() finished for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
 
   // 4. Run NN computation.
-  // LOGFILE << "NN computation started for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());  
   RunNNComputation();
-  // LOGFILE << "NN computation finished 0 for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());  
   search_->backend_waiting_counter_.fetch_add(-1, std::memory_order_relaxed);
-
-  // LOGFILE << "NN computation finished 1 for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
 
   // 5. Retrieve NN computations (and terminal values) into nodes.
   FetchMinibatchResults();
-  // LOGFILE << "FetchMinibatchResults() finished for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
 
   // 6. Propagate the new nodes' information to all their parents in the tree.
   DoBackupUpdate();
-  // LOGFILE << "DoBackupUpdate() finished, now on to UpdateCounters() for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
 
   // 7. Update the Search's status and progress information.
   UpdateCounters();
-  // LOGFILE << "UpdateCounters() finished for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
 
   // If required, waste time to limit nps.
   if (params_.GetNpsLimit() > 0) {
@@ -1400,7 +1393,6 @@ void SearchWorker::ExecuteOneIteration() {
       }
     }
   }
-  // LOGFILE << "ExecuteOneIteration() finished for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
 }
 
 // 1. Initialize internal structures.

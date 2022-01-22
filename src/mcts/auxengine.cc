@@ -354,9 +354,9 @@ void Search::AuxEngineWorker() {
 
   // Quit early if search has stopped
  if(stop_.load(std::memory_order_acquire)) {
-   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Would have quit early from AuxEncode_and_Enqueue() since search has stopped, but decided to take the risk and go on.";   
-   // if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Quitting early from AuxEncode_and_Enqueue() since search has stopped.";
-   // return;
+   // if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Would have quit early from AuxEncode_and_Enqueue() since search has stopped, but decided to take the risk and go on.";   
+   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Quitting early from AuxEncode_and_Enqueue() since search has stopped.";
+   return;
  }
 
   std::istringstream iss(pv_as_string);  
@@ -446,14 +446,20 @@ void Search::AuxEngineWorker() {
 	LOGFILE << "debug info: length of PV given to helper engine: " << depth << " position given to helper: " << s << " white to move at root, length of my_moves_from_the_white_side " << my_moves_from_the_white_side.size() << " my_moves_from_the_white_side: " << debug_string;
       }
     }
-    fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before starting to modify it
-    fast_track_extend_and_evaluate_queue_.push(my_moves_from_the_white_side);
-    fast_track_extend_and_evaluate_queue_mutex_.unlock();
-    auxengine_mutex_.lock();
-    search_stats_->source_of_PVs.push(source);
-    auxengine_mutex_.unlock();
-  }
 
+    // Because some threads doesn't shut down fast enough, e.g. because they are loading endgame databases.
+    // If final purge has already taken place, then discard this PV
+    if(! search_stats_->final_purge_run) {
+      fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before starting to modify it
+      fast_track_extend_and_evaluate_queue_.push(my_moves_from_the_white_side);
+      fast_track_extend_and_evaluate_queue_mutex_.unlock();
+      auxengine_mutex_.lock();
+      search_stats_->source_of_PVs.push(source);
+      auxengine_mutex_.unlock();
+    } else {
+      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Discarding a nice PV because the final purge was already made, so this PV could be irrelevant already";
+    }
+  }
 }
 
 void Search::DoAuxEngine(Node* n, int index){
@@ -556,16 +562,44 @@ void Search::DoAuxEngine(Node* n, int index){
   if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "add pv=" << s << " from root position: " << GetFen(played_history_.Last());
   s = "position fen " + GetFen(my_position);
   
+  // // Before starting, test if stop_ is set
+  // if (stop_.load(std::memory_order_acquire)) {
+  //   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine caught a stop signal 1.";
+  //   return;
+  // }
+
+  // auto auxengine_start_time = std::chrono::steady_clock::now();
+  // // auxengine_os_ << s << std::endl;
+  // *vector_of_opstreams[index] << s << std::endl;  
+
+  // if(index == 0){
+  //   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Starting infinite query from root node for thread 0";
+  //   *vector_of_opstreams[index] << "go infinite " << std::endl;
+  // } else {
+  //   // This is a read of search_stats_ without a lock, is that OK?
+  //   *vector_of_opstreams[index] << "go movetime " << search_stats_->AuxEngineTime << std::endl;
+  // }
+
+  // auxengine_stopped_mutex_.lock();
+  // if(auxengine_stopped_[index]){
+  //   if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "Setting auxengine_stopped_ to false for thread " << index;
+  //   auxengine_stopped_[index] = false;    
+  // }
+  // auxengine_stopped_mutex_.unlock();
+
+  // Can we do better?
+  // 1. Only start the engines if we can aquire the auxengine_stopped_mutex
+  // 2. Only send anything to the engines if we have aquired that mutex
+
+  auxengine_stopped_mutex_.lock();  
   // Before starting, test if stop_ is set
   if (stop_.load(std::memory_order_acquire)) {
     if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine caught a stop signal 1.";
+    auxengine_stopped_mutex_.unlock();
     return;
   }
-
+  *vector_of_opstreams[index] << s << std::endl;
   auto auxengine_start_time = std::chrono::steady_clock::now();
-  // auxengine_os_ << s << std::endl;
-  *vector_of_opstreams[index] << s << std::endl;  
-
   if(index == 0){
     if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Starting infinite query from root node for thread 0";
     *vector_of_opstreams[index] << "go infinite " << std::endl;
@@ -573,8 +607,6 @@ void Search::DoAuxEngine(Node* n, int index){
     // This is a read of search_stats_ without a lock, is that OK?
     *vector_of_opstreams[index] << "go movetime " << search_stats_->AuxEngineTime << std::endl;
   }
-
-  auxengine_stopped_mutex_.lock();
   if(auxengine_stopped_[index]){
     if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "Setting auxengine_stopped_ to false for thread " << index;
     auxengine_stopped_[index] = false;    
@@ -588,9 +620,10 @@ void Search::DoAuxEngine(Node* n, int index){
   std::string my_token;  
   bool stopping = false;
   bool second_stopping = false;  
-  // while(std::getline(auxengine_is_, line)) {  
+  bool second_stopping_notification = false;
   while(std::getline(*vector_of_ipstreams[index], line)) {
-    if (params_.GetAuxEngineVerbosity() >= 9) {
+    if (params_.GetAuxEngineVerbosity() >= 9 &&
+	!second_stopping_notification) {
       LOGFILE << "thread: " << index << " auxe:" << line;
     }
 
@@ -627,6 +660,8 @@ void Search::DoAuxEngine(Node* n, int index){
 	  *vector_of_opstreams[index] << "stop" << std::endl; // stop the A/B helper	  
 	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine(), thread=" << index << " Stopping the A/B helper Stop";
 	  auxengine_stopped_[index] = true;
+	} else {
+	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "MaybeTriggerStop() must have already sent stop to the engine for instance." << index;
 	}
 	auxengine_stopped_mutex_.unlock();
       } else {
@@ -641,13 +676,18 @@ void Search::DoAuxEngine(Node* n, int index){
 	}
       }
     } else {
-      if(!second_stopping){
-	if (params_.GetAuxEngineVerbosity() >= 1) LOGFILE << "We found that search is stopped, but the next line from the helper was not 'bestmove'. Weird! As a workaround send yet another stop";
-	// We were stopping already before going into this iteration, but the helper did not respond "bestmove", as it ought to have done. Send stop again
-	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine(), thread=" << index << " Stopping for the second time the A/B helper Start";
-	*vector_of_opstreams[index] << "stop" << std::endl; // stop the A/B helper	  
-	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine(), thread=" << index << " Stopping for the second time the A/B helper Stop";
-	second_stopping = true;
+      // Stopping is true, but did it happen before or after the helper sent its info line? Assume it was after, in which case the helper is all good.
+      if(second_stopping){
+	// No, this was definitely not the first iteration. If it was the second iteration, then act, otherwise just try again
+	if (params_.GetAuxEngineVerbosity() >= 1 &&
+	    !second_stopping_notification) {
+	  LOGFILE << "thread: " << index << " We found that search was stopped on the previous iteration, but the current line from the helper was not 'bestmove'. Probably the helper engine does not repond to stop until it has search for some minimum amount of time (like 10 ms). As a workaround send yet another stop";
+	  // We were stopping already before going into this iteration, but the helper did not respond "bestmove", as it ought to have done. Send stop again
+	  *vector_of_opstreams[index] << "stop" << std::endl; // stop the A/B helper	  
+	  second_stopping_notification = true;
+	}
+      } else {
+        second_stopping = true;
       }
     }
   }
@@ -688,13 +728,13 @@ void Search::DoAuxEngine(Node* n, int index){
 
 }
 
-void Search::AuxWait() {  
+void Search::AuxWait() {
   while (!auxengine_threads_.empty()) {
     Mutex::Lock lock(threads_mutex_);
-    if (params_.GetAuxEngineVerbosity() >= 7) LOGFILE << "AuxWait about to pop AuxEngineWorker() threads";
     auxengine_threads_.back().join();
     auxengine_threads_.pop_back();
   }
+  if (params_.GetAuxEngineVerbosity() >= 7) LOGFILE << "AuxWait finished shutting down AuxEngineWorker() threads.";
 
   auxengine_mutex_.lock();  
   search_stats_->Number_of_nodes_added_by_AuxEngine = search_stats_->Number_of_nodes_added_by_AuxEngine + auxengine_num_updates;

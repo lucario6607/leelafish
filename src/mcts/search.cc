@@ -627,7 +627,17 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     current_best_edge_ = EdgeAndNode();
     this_edge_has_higher_expected_q_than_the_most_visited_child = -1;
 
-    auxengine_mutex_.lock(); // play nice with Search::AuxEngineWorker()
+    // Make sure all AuxEngineWorker() threads are done before start purging the queue
+    // TODO use wait/interrupts instead of polling.
+    auxengine_mutex_.lock();
+    using namespace std::chrono_literals;
+    while(search_stats_->thread_counter > 0){
+      auxengine_mutex_.unlock();
+      // wait
+      LOGFILE << "MaybeTriggerStop() waiting for all AuxEngineWorker() threads to be finished before purging the persistent queue based on the move we selected.";
+      std::this_thread::sleep_for(250ms);      
+      auxengine_mutex_.lock();      
+    } // lock if not evaluated and lock at exit
 
     // Store the size of the queue, for adjustment of threshold and time
     search_stats_->AuxEngineQueueSizeAtMoveSelectionTime = search_stats_->persistent_queue_of_nodes.size();

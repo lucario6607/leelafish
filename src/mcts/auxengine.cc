@@ -594,7 +594,16 @@ void Search::DoAuxEngine(Node* n, int index){
 
     if (token == "bestmove") {
       iss >> token;
-      break;
+      if(token == "info"){
+	LOGFILE << "Hit a case of https://github.com/hans-ekbrand/lc0/issues/9";
+	// This is a case of https://github.com/hans-ekbrand/lc0/issues/9
+	// bestmove:info" indicates something is corrupted in the input stream.
+	// issue `stop`, stay in the loop and try another iteration.
+	// TODO: If the next iteration also fails, stop and restart the engine.
+	*vector_of_opstreams[index] << "stop" << std::endl;
+      } else {
+	break;
+      }
     }
     prev_line = line;
 

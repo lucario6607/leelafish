@@ -504,14 +504,24 @@ void Search::DoAuxEngine(Node* n, int index){
     if(depth > 0 &&
        depth > params_.GetAuxEngineMaxDepth() &&
        float(1.0f)/(depth) < sample){
-      // This is exactly what SearchWorker::AuxMaybeEnqueueNode() does, but we are in class Search:: now, so that function is not available.
-      int source = search_stats_->source_of_queued_nodes.front();
-      search_stats_->source_of_queued_nodes.pop();
-      search_stats_->persistent_queue_of_nodes.push(n);
-      search_stats_->source_of_queued_nodes.push(source);
-      auxengine_cv_.notify_one(); // unnecessary?
-      auxengine_mutex_.unlock();
-      return;
+      // Never add nodes to the queue after search has stopped or final purge is run
+      if(!stop_.load(std::memory_order_acquire) &&
+	 !search_stats_->final_purge_run){
+	// This is exactly what SearchWorker::AuxMaybeEnqueueNode() does, but we are in class Search:: now, so that function is not available.
+	int source = search_stats_->source_of_queued_nodes.front();
+	search_stats_->source_of_queued_nodes.pop();
+	search_stats_->persistent_queue_of_nodes.push(n);
+	search_stats_->source_of_queued_nodes.push(source);
+	auxengine_cv_.notify_one(); // unnecessary?
+	auxengine_mutex_.unlock();
+	return;
+      } else {
+	// just pop the source node, and unset pending so that the node can get picked up during next search.
+	search_stats_->source_of_queued_nodes.pop();
+	n->SetAuxEngineMove(0xffff);
+	auxengine_mutex_.unlock();
+	return;
+      }
     }
   }
   auxengine_mutex_.unlock();  
@@ -765,25 +775,6 @@ void Search::AuxWait() {
   search_stats_->Total_number_of_nodes = 0;
 
   long unsigned int my_size = search_stats_->persistent_queue_of_nodes.size();
-
-  if(search_stats_->AuxEngineQueueSizeAfterPurging * 2 < search_stats_->persistent_queue_of_nodes.size()){
-    int diff = search_stats_->persistent_queue_of_nodes.size() - search_stats_->AuxEngineQueueSizeAfterPurging * 2;
-    LOGFILE << "Someone sneaked in " << diff << " extra node(s) in the queue! ";
-    // someone sneaked in an extra node. Keep only search_stats_->AuxEngineQueueSizeAfterPurging items
-    std::queue<Node*> persistent_queue_of_nodes_temp_;
-    for(long unsigned int i=0; i < search_stats_->persistent_queue_of_nodes.size(); i++){
-      if(i < search_stats_->AuxEngineQueueSizeAfterPurging){
-	persistent_queue_of_nodes_temp_.push(search_stats_->persistent_queue_of_nodes.front());
-      }
-      search_stats_->persistent_queue_of_nodes.pop();
-    } // At this point search_stats_->persistent_queue_of_nodes is empty, and persistent_queue_of_nodes_temp_ only has the safe nodes. Move the node references back
-    int my_size = persistent_queue_of_nodes_temp_.size();
-    for(int i=0; i < my_size; i++){      
-      search_stats_->persistent_queue_of_nodes.push(persistent_queue_of_nodes_temp_.front());
-      persistent_queue_of_nodes_temp_.pop();
-    }
-    LOGFILE << "Sanity check: " << search_stats_->AuxEngineQueueSizeAfterPurging * 2 << " = " << search_stats_->persistent_queue_of_nodes.size();
-  }
 
   auxengine_mutex_.unlock();  
   

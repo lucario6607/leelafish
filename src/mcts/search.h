@@ -80,6 +80,7 @@ class Search {
     int size_of_queue_at_start; // used by Search::AuxEngineWorker() to decide how many node to check for purging at the start of each move. Without this, new nodes added by before the purge happened would cause a crash.
     int current_depth = 1;
     bool final_purge_run = false; // used by maybetriggerstop() to inform auxworker() that final purge happened before initial purge was started.
+    bool initial_purge_run = false; // used by AuxEngineWorker() to inform subsequent threads that they should immediately return.
     std::queue<Move*> temporary_queue_of_moves; // 
   };
 

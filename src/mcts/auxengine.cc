@@ -106,6 +106,13 @@ void Search::AuxEngineWorker() {
   
   long unsigned int our_index = search_stats_->thread_counter;
 
+  // If the first thread already has exited, then we should immediately return
+  if(our_index == 0 &&
+     search_stats_->initial_purge_run){
+    auxengine_mutex_.unlock();    
+    return;
+  }
+
   // if our_index is greater than the size of the vectors then we now for sure we must start/initiate everything.
   // if our_index + 1 is equal to, or smaller than the size of the vectors then we can safely check search_stats_->vector_of_auxengine_ready_[our_index] and act if it is false
 
@@ -279,7 +286,7 @@ void Search::AuxEngineWorker() {
 
       // More stuff for thread zero only
       if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker() finished purging/initiating, will now check if root can be queued";
-      search_stats_->final_purge_run; // Inform other threads that they should not purge.
+      search_stats_->initial_purge_run = true; // Inform other threads that they should not purge.
   
     } // Thread zero
 
@@ -773,7 +780,8 @@ void Search::AuxWait() {
   // Reset counters for the next move:
   search_stats_->Number_of_nodes_added_by_AuxEngine = 0;
   search_stats_->Total_number_of_nodes = 0;
-
+  search_stats_->initial_purge_run = false;
+  
   long unsigned int my_size = search_stats_->persistent_queue_of_nodes.size();
 
   auxengine_mutex_.unlock();  

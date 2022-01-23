@@ -70,23 +70,25 @@ void SearchWorker::AuxMaybeEnqueueNode(Node* n, int source) {
   // the caller (DoBackupUpdate()->DoBackupUpdateSingleNode()) has a lock on search_->nodes_mutex_, so no other thread will change n right now.
 
   // Since we take a lock below, have to check if search is stopped.
+  // No, the real reason is that we must not add nodes after purging has started.
   if (search_->stop_.load(std::memory_order_acquire)){
     return;
   }
 
-  // if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE
-  //     << "AuxMaybeEnqueueNode() picked node: " << n->DebugString() 
-  //     << " for the persistent_queue_of_nodes which has size: "
-  //     << search_->search_stats_->persistent_queue_of_nodes.size()
-  //     << " The source was " << source;
-
-  search_->auxengine_mutex_.lock();    
-  n->SetAuxEngineMove(0xfffe); // magic for pending
-  search_->search_stats_->persistent_queue_of_nodes.push(n);
-  search_->search_stats_->source_of_queued_nodes.push(source);
+  search_->auxengine_mutex_.lock();
+  // if purging has already happened, then do nothing
+  if(! search_->search_stats_->final_purge_run) {
+    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE
+      << "AuxMaybeEnqueueNode() picked node: " << n->DebugString() 
+      << " for the persistent_queue_of_nodes which has size: "
+      << search_->search_stats_->persistent_queue_of_nodes.size()
+      << " The source was " << source;
+    n->SetAuxEngineMove(0xfffe); // magic for pending
+    search_->search_stats_->persistent_queue_of_nodes.push(n);
+    search_->search_stats_->source_of_queued_nodes.push(source);
+    search_->auxengine_cv_.notify_one();
+  }
   search_->auxengine_mutex_.unlock();
-  search_->auxengine_cv_.notify_one();
-
 }
 
 void Search::AuxEngineWorker() {
@@ -349,14 +351,16 @@ void Search::AuxEngineWorker() {
   auxengine_mutex_.unlock();
 }
 
-  void Search::AuxEncode_and_Enqueue(std::string pv_as_string, int depth, ChessBoard my_board, Position my_position, std::vector<lczero::Move> my_moves_from_the_white_side, int source, bool require_some_depth) {
+  void Search::AuxEncode_and_Enqueue(std::string pv_as_string, int depth, ChessBoard my_board, Position my_position, std::vector<lczero::Move> my_moves_from_the_white_side, int source, bool require_some_depth, int thread) {
   // Take a string recieved from a helper engine, turn it into a vector with elements of type Move and queue that vector.
 
   // Quit early if search has stopped
  if(stop_.load(std::memory_order_acquire)) {
    // if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Would have quit early from AuxEncode_and_Enqueue() since search has stopped, but decided to take the risk and go on.";   
-   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Quitting early from AuxEncode_and_Enqueue() since search has stopped.";
+   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread " << thread << ": Quitting early from AuxEncode_and_Enqueue() since search has stopped.";
    return;
+ } else {
+   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread " << thread << ": AuxEncode_and_Enqueue() Accepting task since search is not stopped.";   
  }
 
   std::istringstream iss(pv_as_string);  
@@ -449,16 +453,17 @@ void Search::AuxEngineWorker() {
 
     // Because some threads doesn't shut down fast enough, e.g. because they are loading endgame databases.
     // If final purge has already taken place, then discard this PV
+    auxengine_mutex_.lock();
     if(! search_stats_->final_purge_run) {
       fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before starting to modify it
       fast_track_extend_and_evaluate_queue_.push(my_moves_from_the_white_side);
       fast_track_extend_and_evaluate_queue_mutex_.unlock();
-      auxengine_mutex_.lock();
       search_stats_->source_of_PVs.push(source);
-      auxengine_mutex_.unlock();
+      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread " << thread << ": Added a PV.";
     } else {
-      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Discarding a nice PV because the final purge was already made, so this PV could be irrelevant already";
+      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread " << thread << ": Discarding a nice PV because the final purge was already made, so this PV could be irrelevant already.";
     }
+    auxengine_mutex_.unlock();
   }
 }
 
@@ -672,7 +677,7 @@ void Search::DoAuxEngine(Node* n, int index){
 	  auxengine_mutex_.lock(); // take a lock even if we are just reading
 	  int source = search_stats_->source_of_queued_nodes.front();
 	  auxengine_mutex_.unlock();
-	  AuxEncode_and_Enqueue(line, depth, my_board, my_position, my_moves_from_the_white_side, source, true);
+	  AuxEncode_and_Enqueue(line, depth, my_board, my_position, my_moves_from_the_white_side, source, true, index);
 	}
       }
     } else {
@@ -718,13 +723,13 @@ void Search::DoAuxEngine(Node* n, int index){
       .count();
   auxengine_total_dur += auxengine_dur;
   auxengine_num_evals++;
-  
+
   auxengine_mutex_.lock();
   int source = search_stats_->source_of_queued_nodes.front();
   search_stats_->source_of_queued_nodes.pop();
   auxengine_mutex_.unlock();
   
-  AuxEncode_and_Enqueue(prev_line, depth, my_board, my_position, my_moves_from_the_white_side, source, false);  
+  AuxEncode_and_Enqueue(prev_line, depth, my_board, my_position, my_moves_from_the_white_side, source, false, index);  
 
 }
 
@@ -759,6 +764,27 @@ void Search::AuxWait() {
   search_stats_->Number_of_nodes_added_by_AuxEngine = 0;
   search_stats_->Total_number_of_nodes = 0;
 
+  long unsigned int my_size = search_stats_->persistent_queue_of_nodes.size();
+
+  if(search_stats_->AuxEngineQueueSizeAfterPurging * 2 < search_stats_->persistent_queue_of_nodes.size()){
+    int diff = search_stats_->persistent_queue_of_nodes.size() - search_stats_->AuxEngineQueueSizeAfterPurging * 2;
+    LOGFILE << "Someone sneaked in " << diff << " extra node(s) in the queue! ";
+    // someone sneaked in an extra node. Keep only search_stats_->AuxEngineQueueSizeAfterPurging items
+    std::queue<Node*> persistent_queue_of_nodes_temp_;
+    for(long unsigned int i=0; i < search_stats_->persistent_queue_of_nodes.size(); i++){
+      if(i < search_stats_->AuxEngineQueueSizeAfterPurging){
+	persistent_queue_of_nodes_temp_.push(search_stats_->persistent_queue_of_nodes.front());
+      }
+      search_stats_->persistent_queue_of_nodes.pop();
+    } // At this point search_stats_->persistent_queue_of_nodes is empty, and persistent_queue_of_nodes_temp_ only has the safe nodes. Move the node references back
+    int my_size = persistent_queue_of_nodes_temp_.size();
+    for(int i=0; i < my_size; i++){      
+      search_stats_->persistent_queue_of_nodes.push(persistent_queue_of_nodes_temp_.front());
+      persistent_queue_of_nodes_temp_.pop();
+    }
+    LOGFILE << "Sanity check: " << search_stats_->AuxEngineQueueSizeAfterPurging * 2 << " = " << search_stats_->persistent_queue_of_nodes.size();
+  }
+
   auxengine_mutex_.unlock();  
   
   // Empty the other queue.
@@ -774,7 +800,7 @@ void Search::AuxWait() {
     if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Number of PV:s in the queue=" << fast_track_extend_and_evaluate_queue_.size();
   }
   fast_track_extend_and_evaluate_queue_mutex_.unlock();  
-  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxWait done search_stats_ at: " << &search_stats_;
+  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxWait done search_stats_ at: " << &search_stats_ << " size of queue is: " << my_size;
 }
 
 }  // namespace lczero

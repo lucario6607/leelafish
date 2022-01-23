@@ -628,6 +628,8 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     current_best_edge_ = EdgeAndNode();
     this_edge_has_higher_expected_q_than_the_most_visited_child = -1;
 
+    auxengine_mutex_.lock();    
+
     // Store the size of the queue, for possible adjustment of threshold and time
     search_stats_->AuxEngineQueueSizeAtMoveSelectionTime = search_stats_->persistent_queue_of_nodes.size();
     search_stats_->Total_number_of_nodes = search_stats_->Total_number_of_nodes + root_node_->GetN();
@@ -672,7 +674,8 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
       if(params_.GetAuxEngineVerbosity() >= 4)
 	LOGFILE << "Purged " << my_size - size_kept
 	      << " nodes in the query queue based the selected move: " << final_bestmove_.as_string()
-	      << ". " << size_kept << " nodes remain.";
+		<< ". " << size_kept << " nodes remain. Sanity check size is " << search_stats_->persistent_queue_of_nodes.size();
+      search_stats_->AuxEngineQueueSizeAfterPurging = size_kept;
     }
 
     // For now avoid checking since it seems it occasionally crashes for unknown reasons.

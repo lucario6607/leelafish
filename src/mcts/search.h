@@ -73,6 +73,7 @@ class Search {
     unsigned long long int Number_of_nodes_added_by_AuxEngine; // all nodes ever added by the auxillary engine.
     int AuxEngineThreshold; // dynamic version of the UCI option AuxEngineThreshold.
     int AuxEngineQueueSizeAtMoveSelectionTime;
+    long unsigned int AuxEngineQueueSizeAfterPurging;
     Move ponder_move; // the move predicted by search().
     float q; // the expected q based on the predicted move.
     bool New_Game = false; // used by EngineController::NewGame in engine.cc to inform search that a new game has started, so it can re-initiate AuxEngineTime to the value given by UCI
@@ -255,7 +256,7 @@ class Search {
   void AuxEngineWorker();
   void AuxWait();
   void DoAuxEngine(Node* n, int index);
-  void AuxEncode_and_Enqueue(std::string pv_as_string, int depth, ChessBoard my_board, Position my_position, std::vector<lczero::Move> my_moves_from_the_white_side, int source, bool require_some_depth);
+  void AuxEncode_and_Enqueue(std::string pv_as_string, int depth, ChessBoard my_board, Position my_position, std::vector<lczero::Move> my_moves_from_the_white_side, int source, bool require_some_depth, int thread);
   void AuxUpdateP(Node* n, std::vector<uint16_t> pv_moves, int ply, ChessBoard my_board);
 
   // static std::vector<std::shared_ptr<boost::process::ipstream>> vector_of_ipstreams;

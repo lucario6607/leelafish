@@ -182,7 +182,8 @@ Search::Search(const NodeTree& tree, Network* network,
   search_stats_->size_of_queue_at_start = search_stats_->persistent_queue_of_nodes.size();
   search_stats_->final_purge_run = false;
   search_stats_->thread_counter = 0;  
-  if (search_stats_->AuxEngineThreshold == 0){
+  if (search_stats_->AuxEngineThreshold == 0 &&
+      params_.GetAuxEngineInstances() > 1){
     search_stats_->AuxEngineThreshold = params_.GetAuxEngineThreshold();
   }
   if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE
@@ -2800,7 +2801,8 @@ void SearchWorker::DoBackupUpdateSingleNode(
 
     // Not taking a lock here since it would be expensive AuxEngineThreshold is never adjusted during search anyway.
 
-    if(n->GetN() >= (uint32_t) search_->search_stats_->AuxEngineThreshold &&
+    if(search_->search_stats_->AuxEngineThreshold > 0 &&
+       n->GetN() >= (uint32_t) search_->search_stats_->AuxEngineThreshold &&
        n->GetAuxEngineMove() == 0xffff &&
       !n->IsTerminal() &&
        n->HasChildren() &&

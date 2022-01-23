@@ -209,7 +209,12 @@ void Search::AuxEngineWorker() {
 
       if(search_stats_->New_Game){
 	search_stats_->AuxEngineTime = params_.GetAuxEngineTime();
-	search_stats_->AuxEngineThreshold = params_.GetAuxEngineThreshold();
+	// Automatically inactivate the queueing machinery if there is only one instance. Could save some time in ultra-bullet, or be good in high end systems.
+	if(params_.GetAuxEngineInstances() == 1){
+	  search_stats_->AuxEngineThreshold = 0;
+	} else  {
+	  search_stats_->AuxEngineThreshold = params_.GetAuxEngineThreshold();
+	}
 	search_stats_->Total_number_of_nodes = 0;
 	search_stats_->Number_of_nodes_added_by_AuxEngine = 0;
 	search_stats_->size_of_queue_at_start = 0;      

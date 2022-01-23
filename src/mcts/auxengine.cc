@@ -500,37 +500,37 @@ void Search::DoAuxEngine(Node* n, int index){
     }
     nodes_mutex_.unlock_shared();    
   }
-  // // Since we take a lock below, have to check if search is stopped.
-  // if (stop_.load(std::memory_order_acquire)){
-  //   return;
-  // }
-  // if there is no node in the queue then accept unconditionally.
+
   auxengine_mutex_.lock();
-  if (search_stats_->persistent_queue_of_nodes.size() > 0){
+  // Never add nodes to the queue after search has stopped or final purge is run
+  if(stop_.load(std::memory_order_acquire) ||
+     search_stats_->final_purge_run){
+    // just pop the source node, and unset pending so that the node can get picked up during next search.
+    search_stats_->source_of_queued_nodes.pop();
+    n->SetAuxEngineMove(0xffff);
+    auxengine_mutex_.unlock();
+    return;
+  }
+
+  if (search_stats_->persistent_queue_of_nodes.size() > 0){ // if there is no node in the queue then accept unconditionally.
     float sample = distribution(generator);
     if(depth > 0 &&
        depth > params_.GetAuxEngineMaxDepth() &&
        float(1.0f)/(depth) < sample){
-      // Never add nodes to the queue after search has stopped or final purge is run
-      if(!stop_.load(std::memory_order_acquire) &&
-	 !search_stats_->final_purge_run){
-	// This is exactly what SearchWorker::AuxMaybeEnqueueNode() does, but we are in class Search:: now, so that function is not available.
-	int source = search_stats_->source_of_queued_nodes.front();
-	search_stats_->source_of_queued_nodes.pop();
-	search_stats_->persistent_queue_of_nodes.push(n);
-	search_stats_->source_of_queued_nodes.push(source);
-	auxengine_cv_.notify_one(); // unnecessary?
-	auxengine_mutex_.unlock();
-	return;
-      } else {
-	// just pop the source node, and unset pending so that the node can get picked up during next search.
-	search_stats_->source_of_queued_nodes.pop();
-	n->SetAuxEngineMove(0xffff);
-	auxengine_mutex_.unlock();
-	return;
-      }
+      // This is exactly what SearchWorker::AuxMaybeEnqueueNode() does, but we are in class Search:: now, so that function is not available.
+      int source = search_stats_->source_of_queued_nodes.front();
+      search_stats_->source_of_queued_nodes.pop();
+      search_stats_->persistent_queue_of_nodes.push(n);
+      search_stats_->source_of_queued_nodes.push(source);
+      auxengine_cv_.notify_one(); // unnecessary?
+      auxengine_mutex_.unlock();
+      return;
     }
   }
+
+  // while we have this lock, also read the current value of search_stats_->AuxEngineTime, which is needed later
+  int AuxEngineTime = search_stats_->AuxEngineTime;
+  
   auxengine_mutex_.unlock();  
   
   if(depth > 0 &&
@@ -584,32 +584,6 @@ void Search::DoAuxEngine(Node* n, int index){
   if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "add pv=" << s << " from root position: " << GetFen(played_history_.Last());
   s = "position fen " + GetFen(my_position);
   
-  // // Before starting, test if stop_ is set
-  // if (stop_.load(std::memory_order_acquire)) {
-  //   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine caught a stop signal 1.";
-  //   return;
-  // }
-
-  // auto auxengine_start_time = std::chrono::steady_clock::now();
-  // // auxengine_os_ << s << std::endl;
-  // *vector_of_opstreams[index] << s << std::endl;  
-
-  // if(index == 0){
-  //   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Starting infinite query from root node for thread 0";
-  //   *vector_of_opstreams[index] << "go infinite " << std::endl;
-  // } else {
-  //   // This is a read of search_stats_ without a lock, is that OK?
-  //   *vector_of_opstreams[index] << "go movetime " << search_stats_->AuxEngineTime << std::endl;
-  // }
-
-  // auxengine_stopped_mutex_.lock();
-  // if(auxengine_stopped_[index]){
-  //   if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "Setting auxengine_stopped_ to false for thread " << index;
-  //   auxengine_stopped_[index] = false;    
-  // }
-  // auxengine_stopped_mutex_.unlock();
-
-  // Can we do better?
   // 1. Only start the engines if we can aquire the auxengine_stopped_mutex
   // 2. Only send anything to the engines if we have aquired that mutex
 
@@ -626,8 +600,7 @@ void Search::DoAuxEngine(Node* n, int index){
     if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Starting infinite query from root node for thread 0";
     *vector_of_opstreams[index] << "go infinite " << std::endl;
   } else {
-    // This is a read of search_stats_ without a lock, is that OK?
-    *vector_of_opstreams[index] << "go movetime " << search_stats_->AuxEngineTime << std::endl;
+    *vector_of_opstreams[index] << "go movetime " << AuxEngineTime << std::endl;
   }
   if(auxengine_stopped_[index]){
     if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "Setting auxengine_stopped_ to false for thread " << index;
@@ -715,7 +688,7 @@ void Search::DoAuxEngine(Node* n, int index){
   }
   if (stopping) {
     // Don't use results of a search that was stopped.
-    // Not because the are unreliable, but we simply want to shut down as fast as possible.
+    // Not because the are unreliable, but simply because we want to shut down as fast as possible.
     return;
   }
   auxengine_stopped_mutex_.lock();
@@ -765,7 +738,7 @@ void Search::AuxWait() {
   // Decrease the EngineTime if we're in an endgame.
   ChessBoard my_board = played_history_.Last().GetBoard();
   if((my_board.ours() | my_board.theirs()).count() < 20){
-    search_stats_->AuxEngineTime = std::max(10, int(std::round(params_.GetAuxEngineTime() * 0.50f))); // minimum 10 ms.
+    search_stats_->AuxEngineTime = std::max(30, int(std::round(params_.GetAuxEngineTime() * 0.50f))); // minimum 30 ms.
   }
 
   // Time based queries    

@@ -623,11 +623,6 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     EnsureBestMoveKnown();
     SendMovesStats();
     BestMoveInfo info(final_bestmove_, final_pondermove_);
-    uci_responder_->OutputBestMove(&info);
-    stopper_->OnSearchDone(stats);
-    bestmove_is_sent_ = true;
-    current_best_edge_ = EdgeAndNode();
-    this_edge_has_higher_expected_q_than_the_most_visited_child = -1;
 
     auxengine_mutex_.lock();    
 
@@ -754,6 +749,13 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     search_stats_->final_purge_run = true; // Inform Search::AuxEngineWorker(), which can start *AFTER* us, that we have already purged stuff. If they also do it, things will break badly.
     
     auxengine_mutex_.unlock(); // play nice with Search::AuxEngineWorker()
+
+    uci_responder_->OutputBestMove(&info);
+    stopper_->OnSearchDone(stats);
+    bestmove_is_sent_ = true;
+    current_best_edge_ = EdgeAndNode();
+    this_edge_has_higher_expected_q_than_the_most_visited_child = -1;
+
 
   }
   

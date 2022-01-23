@@ -359,7 +359,12 @@ void Search::AuxEngineWorker() {
   // Decrement the thread counter so that purge in search.cc does not start before all threads are done.
   auxengine_mutex_.lock();
   search_stats_->thread_counter--;
-  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker thread " << our_index << " done. The thread counter is now " << search_stats_->thread_counter;
+  // Almost always log the when the last thread exits.
+  if(search_stats_->thread_counter-- == 0){
+    if (params_.GetAuxEngineVerbosity() >= 1) LOGFILE << "All AuxEngineWorker threads are now idle";
+  } else {
+    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker thread " << our_index << " done. The thread counter is now " << search_stats_->thread_counter;
+  }
   auxengine_mutex_.unlock();
 }
 

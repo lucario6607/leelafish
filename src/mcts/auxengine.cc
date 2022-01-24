@@ -77,7 +77,10 @@ void SearchWorker::AuxMaybeEnqueueNode(Node* n, int source) {
 
   search_->auxengine_mutex_.lock();
   // if purging has already happened, then do nothing
-  if(! search_->search_stats_->final_purge_run) {
+  if(search_->search_stats_->persistent_queue_of_nodes.size() > 500) LOGFILE << "Queue is dangerously large: " << search_->search_stats_->persistent_queue_of_nodes.size();
+  if(! search_->search_stats_->final_purge_run &&
+     search_->search_stats_->persistent_queue_of_nodes.size() < 1000 // safety net for too low values of AuxEngineThreshold, which would cause this queue to overflow somehow.
+     ) {
     if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE
       << "AuxMaybeEnqueueNode() picked node: " << n->DebugString() 
       << " for the persistent_queue_of_nodes which has size: "
@@ -345,9 +348,16 @@ void Search::AuxEngineWorker() {
 	// Wait until there's some work to compute.
 	auxengine_cv_.wait(lock, [&] { return stop_.load(std::memory_order_acquire) || !search_stats_->persistent_queue_of_nodes.empty(); });
 	if (stop_.load(std::memory_order_acquire)) {
+	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxWorker(), thread " << our_index << " caught a stop signal while waiting for a node to process, will exit the while loop now.";
+	  search_stats_->thread_counter--;
+	  // Almost always log the when the last thread exits.
+	  if(search_stats_->thread_counter == 0){
+	    if (params_.GetAuxEngineVerbosity() >= 1) LOGFILE << "All AuxEngineWorker threads are now idle";
+	  } else {
+	    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker thread " << our_index << " done. The thread counter is now " << search_stats_->thread_counter;
+	  }
 	  auxengine_mutex_.unlock();
-	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxWorker(), thread " << our_index << " caught a stop signal, will exit the while loop now.";
-	  break;
+	  return;
 	}
 	n = search_stats_->persistent_queue_of_nodes.front();
 	search_stats_->persistent_queue_of_nodes.pop();
@@ -356,6 +366,7 @@ void Search::AuxEngineWorker() {
     } // end of not thread zero
   } // end of while loop
 
+  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxWorker(), thread " << our_index << " caught a stop signal after returning from DoAuxEngine(), will exit the while loop now.";
   // Decrement the thread counter so that purge in search.cc does not start before all threads are done.
   auxengine_mutex_.lock();
   search_stats_->thread_counter--;
@@ -376,8 +387,6 @@ void Search::AuxEngineWorker() {
    // if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Would have quit early from AuxEncode_and_Enqueue() since search has stopped, but decided to take the risk and go on.";   
    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread " << thread << ": Quitting early from AuxEncode_and_Enqueue() since search has stopped.";
    return;
- } else {
-   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread " << thread << ": AuxEncode_and_Enqueue() Accepting task since search is not stopped.";   
  }
 
   std::istringstream iss(pv_as_string);  
@@ -472,11 +481,18 @@ void Search::AuxEngineWorker() {
     // If final purge has already taken place, then discard this PV
     auxengine_mutex_.lock();
     if(! search_stats_->final_purge_run) {
+      long unsigned int size;
       fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before starting to modify it
-      fast_track_extend_and_evaluate_queue_.push(my_moves_from_the_white_side);
-      fast_track_extend_and_evaluate_queue_mutex_.unlock();
-      search_stats_->source_of_PVs.push(source);
-      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread " << thread << ": Added a PV.";
+      size = search_stats_->fast_track_extend_and_evaluate_queue_.size();
+      if(size < 2000){ // safety net, silently drop PV:s if we cannot extend nodes fast enough.
+	search_stats_->fast_track_extend_and_evaluate_queue_.push(my_moves_from_the_white_side);
+	fast_track_extend_and_evaluate_queue_mutex_.unlock();
+	search_stats_->source_of_PVs.push(source);
+      } else {
+	// just unlock
+	fast_track_extend_and_evaluate_queue_mutex_.unlock();	
+      }
+      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread " << thread << ": Added a PV, queue has size: " << size;
     } else {
       if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread " << thread << ": Discarding a nice PV because the final purge was already made, so this PV could be irrelevant already.";
     }
@@ -710,7 +726,7 @@ void Search::DoAuxEngine(Node* n, int index){
     LOGFILE << "bestanswer:" << token;
   }
   if(prev_line == ""){
-    if (params_.GetAuxEngineVerbosity() >= 1) LOGFILE << "Empty PV, returning early from doAuxEngine().";
+    if (params_.GetAuxEngineVerbosity() >= 1) LOGFILE << "Thread: " << index << " Empty PV, returning early from doAuxEngine().";
     return;
   }
   if (! vector_of_children[index]->running()) {
@@ -748,7 +764,7 @@ void Search::AuxWait() {
   // Decrease the EngineTime if we're in an endgame.
   ChessBoard my_board = played_history_.Last().GetBoard();
   if((my_board.ours() | my_board.theirs()).count() < 20){
-    search_stats_->AuxEngineTime = std::max(30, int(std::round(params_.GetAuxEngineTime() * 0.50f))); // minimum 30 ms.
+    search_stats_->AuxEngineTime = std::max(20, int(std::round(params_.GetAuxEngineTime() * 0.50f))); // minimum 20 ms.
   }
 
   // Time based queries    
@@ -771,15 +787,15 @@ void Search::AuxWait() {
   
   // Empty the other queue.
   fast_track_extend_and_evaluate_queue_mutex_.lock();
-  if(fast_track_extend_and_evaluate_queue_.empty()){
+  if(search_stats_->fast_track_extend_and_evaluate_queue_.empty()){
     if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE << "No PVs in the fast_track_extend_and_evaluate_queue";
   } else {
-    if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE << fast_track_extend_and_evaluate_queue_.size() << " possibly obsolete PV:s in the queue.";
-    fast_track_extend_and_evaluate_queue_ = {};
+    if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE << search_stats_->fast_track_extend_and_evaluate_queue_.size() << " possibly obsolete PV:s in the queue.";
+    search_stats_->fast_track_extend_and_evaluate_queue_ = {};
     // Also empty the source queue
     search_stats_->source_of_PVs = {};    
     // TODO save the PV if it is still relevant
-    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Number of PV:s in the queue=" << fast_track_extend_and_evaluate_queue_.size();
+    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Number of PV:s in the queue=" << search_stats_->fast_track_extend_and_evaluate_queue_.size();
   }
   fast_track_extend_and_evaluate_queue_mutex_.unlock();  
   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxWait done search_stats_ at: " << &search_stats_ << " size of queue is: " << my_size;

@@ -181,7 +181,8 @@ Search::Search(const NodeTree& tree, Network* network,
   auxengine_mutex_.lock();
   search_stats_->size_of_queue_at_start = search_stats_->persistent_queue_of_nodes.size();
   search_stats_->final_purge_run = false;
-  search_stats_->thread_counter = 0;  
+  search_stats_->thread_counter = 0;
+  search_stats_->Number_of_nodes_added_by_AuxEngine = 0;
   if (search_stats_->AuxEngineThreshold == 0 &&
       params_.GetAuxEngineInstances() > 1){
     search_stats_->AuxEngineThreshold = params_.GetAuxEngineThreshold();
@@ -1599,19 +1600,35 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation() {
   // lock the queue before reading from it
   // Check if search is stopped before trying to take a lock
 
+  // Never add more than 256 nodes to the batch (or you may get these errrors: exception.h:39] Exception: CUDNN error: CUDNN_STATUS_BAD_PARAM (../../src/neural/cuda/layers.cc:228) if max_batch=512
+  // options.GetOrDefault<int>("max_batch", 1024)
+
   search_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before reading from it.
-  if(search_->fast_track_extend_and_evaluate_queue_.size() > 0){
-    while(search_->fast_track_extend_and_evaluate_queue_.size() > 0){
+  if(search_->search_stats_->fast_track_extend_and_evaluate_queue_.size() > 0){
+
+    search_->auxengine_mutex_.lock();
+    int number_of_added_nodes_at_start = search_->search_stats_->Number_of_nodes_added_by_AuxEngine;
+    LOGFILE << "Number of added nodes at start: " << number_of_added_nodes_at_start;
+    
+    while(search_->search_stats_->fast_track_extend_and_evaluate_queue_.size() > 0 &&
+	  search_->search_stats_->Number_of_nodes_added_by_AuxEngine - number_of_added_nodes_at_start < 190 // Need some margin to 256 for the final iteration.
+	  ){
+      // relase the lock, we only needed it to test if to continue or not
+      LOGFILE << "number of additional: " << search_->search_stats_->Number_of_nodes_added_by_AuxEngine - number_of_added_nodes_at_start;
+      search_->auxengine_mutex_.unlock();
+      
       if (params_.GetAuxEngineVerbosity() >= 9) {
 	LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: size of minibatch_ is " << minibatch_.size();
-	LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: size of fast_track_extend_and_evaluate_queue_ is " << search_->fast_track_extend_and_evaluate_queue_.size();
+	LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: size of search_stats_->fast_track_extend_and_evaluate_queue_ is " << search_->search_stats_->fast_track_extend_and_evaluate_queue_.size();
       }
-      std::vector<lczero::Move> my_moves = search_->fast_track_extend_and_evaluate_queue_.front(); // read the element
-      search_->fast_track_extend_and_evaluate_queue_.pop(); // remove it from the queue.
+      std::vector<lczero::Move> my_moves = search_->search_stats_->fast_track_extend_and_evaluate_queue_.front(); // read the element
+      search_->search_stats_->fast_track_extend_and_evaluate_queue_.pop(); // remove it from the queue.
       int source = search_->search_stats_->source_of_PVs.front();
       search_->search_stats_->source_of_PVs.pop();
+      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation() popped the node queue (current size: " << search_->search_stats_->fast_track_extend_and_evaluate_queue_.size() <<
+						  " and the source queue, size: " << search_->search_stats_->source_of_PVs.size() << ").";
       // Finished modifying the queue, release the lock, so that others can add more PVs to it while we extend nodes.
-      // long unsigned int queue_size = search_->fast_track_extend_and_evaluate_queue_.size();
+      // long unsigned int queue_size = search_->search_stats_->fast_track_extend_and_evaluate_queue_.size();
       search_->fast_track_extend_and_evaluate_queue_mutex_.unlock(); // unlock
       
       if (params_.GetAuxEngineVerbosity() >= 9) {	
@@ -1627,20 +1644,23 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation() {
       PreExtendTreeAndFastTrackForNNEvaluation_inner(search_->root_node_, my_moves, 0, 0, source);
       if (params_.GetAuxEngineVerbosity() >= 9) {
 	  LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: finished one iteration, size of minibatch_ is " << minibatch_.size();
-	  LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: finished one iteration, size of fast_track_extend_and_evaluate_queue_ is " << search_->fast_track_extend_and_evaluate_queue_.size();
+	  LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: finished one iteration, size of search_stats_->fast_track_extend_and_evaluate_queue_ is " << search_->search_stats_->fast_track_extend_and_evaluate_queue_.size();
       }
 
       // While we extended nodes, someone could have added more PV:s, update our belief about the current size of the queue.
       search_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before reading from it again.
+      search_->auxengine_mutex_.lock();
 
       // // Check if we are truly multithreaded:
-      // if(queue_size < search_->fast_track_extend_and_evaluate_queue_.size()){
+      // if(queue_size < search_->search_stats_->fast_track_extend_and_evaluate_queue_.size()){
       // 	LOGFILE << "Someone added a PV while we added an earlier one, isn't that great?";
       // }
       
-    } // Always end the while loop with the lock on. 
+    } // Always end the while loop with the lock on.
+    search_->auxengine_mutex_.unlock();
   }
   search_->fast_track_extend_and_evaluate_queue_mutex_.unlock(); // unlock
+  LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: finished."; 
 }
   
 // 2. Gather minibatch.

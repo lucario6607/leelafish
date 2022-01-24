@@ -77,19 +77,20 @@ void SearchWorker::AuxMaybeEnqueueNode(Node* n, int source) {
 
   search_->auxengine_mutex_.lock();
   // if purging has already happened, then do nothing
-  if(search_->search_stats_->persistent_queue_of_nodes.size() > 500) LOGFILE << "Queue is dangerously large: " << search_->search_stats_->persistent_queue_of_nodes.size();
-  if(! search_->search_stats_->final_purge_run &&
-     search_->search_stats_->persistent_queue_of_nodes.size() < 1000 // safety net for too low values of AuxEngineThreshold, which would cause this queue to overflow somehow.
-     ) {
+
+
+  if(! search_->search_stats_->final_purge_run) {
     if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE
       << "AuxMaybeEnqueueNode() picked node: " << n->DebugString() 
       << " for the persistent_queue_of_nodes which has size: "
       << search_->search_stats_->persistent_queue_of_nodes.size()
       << " The source was " << source;
     n->SetAuxEngineMove(0xfffe); // magic for pending
-    search_->search_stats_->persistent_queue_of_nodes.push(n);
-    search_->search_stats_->source_of_queued_nodes.push(source);
-    search_->auxengine_cv_.notify_one();
+    if(search_->search_stats_->persistent_queue_of_nodes.size() < 1000) { // safety net for too low values of AuxEngineThreshold, which would cause this queue to overflow somehow.     
+      search_->search_stats_->persistent_queue_of_nodes.push(n);
+      search_->search_stats_->source_of_queued_nodes.push(source);
+      search_->auxengine_cv_.notify_one();
+    }
   }
   search_->auxengine_mutex_.unlock();
 }
@@ -484,7 +485,7 @@ void Search::AuxEngineWorker() {
       long unsigned int size;
       fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before starting to modify it
       size = search_stats_->fast_track_extend_and_evaluate_queue_.size();
-      if(size < 2000){ // safety net, silently drop PV:s if we cannot extend nodes fast enough.
+      if(size < 20){ // safety net, silently drop PV:s if we cannot extend nodes fast enough.
 	search_stats_->fast_track_extend_and_evaluate_queue_.push(my_moves_from_the_white_side);
 	fast_track_extend_and_evaluate_queue_mutex_.unlock();
 	search_stats_->source_of_PVs.push(source);

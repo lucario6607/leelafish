@@ -48,17 +48,6 @@ std::uniform_real_distribution<float> distribution(1,0);
 
 namespace lczero {
 
-  // Plan to go multithreaded with 1 + k instances of the helper
-  // make 1 + k instances of auxengine_is_, auxengine_os_ and auxengine_c_
-  // rewrite DoAuxEngine() so that it takes pointers to the specific auxengine_is_ and auxengine_os_.
-  // Let the first thread/instance continuosly query root.
-  // Let the subsequent threads/instances pop nodes from the shared queue and process them as they see fit.
-
-  std::vector<std::unique_ptr<boost::process::ipstream>> Search::vector_of_ipstreams;
-  std::vector<std::unique_ptr<boost::process::opstream>> Search::vector_of_opstreams;
-  std::vector<std::unique_ptr<boost::process::child>> Search::vector_of_children;
-  std::vector<bool> Search::vector_of_auxengine_ready_;
-
 void Search::OpenAuxEngine() REQUIRES(threads_mutex_) {
   if (params_.GetAuxEngineFile() == "") return;
   for(int i = 0; i < params_.GetAuxEngineInstances(); i++){
@@ -84,7 +73,7 @@ void SearchWorker::AuxMaybeEnqueueNode(Node* n, int source) {
       << search_->search_stats_->persistent_queue_of_nodes.size()
       << " The source was " << source;
     n->SetAuxEngineMove(0xfffe); // magic for pending
-    if(search_->search_stats_->persistent_queue_of_nodes.size() < 500) { // safety net for too low values of AuxEngineThreshold, which would cause this queue to overflow somehow.     
+    if(search_->search_stats_->persistent_queue_of_nodes.size() < 1000) { // safety net for too low values of AuxEngineThreshold, which would cause this queue to overflow somehow, or just take too much time to check between moves.
       search_->search_stats_->persistent_queue_of_nodes.push(n);
       search_->search_stats_->source_of_queued_nodes.push(source);
       search_->auxengine_cv_.notify_one();
@@ -98,6 +87,7 @@ void Search::AuxEngineWorker() {
   // aquire a lock auxengine_mutex_ to ensure no other thread is
   // modifying search_stats_->thread_counter or the vector_of_*
   // vectors
+
   auxengine_mutex_.lock();
 
   // Find out which thread we are by reading the thread_counter.
@@ -124,10 +114,10 @@ void Search::AuxEngineWorker() {
   // if our_index is greater than the size of the vectors then we now for sure we must start/initiate everything.
   // if our_index + 1 is equal to, or smaller than the size of the vectors then we can safely check search_stats_->vector_of_auxengine_ready_[our_index] and act if it is false
 
-  if(our_index + 1 > vector_of_auxengine_ready_.size() ||
+  if(our_index + 1 > search_stats_->vector_of_auxengine_ready_.size() ||
      (
-      our_index + 1 <= vector_of_auxengine_ready_.size() &&
-      ! vector_of_auxengine_ready_[our_index]
+      our_index + 1 <= search_stats_->vector_of_auxengine_ready_.size() &&
+      ! search_stats_->vector_of_auxengine_ready_[our_index]
      )
    ) {
 
@@ -135,24 +125,24 @@ void Search::AuxEngineWorker() {
     search_stats_->thread_counter++;
   
     // populate the global vectors. 
-    vector_of_ipstreams.emplace_back(new boost::process::ipstream);
-    vector_of_opstreams.emplace_back(new boost::process::opstream);
-    vector_of_children.emplace_back(new boost::process::child);
+    search_stats_->vector_of_ipstreams.emplace_back(new boost::process::ipstream);
+    search_stats_->vector_of_opstreams.emplace_back(new boost::process::opstream);
+    search_stats_->vector_of_children.emplace_back(new boost::process::child);
 
     // Start the helper
-    *vector_of_children[our_index] = boost::process::child(params_.GetAuxEngineFile(), boost::process::std_in < *vector_of_opstreams[our_index], boost::process::std_out > *vector_of_ipstreams[our_index]);
+    *search_stats_->vector_of_children[our_index] = boost::process::child(params_.GetAuxEngineFile(), boost::process::std_in < *search_stats_->vector_of_opstreams[our_index], boost::process::std_out > *search_stats_->vector_of_ipstreams[our_index]);
 
     // Record that we have started, so that we can skip this on the next invocation.
-    vector_of_auxengine_ready_.push_back(false);
+    search_stats_->vector_of_auxengine_ready_.push_back(true);
 
     auxengine_stopped_mutex_.lock();  
     auxengine_stopped_.push_back(true);
     auxengine_stopped_mutex_.unlock();
 
     // unlock while we wait for the engine to be finished?
-    LOGFILE << "thread " << our_index << " releasing lock on auxengine while the helper instance is starting";
+    if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "thread " << our_index << " releasing lock on auxengine_mutex_ while the helper instance is starting";
     auxengine_mutex_.unlock();
-    LOGFILE << "thread " << our_index << " released lock on auxengine while the helper instance is starting";    
+    if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "thread " << our_index << " released lock on auxengine_mutex_ while the helper instance is starting";    
     
     {
       std::string bar;
@@ -172,12 +162,12 @@ void Search::AuxEngineWorker() {
         std::getline(iss, token, ';');
         oss << " value " << token;
         LOGFILE << oss.str();
-	*vector_of_opstreams[our_index] << oss.str() << std::endl;
+	*search_stats_->vector_of_opstreams[our_index] << oss.str() << std::endl;
       }
-      *vector_of_opstreams[our_index] << "uci" << std::endl;      
+      *search_stats_->vector_of_opstreams[our_index] << "uci" << std::endl;      
     }
     std::string line;
-    while(std::getline(*vector_of_ipstreams[our_index], line)) {
+    while(std::getline(*search_stats_->vector_of_ipstreams[our_index], line)) {
       LOGFILE << line;
       std::istringstream iss(line);
       std::string token;
@@ -192,25 +182,18 @@ void Search::AuxEngineWorker() {
             std::ostringstream oss;
             oss << "setoption name SyzygyPath value " << syzygy_tb_->get_paths();
             LOGFILE << oss.str();
-            *vector_of_opstreams[our_index] << oss.str() << std::endl;	    
+            *search_stats_->vector_of_opstreams[our_index] << oss.str() << std::endl;	    
           }
         }
       }
     }
 
-    LOGFILE << "thread " << our_index << " aquiring lock on auxengine since the helper instance is started";
+    if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "thread " << our_index << " aquiring lock on auxengine since the helper instance is started";
     auxengine_mutex_.lock();    
-    vector_of_auxengine_ready_[our_index] = true;
 
     if(our_index == 0){
       // Initiate some stats and parameters (Threshold needs to be set
       // earlier, see search() in search.cc)
-
-      // // Since we take a lock below, have to check if search is stopped.
-      // if (stop_.load(std::memory_order_acquire)){
-      // 	auxengine_mutex_.unlock();
-      // 	return;
-      // }
 
       search_stats_->AuxEngineTime = params_.GetAuxEngineTime();
       search_stats_->Number_of_nodes_added_by_AuxEngine = 0;
@@ -223,6 +206,7 @@ void Search::AuxEngineWorker() {
   } else {
 
     // AuxEngine(s) were already started. If we are thread zero then (1) Purge the queue(s) and (2) kickstart root if the queue is empty.
+    search_stats_->thread_counter++;
 
     if(our_index == 0){
 
@@ -497,7 +481,7 @@ void Search::AuxEngineWorker() {
       long unsigned int size;
       fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before starting to modify it
       size = search_stats_->fast_track_extend_and_evaluate_queue_.size();
-      if(size < 10){ // safety net, silently drop PV:s if we cannot extend nodes fast enough. lc0 stalls when this number is too high.
+      if(size < 1000){ // safety net, silently drop PV:s if we cannot extend nodes fast enough. lc0 stalls when this number is too high.
 	search_stats_->fast_track_extend_and_evaluate_queue_.push(my_moves_from_the_white_side);
 	fast_track_extend_and_evaluate_queue_mutex_.unlock();
 	search_stats_->source_of_PVs.push(source);
@@ -633,13 +617,13 @@ void Search::DoAuxEngine(Node* n, int index){
     auxengine_stopped_mutex_.unlock();
     return;
   }
-  *vector_of_opstreams[index] << s << std::endl;
+  *search_stats_->vector_of_opstreams[index] << s << std::endl;
   auto auxengine_start_time = std::chrono::steady_clock::now();
   if(index == 0){
     if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Starting infinite query from root node for thread 0";
-    *vector_of_opstreams[index] << "go infinite " << std::endl;
+    *search_stats_->vector_of_opstreams[index] << "go infinite " << std::endl;
   } else {
-    *vector_of_opstreams[index] << "go movetime " << AuxEngineTime << std::endl;
+    *search_stats_->vector_of_opstreams[index] << "go movetime " << AuxEngineTime << std::endl;
   }
   if(auxengine_stopped_[index]){
     if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "Setting auxengine_stopped_ to false for thread " << index;
@@ -655,7 +639,7 @@ void Search::DoAuxEngine(Node* n, int index){
   bool stopping = false;
   bool second_stopping = false;  
   bool second_stopping_notification = false;
-  while(std::getline(*vector_of_ipstreams[index], line)) {
+  while(std::getline(*search_stats_->vector_of_ipstreams[index], line)) {
     if (params_.GetAuxEngineVerbosity() >= 9 &&
 	!second_stopping_notification) {
       LOGFILE << "thread: " << index << " auxe:" << line;
@@ -672,7 +656,7 @@ void Search::DoAuxEngine(Node* n, int index){
 	// bestmove:info" indicates something is corrupted in the input stream.
 	// issue `stop`, stay in the loop and try another iteration.
 	// TODO: If the next iteration also fails, stop and restart the engine.
-	*vector_of_opstreams[index] << "stop" << std::endl;
+	*search_stats_->vector_of_opstreams[index] << "stop" << std::endl;
       } else {
 	break;
       }
@@ -691,7 +675,7 @@ void Search::DoAuxEngine(Node* n, int index){
 	auxengine_stopped_mutex_.lock();
 	if(!auxengine_stopped_[index]){
 	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine(), thread=" << index << " Stopping the A/B helper Start";
-	  *vector_of_opstreams[index] << "stop" << std::endl; // stop the A/B helper	  
+	  *search_stats_->vector_of_opstreams[index] << "stop" << std::endl; // stop the A/B helper	  
 	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine(), thread=" << index << " Stopping the A/B helper Stop";
 	  auxengine_stopped_[index] = true;
 	} else {
@@ -717,7 +701,7 @@ void Search::DoAuxEngine(Node* n, int index){
 	    !second_stopping_notification) {
 	  LOGFILE << "thread: " << index << " We found that search was stopped on the previous iteration, but the current line from the helper was not 'bestmove'. Probably the helper engine does not repond to stop until it has search for some minimum amount of time (like 10 ms). As a workaround send yet another stop";
 	  // We were stopping already before going into this iteration, but the helper did not respond "bestmove", as it ought to have done. Send stop again
-	  *vector_of_opstreams[index] << "stop" << std::endl; // stop the A/B helper	  
+	  *search_stats_->vector_of_opstreams[index] << "stop" << std::endl; // stop the A/B helper	  
 	  second_stopping_notification = true;
 	}
       } else {
@@ -742,7 +726,7 @@ void Search::DoAuxEngine(Node* n, int index){
     if (params_.GetAuxEngineVerbosity() >= 1) LOGFILE << "Thread: " << index << " Empty PV, returning early from doAuxEngine().";
     return;
   }
-  if (! vector_of_children[index]->running()) {
+  if (! search_stats_->vector_of_children[index]->running()) {
     LOGFILE << "AuxEngine died!";
     throw Exception("AuxEngine died!");
   }

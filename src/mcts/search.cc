@@ -609,7 +609,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     for(long unsigned int i = 0; i < auxengine_stopped_.size() ; i++){
       if(!auxengine_stopped_[i]){
 	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "MaybeTriggerStop() Stopping the A/B helper Start for thread=" << i << " Start.";
-	*vector_of_opstreams[i] << "stop" << std::endl; // stop the A/B helper
+	*search_stats_->vector_of_opstreams[i] << "stop" << std::endl; // stop the A/B helper
 	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "MaybeTriggerStop() Stopping the A/B helper for thread=" << i << " Stop.";
 	auxengine_stopped_[i] = true;
       } else {

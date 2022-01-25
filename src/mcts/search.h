@@ -261,9 +261,6 @@ class Search {
   void AuxEncode_and_Enqueue(std::string pv_as_string, int depth, ChessBoard my_board, Position my_position, std::vector<lczero::Move> my_moves_from_the_white_side, int source, bool require_some_depth, int thread);
   void AuxUpdateP(Node* n, std::vector<uint16_t> pv_moves, int ply, ChessBoard my_board);
 
-  // static std::vector<std::shared_ptr<boost::process::ipstream>> vector_of_ipstreams;
-  // static std::vector<std::shared_ptr<boost::process::opstream>> vector_of_opstreams;
-  // static std::vector<std::shared_ptr<boost::process::child>> vector_of_children;
   static std::vector<std::unique_ptr<boost::process::ipstream>> vector_of_ipstreams;
   static std::vector<std::unique_ptr<boost::process::opstream>> vector_of_opstreams;
   static std::vector<std::unique_ptr<boost::process::child>> vector_of_children;

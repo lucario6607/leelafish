@@ -159,9 +159,11 @@ void Search::AuxEngineWorker() {
     {
       std::string bar;
       // Thread zero uses a different parameter than the other threads
-      if(our_index == 0){
-	// at root, infinite exploration
-	bar = params_.GetAuxEngineOptionsOnRoot();
+      if(our_index == 0 &&
+	 !params_.GetAuxEngineOptionsOnRoot().empty()
+	 ){
+	// at root, infinite exploration, TODO unless AuxEngineOptionsOnRoot is "".
+	bar = params_.GetAuxEngineOptions();
       } else {
 	// in-tree time based evaluations
 	bar = params_.GetAuxEngineOptions();
@@ -219,6 +221,16 @@ void Search::AuxEngineWorker() {
       search_stats_->Total_number_of_nodes = 0;
       if(search_stats_->New_Game){
 	search_stats_->New_Game = false;
+	// Automatically inactivate the queueing machinery if there is only one instance AND OptionsOnRoot is NON-empty. Could save some time in ultra-bullet.
+	if(params_.GetAuxEngineInstances() == 1 &&
+	   !params_.GetAuxEngineOptionsOnRoot().empty()
+	   ){
+	  search_stats_->AuxEngineThreshold = 0;
+	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Inactivating the queueing machinery since there is exactly one instance and OnRoot is non-empty.";
+	} else  {
+	  search_stats_->AuxEngineThreshold = params_.GetAuxEngineThreshold();
+	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Settinge threshold to " << search_stats_->AuxEngineThreshold << ".";
+	}
       }
     }
   } else {
@@ -230,11 +242,15 @@ void Search::AuxEngineWorker() {
 
       if(search_stats_->New_Game){
 	search_stats_->AuxEngineTime = params_.GetAuxEngineTime();
-	// Automatically inactivate the queueing machinery if there is only one instance. Could save some time in ultra-bullet, or be good in high end systems.
-	if(params_.GetAuxEngineInstances() == 1){
+	// Automatically inactivate the queueing machinery if there is only one instance and OptionsOnRoot is non-empty. Could save some time in ultra-bullet.
+	if(params_.GetAuxEngineInstances() == 1 &&
+	   !params_.GetAuxEngineOptionsOnRoot().empty()
+	   ){
 	  search_stats_->AuxEngineThreshold = 0;
+	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Inactivating the queueing machinery since there is exactly one instance and OnRoot is non-empty.";
 	} else  {
 	  search_stats_->AuxEngineThreshold = params_.GetAuxEngineThreshold();
+	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Settinge threshold to " << search_stats_->AuxEngineThreshold << ".";
 	}
 	search_stats_->Total_number_of_nodes = 0;
 	search_stats_->Number_of_nodes_added_by_AuxEngine = 0;
@@ -336,7 +352,7 @@ void Search::AuxEngineWorker() {
   bool not_yet_notified = true;
   while (!stop_.load(std::memory_order_acquire)) {
     // if we are thread zero, don't read from the queue, just take the root node.
-    if(our_index == 0){
+    if(our_index == 0 && !params_.GetAuxEngineOptionsOnRoot().empty()){
       // kickstart with the root node, no need to wait for it to get some
       // amount of visits. Except if root is not yet expanded, or lacks
       // edges for any other reason (e.g. being terminal), in which case
@@ -358,7 +374,7 @@ void Search::AuxEngineWorker() {
 	std::this_thread::sleep_for(100ms);
       }
     } else {
-      // Not thread 0
+      // Not thread 0, or empty OnRoot options
       if (not_yet_notified &&
 	  params_.GetAuxEngineVerbosity() >= 5){
 
@@ -658,7 +674,8 @@ void Search::DoAuxEngine(Node* n, int index){
   }
   *search_stats_->vector_of_opstreams[index] << s << std::endl;
   auto auxengine_start_time = std::chrono::steady_clock::now();
-  if(index == 0){
+  if(index == 0 &&
+     !params_.GetAuxEngineOptionsOnRoot().empty()){
     if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Starting infinite query from root node for thread 0 using the opstream at: " << &search_stats_->vector_of_opstreams[index];
     *search_stats_->vector_of_opstreams[index] << "go infinite " << std::endl;
     if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Started infinite query from root node for thread 0 using the opstream at: " << &search_stats_->vector_of_opstreams[index];    

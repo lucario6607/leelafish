@@ -92,7 +92,9 @@ void Search::AuxEngineWorker() {
   // modifying search_stats_->thread_counter or the vector_of_*
   // vectors
 
-  pure_stats_mutex_.lock();  
+  LOGFILE << "Thread X About to aquire a lock on pure_stats_";
+  pure_stats_mutex_.lock();
+  LOGFILE << "Thread X aquired a lock on pure_stats_";  
 
   // Find out which thread we are by reading the thread_counter.
 
@@ -100,8 +102,9 @@ void Search::AuxEngineWorker() {
   // initiated, or MaybeTriggerStop() in search.cc will try to write
   // to uninitiated adresses.
 
-  
+  LOGFILE << "Thread X About to read data from pure_stats_";
   long unsigned int our_index = search_stats_->thread_counter;
+  LOGFILE << "Thread X=" << our_index << ".";
 
   // If we are the first thread, and the final purge already has taken place, then return immediately
   if(our_index == 0 &&
@@ -131,11 +134,9 @@ void Search::AuxEngineWorker() {
   
     // populate the global vectors. 
     search_stats_->vector_of_ipstreams.emplace_back(new boost::process::ipstream);
-    pure_stats_mutex_.unlock();  // Avoid nested locks
     auxengine_stopped_mutex_.lock();
     search_stats_->vector_of_opstreams.emplace_back(new boost::process::opstream);
     auxengine_stopped_mutex_.unlock();
-    pure_stats_mutex_.lock();      
     search_stats_->vector_of_children.emplace_back(new boost::process::child);
 
     // Start the helper

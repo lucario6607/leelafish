@@ -658,11 +658,6 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	  }
 	}
       }
-      // long unsigned int size_kept = source_of_queued_nodes_temp.size();
-      // for(long unsigned int i=0; i < size_kept; i++){      
-      // 	search_stats_->source_of_queued_nodes.push(source_of_queued_nodes_temp.front());
-      // 	source_of_queued_nodes_temp.pop();
-      // }
       long unsigned int size_kept = persistent_queue_of_nodes_temp.size() / 2;
       for(long unsigned int i=0; i < size_kept * 2; i++){
 	search_stats_->persistent_queue_of_nodes.push(persistent_queue_of_nodes_temp.front());
@@ -674,6 +669,9 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	      << " nodes in the query queue based the selected move: " << final_bestmove_.as_string()
 		<< ". " << size_kept << " nodes remain. Sanity check size is " << search_stats_->persistent_queue_of_nodes.size();
       search_stats_->AuxEngineQueueSizeAfterPurging = size_kept;
+    } else {
+      if(params_.GetAuxEngineVerbosity() >= 4)      
+	LOGFILE << "No nodes in the query queue at move selection";
     }
 
     // // For now avoid checking since it seems it occasionally crashes for unknown reasons.

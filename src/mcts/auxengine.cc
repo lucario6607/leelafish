@@ -648,7 +648,7 @@ void Search::DoAuxEngine(Node* n, int index){
     *search_stats_->vector_of_opstreams[index] << "go infinite " << std::endl;
     if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Started infinite query from root node for thread 0 using the opstream at: " << &search_stats_->vector_of_opstreams[index];    
   } else {
-    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Starting infinite query from root node for thread " << index << " using the opstream at: " << &search_stats_->vector_of_opstreams[index];    
+    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Starting time limited query for thread " << index << " using the opstream at: " << &search_stats_->vector_of_opstreams[index];    
     *search_stats_->vector_of_opstreams[index] << "go movetime " << AuxEngineTime << std::endl;
   }
   if(search_stats_->auxengine_stopped_[index]){

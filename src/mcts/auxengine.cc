@@ -92,9 +92,9 @@ void Search::AuxEngineWorker() {
   // modifying search_stats_->thread_counter or the vector_of_*
   // vectors
 
-  LOGFILE << "Thread X About to aquire a lock on pure_stats_";
+  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread X About to aquire a lock on pure_stats_";
   pure_stats_mutex_.lock();
-  LOGFILE << "Thread X aquired a lock on pure_stats_";  
+  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread X aquired a lock on pure_stats_";  
 
   // Find out which thread we are by reading the thread_counter.
 
@@ -102,9 +102,9 @@ void Search::AuxEngineWorker() {
   // initiated, or MaybeTriggerStop() in search.cc will try to write
   // to uninitiated adresses.
 
-  LOGFILE << "Thread X About to read data from pure_stats_";
+  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread X About to read data from pure_stats_";
   long unsigned int our_index = search_stats_->thread_counter;
-  LOGFILE << "Thread X=" << our_index << ".";
+  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread X=" << our_index << ".";
 
   // If we are the first thread, and the final purge already has taken place, then return immediately
   if(our_index == 0 &&
@@ -173,10 +173,10 @@ void Search::AuxEngineWorker() {
         oss << "setoption name " << token;
         std::getline(iss, token, ';');
         oss << " value " << token;
-        LOGFILE << oss.str();
-	if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "thread " << our_index << " about to configure the engine.";
+        if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << oss.str();
+	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "thread " << our_index << " about to configure the engine.";
 	auxengine_stopped_mutex_.lock();
-	if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "thread " << our_index << " configured the engine.";
+	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "thread " << our_index << " configured the engine.";
 	*search_stats_->vector_of_opstreams[our_index] << oss.str() << std::endl;
 	auxengine_stopped_mutex_.unlock();	
       }
@@ -186,7 +186,7 @@ void Search::AuxEngineWorker() {
     }
     std::string line;
     while(std::getline(*search_stats_->vector_of_ipstreams[our_index], line)) {
-      LOGFILE << line;
+      if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << line;
       std::istringstream iss(line);
       std::string token;
       iss >> token >> std::ws;
@@ -199,7 +199,7 @@ void Search::AuxEngineWorker() {
           if (token == "SyzygyPath" && syzygy_tb_) {
             std::ostringstream oss;
             oss << "setoption name SyzygyPath value " << syzygy_tb_->get_paths();
-            LOGFILE << oss.str();
+            if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << oss.str();
 	    auxengine_stopped_mutex_.lock();
 	    *search_stats_->vector_of_opstreams[our_index] << oss.str() << std::endl;	    
 	    auxengine_stopped_mutex_.unlock();
@@ -353,7 +353,7 @@ void Search::AuxEngineWorker() {
 	DoAuxEngine(root_node_, our_index);
       } else {
 	nodes_mutex_.unlock_shared(); // unlock, nothing more to do until root gets edges.
-	if (params_.GetAuxEngineVerbosity() >= 1) LOGFILE << "AuxEngineWorker() thread 0 found root node has no edges will sleep 100 ms";
+	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker() thread 0 found root node has no edges will sleep 100 ms";
 	using namespace std::chrono_literals;
 	std::this_thread::sleep_for(100ms);
       }
@@ -366,7 +366,7 @@ void Search::AuxEngineWorker() {
 	auxengine_mutex_.lock();
 	if(!search_stats_->initial_purge_run) {
 	  auxengine_mutex_.unlock();	
-	  if (params_.GetAuxEngineVerbosity() >= 1) LOGFILE << "AuxEngineWorker() thread " << our_index << " waiting for thread 0 to purge the queue, will sleep 100 ms";	
+	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker() thread " << our_index << " waiting for thread 0 to purge the queue, will sleep 100 ms";	
 	  using namespace std::chrono_literals;
 	  std::this_thread::sleep_for(100ms);
 	} else {
@@ -374,7 +374,7 @@ void Search::AuxEngineWorker() {
 	}
 
 	// OK, we are good to go.
-	LOGFILE << "AuxEngineWorker() thread: " << our_index << " entered main loop.";
+	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker() thread: " << our_index << " entered main loop.";
 	not_yet_notified = false;
       }
 
@@ -743,7 +743,7 @@ void Search::DoAuxEngine(Node* n, int index){
 	// No, this was definitely not the first iteration. If it was the second iteration, then act, otherwise just try again
 	if (params_.GetAuxEngineVerbosity() >= 1 &&
 	    !second_stopping_notification) {
-	  LOGFILE << "thread: " << index << " We found that search was stopped on the previous iteration, but the current line from the helper was not 'bestmove'. Probably the helper engine does not repond to stop until it has search for some minimum amount of time (like 10 ms). As a workaround send yet another stop";
+	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "thread: " << index << " We found that search was stopped on the previous iteration, but the current line from the helper was not 'bestmove'. Probably the helper engine does not repond to stop until it has search for some minimum amount of time (like 10 ms). As a workaround send yet another stop";
 	  // We were stopping already before going into this iteration, but the helper did not respond "bestmove", as it ought to have done. Send stop again
 	  auxengine_stopped_mutex_.lock();
 	  *search_stats_->vector_of_opstreams[index] << "stop" << std::endl; // stop the A/B helper
@@ -794,7 +794,7 @@ void Search::DoAuxEngine(Node* n, int index){
 }
 
 void Search::AuxWait() {
-  LOGFILE << "In AuxWait()";
+  if (params_.GetAuxEngineVerbosity() >= 7) LOGFILE << "In AuxWait()";
   while (!auxengine_threads_.empty()) {
     Mutex::Lock lock(threads_mutex_);
     auxengine_threads_.back().join();

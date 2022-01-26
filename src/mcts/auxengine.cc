@@ -361,21 +361,23 @@ void Search::AuxEngineWorker() {
       // Not thread 0
       if (not_yet_notified &&
 	  params_.GetAuxEngineVerbosity() >= 5){
+
+	// Wait for search_stats_->initial_purge_run = true before starting
+	auxengine_mutex_.lock();
+	if(!search_stats_->initial_purge_run) {
+	  auxengine_mutex_.unlock();	
+	  if (params_.GetAuxEngineVerbosity() >= 1) LOGFILE << "AuxEngineWorker() thread " << our_index << " waiting for thread 0 to purge the queue, will sleep 100 ms";	
+	  using namespace std::chrono_literals;
+	  std::this_thread::sleep_for(100ms);
+	} else {
+	  auxengine_mutex_.unlock();	
+	}
+
+	// OK, we are good to go.
 	LOGFILE << "AuxEngineWorker() thread: " << our_index << " entered main loop.";
 	not_yet_notified = false;
       }
 
-      // Wait for search_stats_->initial_purge_run = true before starting
-      auxengine_mutex_.lock();
-      if(!search_stats_->initial_purge_run) {
-	auxengine_mutex_.unlock();	
-	if (params_.GetAuxEngineVerbosity() >= 1) LOGFILE << "AuxEngineWorker() thread " << our_index << " waiting for thread 0 to purge the qeueu, will sleep 100 ms";	
-	using namespace std::chrono_literals;
-	std::this_thread::sleep_for(100ms);
-      } else {
-	auxengine_mutex_.unlock();	
-      }
-      
       {
 	std::unique_lock<std::mutex> lock(auxengine_mutex_);
 	// Wait until there's some work to compute.

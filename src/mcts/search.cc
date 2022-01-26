@@ -606,12 +606,12 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     this_tread_triggered_stop = true;
     auxengine_stopped_mutex_.lock();
     // Check the status for each thread, and act accordingly
-    for(long unsigned int i = 0; i < auxengine_stopped_.size() ; i++){
-      if(!auxengine_stopped_[i]){
+    for(long unsigned int i = 0; i < search_stats_->auxengine_stopped_.size() ; i++){
+      if(!search_stats_->auxengine_stopped_[i]){
 	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "MaybeTriggerStop() Stopping the A/B helper Start for thread=" << i << " Start.";
 	*search_stats_->vector_of_opstreams[i] << "stop" << std::endl; // stop the A/B helper
 	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "MaybeTriggerStop() Stopping the A/B helper for thread=" << i << " Stop.";
-	auxengine_stopped_[i] = true;
+	search_stats_->auxengine_stopped_[i] = true;
       } else {
 	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "MaybeTriggerStop() Not stopping the A/B helper for thread=" << i << ".";      	
       }
@@ -635,13 +635,13 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     // purge obsolete nodes in the helper queues. Note that depending on the move of the opponent more nodes can become obsolete.
     if(search_stats_->persistent_queue_of_nodes.size() > 0){
       std::queue<Node*> persistent_queue_of_nodes_temp;
-      std::queue<int> source_of_queued_nodes_temp;
+      // std::queue<int> source_of_queued_nodes_temp;
       long unsigned int my_size = search_stats_->persistent_queue_of_nodes.size();
       for(long unsigned int i=0; i < my_size; i++){
     	Node * n = search_stats_->persistent_queue_of_nodes.front(); // read the element
     	search_stats_->persistent_queue_of_nodes.pop(); // remove it from the queue.
-	int source = search_stats_->source_of_queued_nodes.front(); // read the element
-	search_stats_->source_of_queued_nodes.pop(); // remove it from the queue.
+	// int source = search_stats_->source_of_queued_nodes.front(); // read the element
+	// search_stats_->source_of_queued_nodes.pop(); // remove it from the queue.
 	for (Node* n2 = n; n2 != root_node_ ; n2 = n2->GetParent()) {
 	  // if purge at search start never happened (because of only one move possible, auxworker() never started), then we can have disconnected nodes in the queue.
 	  // if(n2->GetParent() == nullptr || n2->GetParent()->GetParent() == nullptr) break;
@@ -652,17 +652,18 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	      // in order to be able to purge nodes that became obsolete and deallocated due to the move of the opponent,
 	      // also save the grandparent that will become root at next iteration if this node is still relevant by then.
 	      persistent_queue_of_nodes_temp.push(n2);
-	      source_of_queued_nodes_temp.push(source);
+	      // source_of_queued_nodes_temp.push(source);
 	    }
 	    break;
 	  }
 	}
       }
-      long unsigned int size_kept = source_of_queued_nodes_temp.size();
-      for(long unsigned int i=0; i < size_kept; i++){      
-    	search_stats_->source_of_queued_nodes.push(source_of_queued_nodes_temp.front());
-	source_of_queued_nodes_temp.pop();
-      }
+      // long unsigned int size_kept = source_of_queued_nodes_temp.size();
+      // for(long unsigned int i=0; i < size_kept; i++){      
+      // 	search_stats_->source_of_queued_nodes.push(source_of_queued_nodes_temp.front());
+      // 	source_of_queued_nodes_temp.pop();
+      // }
+      long unsigned int size_kept = persistent_queue_of_nodes_temp.size() / 2;
       for(long unsigned int i=0; i < size_kept * 2; i++){
 	search_stats_->persistent_queue_of_nodes.push(persistent_queue_of_nodes_temp.front());
     	persistent_queue_of_nodes_temp.pop();
@@ -675,11 +676,11 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
       search_stats_->AuxEngineQueueSizeAfterPurging = size_kept;
     }
 
-    // For now avoid checking since it seems it occasionally crashes for unknown reasons.
-    if(search_stats_->nodes_added_by_the_helper.size() > 0){
-      search_stats_->nodes_added_by_the_helper = {};
-      search_stats_->source_of_added_nodes = {};
-    }
+    // // For now avoid checking since it seems it occasionally crashes for unknown reasons.
+    // if(search_stats_->nodes_added_by_the_helper.size() > 0){
+    //   search_stats_->nodes_added_by_the_helper = {};
+    //   search_stats_->source_of_added_nodes = {};
+    // }
   
     // if(search_stats_->nodes_added_by_the_helper.size() > 0){
     //   std::queue<Node*> nodes_added_by_the_helper_temp;
@@ -1461,10 +1462,10 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	// GetOrSpawnNode() does work with the lock on since it does not modify the tree.
 	Node* child_node = edge.GetOrSpawnNode(my_node, nullptr);
 
-	search_->auxengine_mutex_.lock();
-	search_->search_stats_->nodes_added_by_the_helper.push(child_node);
-	search_->search_stats_->source_of_added_nodes.push(source);
-	search_->auxengine_mutex_.unlock();
+	// search_->auxengine_mutex_.lock();
+	// search_->search_stats_->nodes_added_by_the_helper.push(child_node);
+	// search_->search_stats_->source_of_added_nodes.push(source);
+	// search_->auxengine_mutex_.unlock();
 
 	nodes_added++;
 
@@ -1529,9 +1530,9 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	    return; // someone further down has already added visits_in_flight;
 	}
 	
-	search_->auxengine_mutex_.lock();
+	search_->pure_stats_mutex_.lock();
 	search_->search_stats_->Number_of_nodes_added_by_AuxEngine += nodes_added;
-	search_->auxengine_mutex_.unlock();
+	search_->pure_stats_mutex_.unlock();
 	
 	// Not going deeper now, either because the PV is finished, or because we hit a terminal node.
 	// Aquire a write lock to adjust visits_in_flight.
@@ -1606,7 +1607,7 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation() {
   search_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before reading from it.
   if(search_->search_stats_->fast_track_extend_and_evaluate_queue_.size() > 0){
 
-    search_->auxengine_mutex_.lock();
+    search_->pure_stats_mutex_.lock();
     int number_of_added_nodes_at_start = search_->search_stats_->Number_of_nodes_added_by_AuxEngine;
     LOGFILE << "Number of added nodes at start: " << number_of_added_nodes_at_start;
     
@@ -1615,7 +1616,7 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation() {
 	  ){
       // relase the lock, we only needed it to test if to continue or not
       LOGFILE << "number of additional: " << search_->search_stats_->Number_of_nodes_added_by_AuxEngine - number_of_added_nodes_at_start;
-      search_->auxengine_mutex_.unlock();
+      search_->pure_stats_mutex_.unlock();
       
       if (params_.GetAuxEngineVerbosity() >= 9) {
 	LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: size of minibatch_ is " << minibatch_.size();
@@ -1623,10 +1624,9 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation() {
       }
       std::vector<lczero::Move> my_moves = search_->search_stats_->fast_track_extend_and_evaluate_queue_.front(); // read the element
       search_->search_stats_->fast_track_extend_and_evaluate_queue_.pop(); // remove it from the queue.
-      int source = search_->search_stats_->source_of_PVs.front();
-      search_->search_stats_->source_of_PVs.pop();
-      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation() popped the node queue (current size: " << search_->search_stats_->fast_track_extend_and_evaluate_queue_.size() <<
-						  " and the source queue, size: " << search_->search_stats_->source_of_PVs.size() << ").";
+      // int source = search_->search_stats_->source_of_PVs.front();
+      // search_->search_stats_->source_of_PVs.pop();
+      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation() popped the node queue (current size: " << search_->search_stats_->fast_track_extend_and_evaluate_queue_.size() << ").";
       // Finished modifying the queue, release the lock, so that others can add more PVs to it while we extend nodes.
       // long unsigned int queue_size = search_->search_stats_->fast_track_extend_and_evaluate_queue_.size();
       search_->fast_track_extend_and_evaluate_queue_mutex_.unlock(); // unlock
@@ -1638,9 +1638,10 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation() {
 	  for(int i = 0; i < (int) my_moves.size(); i++){
 	    s = s + my_moves[i].as_string() + " ";
 	  }
-	  LOGFILE << "Length of PV to add: " << my_moves.size() << " my_moves: " << s << " source: " << source;	    
+	  LOGFILE << "Length of PV to add: " << my_moves.size() << " my_moves: " << s << ".";
 	}
       }
+      int source = 0; // dummy while we don't track source for the moment.
       PreExtendTreeAndFastTrackForNNEvaluation_inner(search_->root_node_, my_moves, 0, 0, source);
       if (params_.GetAuxEngineVerbosity() >= 9) {
 	  LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: finished one iteration, size of minibatch_ is " << minibatch_.size();
@@ -1649,7 +1650,7 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation() {
 
       // While we extended nodes, someone could have added more PV:s, update our belief about the current size of the queue.
       search_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before reading from it again.
-      search_->auxengine_mutex_.lock();
+      search_->pure_stats_mutex_.lock();
 
       // // Check if we are truly multithreaded:
       // if(queue_size < search_->search_stats_->fast_track_extend_and_evaluate_queue_.size()){
@@ -1657,7 +1658,7 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation() {
       // }
       
     } // Always end the while loop with the lock on.
-    search_->auxengine_mutex_.unlock();
+    search_->pure_stats_mutex_.unlock();
   }
   search_->fast_track_extend_and_evaluate_queue_mutex_.unlock(); // unlock
   LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: finished."; 
@@ -2831,11 +2832,8 @@ void SearchWorker::DoBackupUpdateSingleNode(
        // These last two conditions are rather expensive to evaluate, which is why they must come last
        params_.GetAuxEngineFile() != ""
        ){
-      AuxMaybeEnqueueNode(n, 1);
-      // Afford a lock here, but probably not needed.
-      search_->auxengine_mutex_.lock();
-      search_->number_of_times_called_AuxMaybeEnqueueNode_ += 1;
-      search_->auxengine_mutex_.unlock();
+      // AuxMaybeEnqueueNode(n, 1);
+      AuxMaybeEnqueueNode(n);      
     }
     
   }

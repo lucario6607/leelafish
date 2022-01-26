@@ -1607,13 +1607,13 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation() {
 
     search_->pure_stats_mutex_.lock();
     int number_of_added_nodes_at_start = search_->search_stats_->Number_of_nodes_added_by_AuxEngine;
-    LOGFILE << "Number of added nodes at start: " << number_of_added_nodes_at_start;
+    // LOGFILE << "Number of added nodes at start: " << number_of_added_nodes_at_start;
     
     while(search_->search_stats_->fast_track_extend_and_evaluate_queue_.size() > 0 &&
 	  search_->search_stats_->Number_of_nodes_added_by_AuxEngine - number_of_added_nodes_at_start < 190 // Need some margin to 256 for the final iteration.
 	  ){
       // relase the lock, we only needed it to test if to continue or not
-      LOGFILE << "number of additional: " << search_->search_stats_->Number_of_nodes_added_by_AuxEngine - number_of_added_nodes_at_start;
+      // LOGFILE << "number of additional: " << search_->search_stats_->Number_of_nodes_added_by_AuxEngine - number_of_added_nodes_at_start;
       search_->pure_stats_mutex_.unlock();
       
       if (params_.GetAuxEngineVerbosity() >= 9) {

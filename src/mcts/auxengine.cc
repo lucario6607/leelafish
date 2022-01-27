@@ -400,6 +400,7 @@ void Search::AuxEngineWorker() {
 	auxengine_cv_.wait(lock, [&] { return stop_.load(std::memory_order_acquire) || !search_stats_->persistent_queue_of_nodes.empty(); });
 	if (stop_.load(std::memory_order_acquire)) {
 	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxWorker(), thread " << our_index << " caught a stop signal while waiting for a node to process, will exit the while loop now.";
+	  pure_stats_mutex_.lock();
 	  search_stats_->thread_counter--;
 	  // Almost always log the when the last thread exits.
 	  if(search_stats_->thread_counter == 0){
@@ -407,7 +408,7 @@ void Search::AuxEngineWorker() {
 	  } else {
 	    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker thread " << our_index << " done. The thread counter is now " << search_stats_->thread_counter;
 	  }
-	  auxengine_mutex_.unlock();
+	  pure_stats_mutex_.unlock();
 	  return;
 	}
 	n = search_stats_->persistent_queue_of_nodes.front();

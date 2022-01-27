@@ -158,12 +158,12 @@ void Search::AuxEngineWorker() {
     
     {
       std::string bar;
-      // Thread zero uses a different parameter than the other threads
+      // If AuxEngineOptionsOnRoot is set, Thread zero uses a different parameter and it continuosly explores root node only.
+      // If not set, thread zero becomes just another in-tree helper instance.
       if(our_index == 0 &&
 	 !params_.GetAuxEngineOptionsOnRoot().empty()
 	 ){
-	// at root, infinite exploration, TODO unless AuxEngineOptionsOnRoot is "".
-	bar = params_.GetAuxEngineOptions();
+	bar = params_.GetAuxEngineOptionsOnRoot();
       } else {
 	// in-tree time based evaluations
 	bar = params_.GetAuxEngineOptions();

@@ -226,6 +226,7 @@ void Search::AuxEngineWorker() {
 	   !params_.GetAuxEngineOptionsOnRoot().empty()
 	   ){
 	  search_stats_->AuxEngineThreshold = 0;
+	  search_stats_->my_pv_cache_.clear(); // Clear the PV cache.
 	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Inactivating the queueing machinery since there is exactly one instance and OnRoot is non-empty.";
 	} else  {
 	  search_stats_->AuxEngineThreshold = params_.GetAuxEngineThreshold();
@@ -516,6 +517,22 @@ void Search::AuxEngineWorker() {
   }
 
   if (pv_moves.size() > 0){
+
+    // check if the PV is new
+    std::ostringstream oss;
+    // Convert all but the last element to avoid a trailing "," https://stackoverflow.com/questions/8581832/converting-a-vectorint-to-string
+    std::copy(pv_moves.begin(), pv_moves.end()-1, std::ostream_iterator<int>(oss, ","));
+    // Now add the last element with no delimiter
+    oss << pv_moves.back();
+    // https://stackoverflow.com/questions/8581832/converting-a-vectorint-to-string
+    if ( search_stats_->my_pv_cache_.find(oss.str()) == search_stats_->my_pv_cache_.end() ) {
+      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "string not found in the cache, adding it.";
+      search_stats_->my_pv_cache_[oss.str()] = true;
+    } else {
+      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "string found in the cache. Return early.";
+      return;
+    }
+    
     if (params_.GetAuxEngineVerbosity() >= 9){
       std::string debug_string;
       // No lock required here, my_moves_from_the_white_side is only a simple queue of Moves, it has nothing to do with the searchtree.

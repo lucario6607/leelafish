@@ -60,6 +60,7 @@ class Search {
     // std::queue<int> source_of_queued_nodes; // 0 = SearchWorker::PickNodesToExtendTask(); 1 = Search::DoBackupUpdateSingleNode(); 2 = Search::SendUciInfo(); 3 = Search::AuxEngineWorker() node is root
     std::queue<std::vector<Move>> fast_track_extend_and_evaluate_queue_ GUARDED_BY(fast_track_extend_and_evaluate_queue_mutex_); // PV:s to be extended in Leelas search tree.
     // std::queue<int> source_of_PVs; // 0 = SearchWorker::PickNodesToExtendTask(); 1 = Search::DoBackupUpdateSingleNode(); 2 = Search::SendUciInfo(); 3 = Search::AuxEngineWorker() node is root. Whenever k (=1 or more) PVs are created from a single node, add k elements with value source from source_of_queued_nodes into this queue.
+    std::queue<int> length_of_PVs; // Whenever an element from fast_track_extend_and_evaluate_queue_ is popped by PreExt...(), record the length of that element in this vector. This way MaybeAdjustPolicyForHelperAddedNodes() can guesstimate the number of nodes there are to backup an added node.
 
     std::vector<std::shared_ptr<boost::process::ipstream>> vector_of_ipstreams;
     std::vector<std::shared_ptr<boost::process::opstream>> vector_of_opstreams;
@@ -67,6 +68,7 @@ class Search {
     std::vector<bool> vector_of_auxengine_ready_;
     std::vector<bool> auxengine_stopped_;
     int thread_counter;
+    std::map<std::string, bool> my_pv_cache_;
 
     std::queue<Node*> nodes_added_by_the_helper; // this is useful only to assess how good the different sources are, it does not affect search
     std::queue<int> source_of_added_nodes; // 0 = SearchWorker::PickNodesToExtendTask(); 1 = Search::DoBackupUpdateSingleNode(); 2 = Search::SendUciInfo(); 3 = Search::AuxEngineWorker() node is root

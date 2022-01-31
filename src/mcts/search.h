@@ -348,9 +348,10 @@ class SearchWorker {
 
   // 1.5 Extend tree with nodes using PV of a/b helper, and add the new
   // nodes to the minibatch
-  void PreExtendTreeAndFastTrackForNNEvaluation();
-  void PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node,
-      std::vector<lczero::Move> my_moves, int ply, int nodes_added, int source);
+  std::queue<std::vector<Node*>> PreExtendTreeAndFastTrackForNNEvaluation();
+  void PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node, std::vector<lczero::Move> my_moves, int ply, int nodes_added, int source, std::vector<Node*>* nodes_from_helper_added_by_this_PV);
+  // void PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node,
+  //     std::vector<lczero::Move> my_moves, int ply, int nodes_added, int source);
   
   // 2. Gather minibatch.
   void GatherMinibatch();
@@ -371,6 +372,9 @@ class SearchWorker {
 
   // 6. Propagate the new nodes' information to all their parents in the tree.
   void DoBackupUpdate();
+
+  // 6.5 Check policy and V for any new nodes added by the helper, and adjust policy if V is promising
+  void MaybeAdjustPolicyForHelperAddedNodes(std::queue<std::vector<Node*>> queue_of_vector_of_nodes_from_helper_added_by_this_thread);
 
   // 7. Update the Search's status and progress information.
   void UpdateCounters();

@@ -1312,7 +1312,6 @@ void SearchWorker::RunTasks(int tid) {
 void SearchWorker::ExecuteOneIteration() {
   // 1. Initialize internal structures.
   InitializeIteration(search_->network_->NewComputation());
-
   if (params_.GetMaxConcurrentSearchers() != 0) {
     while (true) {
       // If search is stop, we've not gathered or done anything and we don't
@@ -1337,7 +1336,7 @@ void SearchWorker::ExecuteOneIteration() {
 
   // 1.5 Extend tree with nodes using PV of a/b helper, and add the new
   // nodes to the minibatch
-  PreExtendTreeAndFastTrackForNNEvaluation();
+  std::queue<std::vector<Node*>> queue_of_vector_of_nodes_from_helper_added_by_this_thread = PreExtendTreeAndFastTrackForNNEvaluation();
 
   // 2. Gather minibatch.
   GatherMinibatch2();
@@ -1363,6 +1362,8 @@ void SearchWorker::ExecuteOneIteration() {
 
   // 6. Propagate the new nodes' information to all their parents in the tree.
   DoBackupUpdate();
+
+  MaybeAdjustPolicyForHelperAddedNodes(queue_of_vector_of_nodes_from_helper_added_by_this_thread);
 
   // 7. Update the Search's status and progress information.
   UpdateCounters();
@@ -1399,7 +1400,7 @@ void SearchWorker::InitializeIteration(
   minibatch_.reserve(2 * params_.GetMiniBatchSize());
 }
 
-void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node, std::vector<lczero::Move> my_moves, int ply, int nodes_added, int source) {
+void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node, std::vector<lczero::Move> my_moves, int ply, int nodes_added, int source, std::vector<Node*>* nodes_from_helper_added_by_this_PV) {
 
   bool black_to_move = ! search_->played_history_.IsBlackToMove() ^ (ply % 2 == 0);
   bool edge_found = false;
@@ -1440,7 +1441,7 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	  }
 	  // unlock nodes so that the next level can write stuff.
 	  search_->nodes_mutex_.unlock_shared();
-	  PreExtendTreeAndFastTrackForNNEvaluation_inner(edge.node(), my_moves, ply+1, nodes_added, source);
+	  PreExtendTreeAndFastTrackForNNEvaluation_inner(edge.node(), my_moves, ply+1, nodes_added, source, nodes_from_helper_added_by_this_PV);
 
 	} else {
 	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "All moves in the PV already expanded, nothing to do.";
@@ -1460,10 +1461,15 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	// GetOrSpawnNode() does work with the lock on since it does not modify the tree.
 	Node* child_node = edge.GetOrSpawnNode(my_node, nullptr);
 
-	// search_->auxengine_mutex_.lock();
+	LOGFILE << "size of nodes_from_helper_added_by_this_PV: " << nodes_from_helper_added_by_this_PV->size();
+	nodes_from_helper_added_by_this_PV->push_back(child_node);
+	LOGFILE << "size of nodes_from_helper_added_by_this_PV after adding nodes: " << nodes_from_helper_added_by_this_PV->size();
+
+	// // Also record the node, and its source, in the global vectors.
+	// search_->pure_stats_mutex_.lock();
 	// search_->search_stats_->nodes_added_by_the_helper.push(child_node);
 	// search_->search_stats_->source_of_added_nodes.push(source);
-	// search_->auxengine_mutex_.unlock();
+	// search_->pure_stats_mutex_.unlock();
 
 	nodes_added++;
 
@@ -1523,9 +1529,9 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	// unlock the readlock.
 	search_->nodes_mutex_.unlock_shared();
 	if (!is_terminal && (int) my_moves.size() > ply+1){
-	    // Go deeper.
-	    PreExtendTreeAndFastTrackForNNEvaluation_inner(child_node, my_moves, ply+1, nodes_added, source);
-	    return; // someone further down has already added visits_in_flight;
+	  // Go deeper.
+	  PreExtendTreeAndFastTrackForNNEvaluation_inner(child_node, my_moves, ply+1, nodes_added, source, nodes_from_helper_added_by_this_PV);
+	  return; // someone further down has already added visits_in_flight;
 	}
 	
 	search_->pure_stats_mutex_.lock();
@@ -1542,6 +1548,7 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	// number is equal to nodes_added.
 	int visits_to_add = 1;
 	search_->nodes_mutex_.lock();
+	if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Aquired a lock on nodes to adjust IncrementNInFlight";
 	for(Node * n = child_node; n != search_->root_node_; n = n->GetParent()){
 	  n->IncrementNInFlight(visits_to_add);  
 	  // LOGFILE << "Added visits_in_flight=" << visits_to_add << " to node " << n->DebugString();
@@ -1593,7 +1600,7 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 
 // 1.5 Extend tree with nodes using PV of a/b helper, and add the new nodes to the minibatch.
 
-void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation() {
+std::queue<std::vector<Node*>> SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation() {
   // input: a PV starting from root in form of a vector of Moves (the vectors are stored in a global queue called fast_track_extend_and_evaluate_queue_)
   // LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation() for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
   // lock the queue before reading from it
@@ -1601,6 +1608,9 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation() {
 
   // Never add more than 256 nodes to the batch (or you may get these errrors: exception.h:39] Exception: CUDNN error: CUDNN_STATUS_BAD_PARAM (../../src/neural/cuda/layers.cc:228) if max_batch=512
   // options.GetOrDefault<int>("max_batch", 1024)
+
+  LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation called.";
+  std::queue<std::vector<Node*>> queue_of_vector_of_nodes_from_helper_added_by_this_thread = {};  
 
   search_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before reading from it.
   if(search_->search_stats_->fast_track_extend_and_evaluate_queue_.size() > 0){
@@ -1640,10 +1650,19 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation() {
 	}
       }
       int source = 0; // dummy while we don't track source for the moment.
-      PreExtendTreeAndFastTrackForNNEvaluation_inner(search_->root_node_, my_moves, 0, 0, source);
+      std::vector<Node*> nodes_from_helper_added_by_this_PV = {};
+      LOGFILE << "size: " << nodes_from_helper_added_by_this_PV.size();
+      PreExtendTreeAndFastTrackForNNEvaluation_inner(search_->root_node_, my_moves, 0, 0, source, &nodes_from_helper_added_by_this_PV);
+      if (nodes_from_helper_added_by_this_PV.size() > 0){
+	// add this vector to the queue, since it is not empty
+	queue_of_vector_of_nodes_from_helper_added_by_this_thread.push(nodes_from_helper_added_by_this_PV);
+      }
       if (params_.GetAuxEngineVerbosity() >= 9) {
-	  LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: finished one iteration, size of minibatch_ is " << minibatch_.size();
-	  LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: finished one iteration, size of search_stats_->fast_track_extend_and_evaluate_queue_ is " << search_->search_stats_->fast_track_extend_and_evaluate_queue_.size();
+	std::thread::id this_id = std::this_thread::get_id();
+	LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: finished one iteration, size of minibatch_ is " << minibatch_.size();
+	LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: finished one iteration, size of nodes_from_helper_added_by_this_PV is " << nodes_from_helper_added_by_this_PV.size();
+	LOGFILE << "Thread: " << this_id << ", PreExtendTreeAndFastTrackForNNEvaluation: finished one iteration, size of queue_of_vector_of_nodes_from_helper_added_by_this_thread is " << queue_of_vector_of_nodes_from_helper_added_by_this_thread.size();
+	LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: finished one iteration, size of search_stats_->fast_track_extend_and_evaluate_queue_ is " << search_->search_stats_->fast_track_extend_and_evaluate_queue_.size();
       }
 
       // While we extended nodes, someone could have added more PV:s, update our belief about the current size of the queue.
@@ -1659,7 +1678,8 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation() {
     search_->pure_stats_mutex_.unlock();
   }
   search_->fast_track_extend_and_evaluate_queue_mutex_.unlock(); // unlock
-  LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: finished."; 
+  LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: finished.";
+  return(queue_of_vector_of_nodes_from_helper_added_by_this_thread);
 }
   
 // 2. Gather minibatch.
@@ -2909,6 +2929,62 @@ bool SearchWorker::MaybeSetBounds(Node* p, float m, int* n_to_fix,
   // Bounds were set, so indicate we should check the parent too.
   return true;
 }
+
+  // 6.5
+void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(std::queue<std::vector<Node*>> queue_of_vector_of_nodes_from_helper_added_by_this_thread){
+  std::thread::id this_id = std::this_thread::get_id();
+  long unsigned int my_queue_size = queue_of_vector_of_nodes_from_helper_added_by_this_thread.size();
+  LOGFILE << "Thread: " << this_id << ", In MaybeAdjustPolicyForHelperAddedNodes(), size of queue to process: " << my_queue_size;
+  if(my_queue_size > 0){
+    if (!search_->stop_.load(std::memory_order_acquire)) {
+      search_->nodes_mutex_.lock();
+    } else {
+      return;
+    }
+    while(queue_of_vector_of_nodes_from_helper_added_by_this_thread.size() > 0){    
+      std::vector<Node*> vector_of_nodes_from_helper_added_by_this_thread = queue_of_vector_of_nodes_from_helper_added_by_this_thread.front();
+      queue_of_vector_of_nodes_from_helper_added_by_this_thread.pop();
+      long unsigned int my_pv_size = vector_of_nodes_from_helper_added_by_this_thread.size();
+
+      // Do we want to maximize or minimize Q?
+      // At root and thus at even depth, we want to _minimize_ Q (Q is from the perspective of the player who _made the move_ leading up the current position.
+      // Calculate depth.
+      int depth = 0;
+      for (Node* n2 = vector_of_nodes_from_helper_added_by_this_thread[0]; n2 != search_->root_node_; n2 = n2->GetParent()) {
+	depth++;
+      }
+      LOGFILE << "How good is this line I just added based on recommendations from the helper?";
+      LOGFILE << "Q of parent to the first added node in the line: " << vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " depth: " << depth - 1;
+      for(long unsigned int j = 0; j < my_pv_size; j++){
+	Node* n = vector_of_nodes_from_helper_added_by_this_thread[j];
+	// if starting node is maximising and we are maximising: are we greater?
+	// if starting node is maximising and we are minimizing: are (-we) greater?
+	// if starting node is minimizing and we are maximising: are we greater than (-start node)?
+	// if starting node is minimizing and we are minimizing: are (-we) greater than (-start node)?
+	// we are maximising if depth + i % 2 == 1
+	// startnode is maximising if depth % 2 == 1
+	signed int factor_for_us = ((depth + j) % 2 == 1) ? 1 : -1;
+	signed int factor_for_parent = ((depth - 1) % 2 == 1) ? 1 : -1;
+	
+	if(factor_for_us * n->GetQ(0.0f) > factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f)){
+	  LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is greater than " << factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " which means this is promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j;
+	  // First very crude adjustment strategy: make sure policy is at least 0.3 if the move is promising
+	  if(n->GetOwnEdge()->GetP() < 0.3){
+	    LOGFILE << "Increased policy from " << n->GetOwnEdge()->GetP() << " to 0.3 since the move is promising:";
+	    n->GetOwnEdge()->SetP(0.3);
+	  }
+	} else {
+	  LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is smaller than " << factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " which means this is NOT promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j;
+	}
+    }
+    }
+    // Reset the variable, if it was non-empty.
+    queue_of_vector_of_nodes_from_helper_added_by_this_thread = {};
+    search_->nodes_mutex_.unlock();
+  }
+}
+
+  
 
 // 7. Update the Search's status and progress information.
 //~~~~~~~~~~~~~~~~~~~~

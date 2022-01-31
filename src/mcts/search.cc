@@ -2969,9 +2969,11 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(std::queue<std::vector<N
 	if(factor_for_us * n->GetQ(0.0f) > factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f)){
 	  LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is greater than " << factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " which means this is promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j;
 	  // First very crude adjustment strategy: make sure policy is at least 0.3 if the move is promising
-	  if(n->GetOwnEdge()->GetP() < 0.3){
-	    LOGFILE << "Increased policy from " << n->GetOwnEdge()->GetP() << " to 0.3 since the move is promising:";
-	    n->GetOwnEdge()->SetP(0.3);
+	  // For nodes near the leaf, don't increase as much
+	  float max_increase = (1.0f - float(j)/float(my_pv_size)) * 0.3f;
+	  if(n->GetOwnEdge()->GetP() < max_increase){
+	    LOGFILE << "Increased policy from " << n->GetOwnEdge()->GetP() << " to " << max_increase << " since the move is promising:";
+	    n->GetOwnEdge()->SetP(max_increase);
 	  }
 	} else {
 	  LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is smaller than " << factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " which means this is NOT promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j;

@@ -2944,6 +2944,8 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(std::queue<std::vector<N
     while(queue_of_vector_of_nodes_from_helper_added_by_this_thread.size() > 0){    
       std::vector<Node*> vector_of_nodes_from_helper_added_by_this_thread = queue_of_vector_of_nodes_from_helper_added_by_this_thread.front();
       queue_of_vector_of_nodes_from_helper_added_by_this_thread.pop();
+
+      // Until we get the actual length of the PV, work with the number of added nodes instead.
       long unsigned int my_pv_size = vector_of_nodes_from_helper_added_by_this_thread.size();
 
       // Do we want to maximize or minimize Q?
@@ -2957,28 +2959,56 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(std::queue<std::vector<N
       LOGFILE << "Q of parent to the first added node in the line: " << vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " depth: " << depth - 1;
       for(long unsigned int j = 0; j < my_pv_size; j++){
 	Node* n = vector_of_nodes_from_helper_added_by_this_thread[j];
-	// if starting node is maximising and we are maximising: are we greater?
-	// if starting node is maximising and we are minimizing: are (-we) greater?
-	// if starting node is minimizing and we are maximising: are we greater than (-start node)?
-	// if starting node is minimizing and we are minimizing: are (-we) greater than (-start node)?
-	// we are maximising if depth + i % 2 == 1
-	// startnode is maximising if depth % 2 == 1
-	signed int factor_for_us = ((depth + j) % 2 == 1) ? 1 : -1;
-	signed int factor_for_parent = ((depth - 1) % 2 == 1) ? 1 : -1;
+
+	// Strategies for policy adjustment:
+	// a "trust the helper", make sure policy is at least c
+	// b "only trust yourself, even with deep analysis", make sure policy is at least c when the move is promising.
+	// c "only trust yourself, don't trust deep analysis", when the move is promising, make sure policy is at least x, which varies with depth.
 	
-	if(factor_for_us * n->GetQ(0.0f) > factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f)){
-	  LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is greater than " << factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " which means this is promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j;
-	  // First very crude adjustment strategy: make sure policy is at least 0.3 if the move is promising
-	  // For nodes near the leaf, don't increase as much
-	  float max_increase = (1.0f - float(j)/float(my_pv_size)) * 0.6f;
-	  if(n->GetOwnEdge()->GetP() < max_increase){
-	    LOGFILE << "Increased policy from " << n->GetOwnEdge()->GetP() << " to " << max_increase << " since the move is promising:";
-	    n->GetOwnEdge()->SetP(max_increase);
+	std::string strategy;
+	float minimum_policy;
+	float c = 0.6f;
+	float min_c = 0.2f;
+	strategy = "a";
+
+	if(strategy == "c"){
+	  minimum_policy = std::max(min_c, (1.0f - float(j)/float(my_pv_size)) * c);
+	} else {
+	  minimum_policy = c;	  
+	}
+
+	if(strategy == "a"){
+	  if(n->GetOwnEdge()->GetP() < minimum_policy){
+	    LOGFILE << "Increased policy from " << n->GetOwnEdge()->GetP() << " to " << minimum_policy << " since the helper is trusted (strategy a) and the policy was lower:";
+	    n->GetOwnEdge()->SetP(minimum_policy);
 	  }
 	} else {
-	  LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is smaller than " << factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " which means this is NOT promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j;
+
+	  // Determine if the move is promising or not
+	  
+	  // if starting node is maximising and we are maximising: are we greater?
+	  // if starting node is maximising and we are minimizing: are (-we) greater?
+	  // if starting node is minimizing and we are maximising: are we greater than (-start node)?
+	  // if starting node is minimizing and we are minimizing: are (-we) greater than (-start node)?
+	  // we are maximising if depth + j % 2 == 1
+	  // startnode is maximising if depth % 2 == 1
+	  signed int factor_for_us = ((depth + j) % 2 == 1) ? 1 : -1;
+	  signed int factor_for_parent = ((depth - 1) % 2 == 1) ? 1 : -1;
+	
+	  if(factor_for_us * n->GetQ(0.0f) > factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f)){
+	    LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is greater than " << factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " which means this is promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j;
+	    // First very crude adjustment strategy: make sure policy is at least 0.2 if the move is promising
+	    // For nodes near root, use a higher minimum, up to, at most 0.6.
+	    // float minimum_policy = std::max(0.2, (1.0f - float(j)/float(my_pv_size)) * 0.6f);
+	    if(n->GetOwnEdge()->GetP() < minimum_policy){
+	      LOGFILE << "Increased policy from " << n->GetOwnEdge()->GetP() << " to " << minimum_policy << " since the move is promising:";
+	      n->GetOwnEdge()->SetP(minimum_policy);
+	    }
+	  } else {
+	    LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is smaller than " << factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " which means this is NOT promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j;
+	  }
 	}
-    }
+      }
     }
     // Reset the variable, if it was non-empty.
     queue_of_vector_of_nodes_from_helper_added_by_this_thread = {};

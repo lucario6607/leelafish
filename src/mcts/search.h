@@ -55,12 +55,20 @@ class Search {
 
  public:
 
+  struct adjust_policy_stats {
+    std::queue<std::vector<Node*>> queue_of_vector_of_nodes_from_helper_added_by_this_thread;
+    std::queue<int> length_of_PVs_;
+    std::queue<int> starting_depth_of_PVs_;    
+    std::queue<int> amount_of_support_for_PVs_;
+  };
+
   struct SearchStats {
     std::queue<Node*> persistent_queue_of_nodes; // the query queue for the auxillary helper engine.
     // std::queue<int> source_of_queued_nodes; // 0 = SearchWorker::PickNodesToExtendTask(); 1 = Search::DoBackupUpdateSingleNode(); 2 = Search::SendUciInfo(); 3 = Search::AuxEngineWorker() node is root
     std::queue<std::vector<Move>> fast_track_extend_and_evaluate_queue_ GUARDED_BY(fast_track_extend_and_evaluate_queue_mutex_); // PV:s to be extended in Leelas search tree.
     // std::queue<int> source_of_PVs; // 0 = SearchWorker::PickNodesToExtendTask(); 1 = Search::DoBackupUpdateSingleNode(); 2 = Search::SendUciInfo(); 3 = Search::AuxEngineWorker() node is root. Whenever k (=1 or more) PVs are created from a single node, add k elements with value source from source_of_queued_nodes into this queue.
-    std::queue<int> length_of_PVs; // Whenever an element from fast_track_extend_and_evaluate_queue_ is popped by PreExt...(), record the length of that element in this vector. This way MaybeAdjustPolicyForHelperAddedNodes() can guesstimate the number of nodes there are to backup an added node.
+    std::queue<int> amount_of_support_for_PVs_; // Whenever an element from fast_track_extend_and_evaluate_queue_ is popped by PreExt...(), record the number of nodes to support for that PV in this vector. This way MaybeAdjustPolicyForHelperAddedNodes() can guesstimate the number of nodes there are to backup an added node.
+    std::queue<int> starting_depth_of_PVs_; // needed to calculate the estimated number of nodes in support for a recommended move.
 
     std::vector<std::shared_ptr<boost::process::ipstream>> vector_of_ipstreams;
     std::vector<std::shared_ptr<boost::process::opstream>> vector_of_opstreams;
@@ -72,6 +80,7 @@ class Search {
 
     std::queue<Node*> nodes_added_by_the_helper; // this is useful only to assess how good the different sources are, it does not affect search
     std::queue<int> source_of_added_nodes; // 0 = SearchWorker::PickNodesToExtendTask(); 1 = Search::DoBackupUpdateSingleNode(); 2 = Search::SendUciInfo(); 3 = Search::AuxEngineWorker() node is root
+    
     int AuxEngineTime; // dynamic version of the UCI option AuxEngineTime.
     unsigned long long int Total_number_of_nodes; // all nodes ever added to the tree.
     unsigned long long int Number_of_nodes_added_by_AuxEngine; // all nodes ever added by the auxillary engine.
@@ -350,7 +359,8 @@ class SearchWorker {
 
   // 1.5 Extend tree with nodes using PV of a/b helper, and add the new
   // nodes to the minibatch
-  std::queue<std::vector<Node*>> PreExtendTreeAndFastTrackForNNEvaluation();
+  const std::shared_ptr<Search::adjust_policy_stats> PreExtendTreeAndFastTrackForNNEvaluation();
+  // std::queue<std::vector<Node*>> PreExtendTreeAndFastTrackForNNEvaluation();
   void PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node, std::vector<lczero::Move> my_moves, int ply, int nodes_added, int source, std::vector<Node*>* nodes_from_helper_added_by_this_PV);
   // void PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node,
   //     std::vector<lczero::Move> my_moves, int ply, int nodes_added, int source);
@@ -376,7 +386,7 @@ class SearchWorker {
   void DoBackupUpdate();
 
   // 6.5 Check policy and V for any new nodes added by the helper, and adjust policy if V is promising
-  void MaybeAdjustPolicyForHelperAddedNodes(std::queue<std::vector<Node*>> queue_of_vector_of_nodes_from_helper_added_by_this_thread);
+  void MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Search::adjust_policy_stats> foo);
 
   // 7. Update the Search's status and progress information.
   void UpdateCounters();

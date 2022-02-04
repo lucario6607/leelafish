@@ -579,8 +579,10 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
                               StoppersHints* hints) {
   hints->Reset();
 
+  LOGFILE << "MaybeTriggerStop() called. Trying to get a lock on nodes";
   SharedMutex::Lock nodes_lock(nodes_mutex_);
   Mutex::Lock lock(counters_mutex_);
+  LOGFILE << "MaybeTriggerStop() got the lock.";
   // Already responded bestmove, nothing to do here.
   if (bestmove_is_sent_) return;
   // Don't stop when the root node is not yet expanded.
@@ -1336,7 +1338,8 @@ void SearchWorker::ExecuteOneIteration() {
 
   // 1.5 Extend tree with nodes using PV of a/b helper, and add the new
   // nodes to the minibatch
-  std::queue<std::vector<Node*>> queue_of_vector_of_nodes_from_helper_added_by_this_thread = PreExtendTreeAndFastTrackForNNEvaluation();
+  const std::shared_ptr<Search::adjust_policy_stats> foo = PreExtendTreeAndFastTrackForNNEvaluation();
+  // std::queue<std::vector<Node*>> queue_of_vector_of_nodes_from_helper_added_by_this_thread = PreExtendTreeAndFastTrackForNNEvaluation();
 
   // 2. Gather minibatch.
   GatherMinibatch2();
@@ -1363,7 +1366,8 @@ void SearchWorker::ExecuteOneIteration() {
   // 6. Propagate the new nodes' information to all their parents in the tree.
   DoBackupUpdate();
 
-  MaybeAdjustPolicyForHelperAddedNodes(queue_of_vector_of_nodes_from_helper_added_by_this_thread);
+  MaybeAdjustPolicyForHelperAddedNodes(foo);
+  // MaybeAdjustPolicyForHelperAddedNodes(queue_of_vector_of_nodes_from_helper_added_by_this_thread);
 
   // 7. Update the Search's status and progress information.
   UpdateCounters();
@@ -1425,6 +1429,25 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
     return;
   }
 
+  // Before finding the edge that corresponds to the move suggested by
+  // the helper, find leelas preferred move, and if that move hasn't
+  // already been queried, enqueue it
+
+  // Find out if there are extended siblings
+  if(my_node->GetN() > 1){
+    const EdgeAndNode Leelas_favourite = search_->GetBestChildNoTemperature(my_node, ply);
+    if(my_node->GetAuxEngineMove() == 0xffff){
+      if(Leelas_favourite.HasNode()){
+	LOGFILE << "Leelas favourite move has not been queried, it is " << Leelas_favourite.GetMove(black_to_move).as_string() << ", node: " << Leelas_favourite.DebugString() << ", queueing it now.";
+	AuxMaybeEnqueueNode(Leelas_favourite.node());
+      }
+    } else {
+      LOGFILE << "Leelas favourite move has already been queried. It is " << Leelas_favourite.GetMove(black_to_move).as_string() << ", node: " << Leelas_favourite.DebugString();
+    }
+  } else {
+    LOGFILE << "my_node has no children, so the added node has no obvious challengers to enqueue.";
+  }
+
   // Find the edge
   for (auto& edge : my_node->Edges()) {
     if(edge.GetMove() == my_moves[ply] ){
@@ -1457,7 +1480,7 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	    LOGFILE << "Whites move (edge) " << edge.GetMove(black_to_move).as_string() << " is not expanded. It has policy " << edge.GetP() << " Will expand it, and add the resulting node to the minibatch_, and then use it as parent.";
 	  }
 	}
-	
+
 	// GetOrSpawnNode() does work with the lock on since it does not modify the tree.
 	Node* child_node = edge.GetOrSpawnNode(my_node, nullptr);
 
@@ -1600,7 +1623,8 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 
 // 1.5 Extend tree with nodes using PV of a/b helper, and add the new nodes to the minibatch.
 
-std::queue<std::vector<Node*>> SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation() {
+const std::shared_ptr<Search::adjust_policy_stats> SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation() {
+// std::queue<std::vector<Node*>> SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation() {
   // input: a PV starting from root in form of a vector of Moves (the vectors are stored in a global queue called fast_track_extend_and_evaluate_queue_)
   // LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation() for thread: " << std::hash<std::thread::id>{}(std::this_thread::get_id());
   // lock the queue before reading from it
@@ -1610,7 +1634,8 @@ std::queue<std::vector<Node*>> SearchWorker::PreExtendTreeAndFastTrackForNNEvalu
   // options.GetOrDefault<int>("max_batch", 1024)
 
   LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation called.";
-  std::queue<std::vector<Node*>> queue_of_vector_of_nodes_from_helper_added_by_this_thread = {};  
+  std::queue<std::vector<Node*>> queue_of_vector_of_nodes_from_helper_added_by_this_thread = {};
+  const std::shared_ptr<Search::adjust_policy_stats> bar = std::make_unique<Search::adjust_policy_stats>();
 
   search_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before reading from it.
   if(search_->search_stats_->fast_track_extend_and_evaluate_queue_.size() > 0){
@@ -1632,6 +1657,12 @@ std::queue<std::vector<Node*>> SearchWorker::PreExtendTreeAndFastTrackForNNEvalu
       }
       std::vector<lczero::Move> my_moves = search_->search_stats_->fast_track_extend_and_evaluate_queue_.front(); // read the element
       search_->search_stats_->fast_track_extend_and_evaluate_queue_.pop(); // remove it from the queue.
+      int amount_of_support_for_PVs_ = search_->search_stats_->amount_of_support_for_PVs_.front();
+      LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: size of amount_of_support_for_PVs_ is " << search_->search_stats_->amount_of_support_for_PVs_.size();
+      search_->search_stats_->amount_of_support_for_PVs_.pop();
+      int starting_depth_of_PVs_ = search_->search_stats_->starting_depth_of_PVs_.front();
+      search_->search_stats_->starting_depth_of_PVs_.pop();
+      LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: size of starting_depth_of_PVs_ is " << search_->search_stats_->amount_of_support_for_PVs_.size();      
       // int source = search_->search_stats_->source_of_PVs.front();
       // search_->search_stats_->source_of_PVs.pop();
       if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation() popped the node queue (current size: " << search_->search_stats_->fast_track_extend_and_evaluate_queue_.size() << ").";
@@ -1655,7 +1686,10 @@ std::queue<std::vector<Node*>> SearchWorker::PreExtendTreeAndFastTrackForNNEvalu
       PreExtendTreeAndFastTrackForNNEvaluation_inner(search_->root_node_, my_moves, 0, 0, source, &nodes_from_helper_added_by_this_PV);
       if (nodes_from_helper_added_by_this_PV.size() > 0){
 	// add this vector to the queue, since it is not empty
-	queue_of_vector_of_nodes_from_helper_added_by_this_thread.push(nodes_from_helper_added_by_this_PV);
+	// queue_of_vector_of_nodes_from_helper_added_by_this_thread.push(nodes_from_helper_added_by_this_PV);
+	bar->queue_of_vector_of_nodes_from_helper_added_by_this_thread.push(nodes_from_helper_added_by_this_PV);
+	bar->amount_of_support_for_PVs_.push(amount_of_support_for_PVs_);
+	bar->starting_depth_of_PVs_.push(starting_depth_of_PVs_);
       }
       if (params_.GetAuxEngineVerbosity() >= 9) {
 	std::thread::id this_id = std::this_thread::get_id();
@@ -1679,7 +1713,7 @@ std::queue<std::vector<Node*>> SearchWorker::PreExtendTreeAndFastTrackForNNEvalu
   }
   search_->fast_track_extend_and_evaluate_queue_mutex_.unlock(); // unlock
   LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: finished.";
-  return(queue_of_vector_of_nodes_from_helper_added_by_this_thread);
+  return(bar);
 }
   
 // 2. Gather minibatch.
@@ -2931,25 +2965,34 @@ bool SearchWorker::MaybeSetBounds(Node* p, float m, int* n_to_fix,
 }
 
   // 6.5
-void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(std::queue<std::vector<Node*>> queue_of_vector_of_nodes_from_helper_added_by_this_thread){
+void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Search::adjust_policy_stats> foo){
   std::thread::id this_id = std::this_thread::get_id();
-  long unsigned int my_queue_size = queue_of_vector_of_nodes_from_helper_added_by_this_thread.size();
+  long unsigned int my_queue_size = foo->queue_of_vector_of_nodes_from_helper_added_by_this_thread.size();
   if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << this_id << ", In MaybeAdjustPolicyForHelperAddedNodes(), size of queue to process: " << my_queue_size;
   if(my_queue_size > 0){
     if (!search_->stop_.load(std::memory_order_acquire)) {
       search_->nodes_mutex_.lock();
     } else {
+      LOGFILE << "MaybeAdjustPolicyForHelperAddedNodes() exiting early since search has stopped";
       return;
     }
-    while(queue_of_vector_of_nodes_from_helper_added_by_this_thread.size() > 0){    
-      std::vector<Node*> vector_of_nodes_from_helper_added_by_this_thread = queue_of_vector_of_nodes_from_helper_added_by_this_thread.front();
-      queue_of_vector_of_nodes_from_helper_added_by_this_thread.pop();
+    while(foo->queue_of_vector_of_nodes_from_helper_added_by_this_thread.size() > 0){    
+      std::vector<Node*> vector_of_nodes_from_helper_added_by_this_thread = foo->queue_of_vector_of_nodes_from_helper_added_by_this_thread.front();
+      foo->queue_of_vector_of_nodes_from_helper_added_by_this_thread.pop();
+
+      float branching_factor = 1.6f;
+      int length_of_pv = foo->length_of_PVs_.front();
+      foo->length_of_PVs_.pop();
+      int starting_depth_of_PV = foo->starting_depth_of_PVs_.front();
+      foo->starting_depth_of_PVs_.pop();
+      int amount_of_support = foo->amount_of_support_for_PVs_.front();
+      foo->amount_of_support_for_PVs_.pop();
 
       // Until we get the actual length of the PV, work with the number of added nodes instead.
       long unsigned int my_pv_size = vector_of_nodes_from_helper_added_by_this_thread.size();
 
       // Do we want to maximize or minimize Q?
-      // At root and thus at even depth, we want to _minimize_ Q (Q is from the perspective of the player who _made the move_ leading up the current position.
+      // At root, and thus at even depth, we want to _minimize_ Q (Q is from the perspective of the player who _made the move_ leading up the current position.
       // Calculate depth.
       int depth = 0;
       for (Node* n2 = vector_of_nodes_from_helper_added_by_this_thread[0]; n2 != search_->root_node_; n2 = n2->GetParent()) {
@@ -2959,6 +3002,11 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(std::queue<std::vector<N
       if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Q of parent to the first added node in the line: " << vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " depth: " << depth - 1;
       for(long unsigned int j = 0; j < my_pv_size; j++){
 	Node* n = vector_of_nodes_from_helper_added_by_this_thread[j];
+
+	// divide the amount of support with the current depth ^ scaling factor to the ge current support
+	int current_depth = depth - starting_depth_of_PV + j;
+	int current_amount_of_support = float(amount_of_support) / pow(current_depth, branching_factor);
+	LOGFILE << "MaybeAdjustPolicyForHelperAddedNodes() at a node with current depth (distance from first node in PV) = " << current_depth << ". Starting depth of PV: " << starting_depth_of_PV << ". Distance from root for current node: " << depth << ". Original pv length: " << length_of_pv << ", number of added nodes: " << my_pv_size << ", amount of support for the PV: " << amount_of_support << " amount of support for this node: " << current_amount_of_support;
 
 	// Strategies for policy adjustment:
 	// a "trust the helper", make sure policy is at least c
@@ -2990,7 +3038,7 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(std::queue<std::vector<N
 
 	if(strategy == "a" || strategy == "d"){
 	  if(n->GetOwnEdge()->GetP() < minimum_policy){
-	    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Increased policy from " << n->GetOwnEdge()->GetP() << " to " << minimum_policy << " since the helper is trusted (strategy a) and the policy was lower:";
+	    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Increased policy from " << n->GetOwnEdge()->GetP() << " to " << minimum_policy << " since the helper is trusted (strategy a or d) and the policy was lower:";
 	    n->GetOwnEdge()->SetP(minimum_policy);
 	  }
 	} else {
@@ -3022,7 +3070,7 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(std::queue<std::vector<N
       }
     }
     // Reset the variable, if it was non-empty.
-    queue_of_vector_of_nodes_from_helper_added_by_this_thread = {};
+    foo->queue_of_vector_of_nodes_from_helper_added_by_this_thread = {};
     search_->nodes_mutex_.unlock();
   }
   if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "MaybeAdjustPolicyForHelperAddedNodes() finished";

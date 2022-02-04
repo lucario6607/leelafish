@@ -466,6 +466,7 @@ void Search::AuxEngineWorker() {
 
   int pv_length = 1;
   int depth_reached = 0;
+  int nodes_to_support = 0;
   int max_pv_length = 99; // Dirty work around for too many levels of recursion.
 
   while(iss >> pv >> std::ws) {
@@ -480,6 +481,11 @@ void Search::AuxEngineWorker() {
       // Figure out which depth was reached (can be zero).
       iss >> depth_reached >> std::ws;
       // if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Reached depth: " << depth_reached << " for node with depth: " << depth;
+    }
+    if (pv == "nodes") {
+      // Figure out how many nodes this PV is based on.
+      iss >> nodes_to_support >> std::ws;
+      // if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Nodes in support for this PV: " << nodes_to_support;
     }
 
     // Either "don't require depth" or depth > 14
@@ -557,13 +563,15 @@ void Search::AuxEngineWorker() {
       size = search_stats_->fast_track_extend_and_evaluate_queue_.size();
       if(size < 10000){ // safety net, silently drop PV:s if we cannot extend nodes fast enough. lc0 stalls when this number is too high.
 	search_stats_->fast_track_extend_and_evaluate_queue_.push(my_moves_from_the_white_side);
+	search_stats_->starting_depth_of_PVs_.push(depth);
+	search_stats_->amount_of_support_for_PVs_.push(nodes_to_support);
 	fast_track_extend_and_evaluate_queue_mutex_.unlock();
 	// search_stats_->source_of_PVs.push(source);
       } else {
 	// just unlock
 	fast_track_extend_and_evaluate_queue_mutex_.unlock();	
       }
-      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread " << thread << ": Added a PV, queue has size: " << size;
+      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread " << thread << ": Added a PV starting at depth " << depth << " with " << nodes_to_support  << " nodes to support it. Queue has size: " << size;
     } else {
       if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread " << thread << ": Discarding a nice PV because the final purge was already made, so this PV could be irrelevant already." << source; // get some use for source :-)
     }

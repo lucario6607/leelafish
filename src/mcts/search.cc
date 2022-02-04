@@ -3032,7 +3032,7 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	}
 
 	if(strategy == "d"){
-	  // make sure that policy is at least as good as the best sibling
+	  // make sure that policy is at least as good as the best sibling.
 	  float highest_p = 0;
 	  // loop through the policies of the siblings.
 	  for (auto& edge : n->GetParent()->Edges()) {
@@ -3040,6 +3040,8 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	  }
 	  minimum_policy = highest_p;	  
 	}
+	// Actually, make it slightly higher to compensate for that the other move already has more visits.
+	minimum_policy = minimum_policy * 1.1;
 
 	if(strategy == "a" || strategy == "d"){
 	  if(n->GetOwnEdge()->GetP() < minimum_policy){

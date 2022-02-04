@@ -1409,6 +1409,11 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
   bool black_to_move = ! search_->played_history_.IsBlackToMove() ^ (ply % 2 == 0);
   bool edge_found = false;
 
+  // Check if search is stopped.
+  if(search_->stop_.load(std::memory_order_acquire)){
+    LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation_inner() returning early because search is stopped";
+  }
+
   search_->nodes_mutex_.lock_shared();
   if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Got a lock on nodes reading for node: " << my_node->DebugString();
 
@@ -2981,8 +2986,8 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
       foo->queue_of_vector_of_nodes_from_helper_added_by_this_thread.pop();
 
       float branching_factor = 1.6f;
-      int length_of_pv = foo->length_of_PVs_.front();
-      foo->length_of_PVs_.pop();
+      // int length_of_pv = foo->length_of_PVs_.front();
+      // foo->length_of_PVs_.pop();
       int starting_depth_of_PV = foo->starting_depth_of_PVs_.front();
       foo->starting_depth_of_PVs_.pop();
       int amount_of_support = foo->amount_of_support_for_PVs_.front();
@@ -3006,7 +3011,7 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	// divide the amount of support with the current depth ^ scaling factor to the ge current support
 	int current_depth = depth - starting_depth_of_PV + j;
 	int current_amount_of_support = float(amount_of_support) / pow(current_depth, branching_factor);
-	LOGFILE << "MaybeAdjustPolicyForHelperAddedNodes() at a node with current depth (distance from first node in PV) = " << current_depth << ". Starting depth of PV: " << starting_depth_of_PV << ". Distance from root for current node: " << depth << ". Original pv length: " << length_of_pv << ", number of added nodes: " << my_pv_size << ", amount of support for the PV: " << amount_of_support << " amount of support for this node: " << current_amount_of_support;
+	LOGFILE << "MaybeAdjustPolicyForHelperAddedNodes() at a node with current depth (distance from first node in PV) = " << current_depth << ". Starting depth of PV: " << starting_depth_of_PV << ". Distance from root for current node: " << depth << ", number of added nodes: " << my_pv_size << ", amount of support for the PV: " << amount_of_support << " amount of support for this node: " << current_amount_of_support;
 
 	// Strategies for policy adjustment:
 	// a "trust the helper", make sure policy is at least c

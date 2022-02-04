@@ -92,9 +92,7 @@ void Search::AuxEngineWorker() {
   // modifying search_stats_->thread_counter or the vector_of_*
   // vectors
 
-  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread X About to aquire a lock on pure_stats_";
   pure_stats_mutex_.lock();
-  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread X aquired a lock on pure_stats_";  
 
   // Find out which thread we are by reading the thread_counter.
 
@@ -102,9 +100,7 @@ void Search::AuxEngineWorker() {
   // initiated, or MaybeTriggerStop() in search.cc will try to write
   // to uninitiated adresses.
 
-  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread X About to read data from pure_stats_";
   long unsigned int our_index = search_stats_->thread_counter;
-  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread X=" << our_index << ".";
 
   // If we are the first thread, and the final purge already has taken place, then return immediately
   if(our_index == 0 &&
@@ -146,16 +142,12 @@ void Search::AuxEngineWorker() {
     search_stats_->vector_of_auxengine_ready_.push_back(true);
 
     // unlock while we wait for the engine to be finished?
-    if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "thread " << our_index << " releasing lock on pure_stats_mutex_ while the helper instance is starting";
     pure_stats_mutex_.unlock();
-    if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "thread " << our_index << " released lock on pure_stats_mutex_ while the helper instance is starting";
 
     auxengine_stopped_mutex_.lock();
     search_stats_->auxengine_stopped_.push_back(true);
     auxengine_stopped_mutex_.unlock();
 
-    if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "thread " << our_index << " about to configure the engine.";    
-    
     {
       std::string bar;
       // If AuxEngineOptionsOnRoot is set, Thread zero uses a different parameter and it continuosly explores root node only.
@@ -175,10 +167,7 @@ void Search::AuxEngineWorker() {
         oss << "setoption name " << token;
         std::getline(iss, token, ';');
         oss << " value " << token;
-        if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << oss.str();
-	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "thread " << our_index << " about to configure the engine.";
 	auxengine_stopped_mutex_.lock();
-	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "thread " << our_index << " configured the engine.";
 	*search_stats_->vector_of_opstreams[our_index] << oss.str() << std::endl;
 	auxengine_stopped_mutex_.unlock();	
       }
@@ -210,9 +199,7 @@ void Search::AuxEngineWorker() {
       }
     }
 
-    if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "thread " << our_index << " aquiring lock on pure_stats_mutex_ since the helper instance is started";
     pure_stats_mutex_.lock();
-    if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "thread " << our_index << " aquired lock on pure_stats_mutex_ since the helper instance is started";    
     if(our_index == 0){
       // Initiate some stats and parameters (Threshold needs to be set
       // earlier, see search() in search.cc)
@@ -230,7 +217,6 @@ void Search::AuxEngineWorker() {
 	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Inactivating the queueing machinery since there is exactly one instance and OnRoot is non-empty.";
 	} else  {
 	  search_stats_->AuxEngineThreshold = params_.GetAuxEngineThreshold();
-	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Settinge threshold to " << search_stats_->AuxEngineThreshold << ".";
 	}
       }
     }
@@ -251,23 +237,22 @@ void Search::AuxEngineWorker() {
 	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Inactivating the queueing machinery since there is exactly one instance and OnRoot is non-empty.";
 	} else  {
 	  search_stats_->AuxEngineThreshold = params_.GetAuxEngineThreshold();
-	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Settinge threshold to " << search_stats_->AuxEngineThreshold << ".";
 	}
 	search_stats_->Total_number_of_nodes = 0;
 	search_stats_->Number_of_nodes_added_by_AuxEngine = 0;
 	search_stats_->size_of_queue_at_start = 0;
 
-	if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Resetting AuxEngine parameters because a new game started.";
 	search_stats_->New_Game = false;
 
 	// change lock
-	if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread 0 about to change locks.";
 	pure_stats_mutex_.unlock();
 	auxengine_mutex_.lock();
     
 	// Occasionally, we get a new pointer to search_stats_ between games (not sure when/why that happens). When it happens, make sure the queues are empty, or the purging of them can fail.
 	// Normally, everything works fine without the next four lines.
-	search_stats_->persistent_queue_of_nodes = {}; 
+	search_stats_->persistent_queue_of_nodes = {};
+	// search_stats_->amount_of_support_for_PVs_ = {};
+	// search_stats_->starting_depth_of_PVs_ = {};
 	// search_stats_->nodes_added_by_the_helper = {};
 	// // search_stats_->source_of_PVs = {};
 	// search_stats_->source_of_queued_nodes = {};

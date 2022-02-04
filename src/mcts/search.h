@@ -57,7 +57,6 @@ class Search {
 
   struct adjust_policy_stats {
     std::queue<std::vector<Node*>> queue_of_vector_of_nodes_from_helper_added_by_this_thread;
-    std::queue<int> length_of_PVs_;
     std::queue<int> starting_depth_of_PVs_;    
     std::queue<int> amount_of_support_for_PVs_;
   };

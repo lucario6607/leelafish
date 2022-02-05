@@ -1412,6 +1412,7 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
   // Check if search is stopped.
   if(search_->stop_.load(std::memory_order_acquire)){
     LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation_inner() returning early because search is stopped";
+    return;
   }
 
   search_->nodes_mutex_.lock_shared();
@@ -1702,6 +1703,12 @@ const std::shared_ptr<Search::adjust_policy_stats> SearchWorker::PreExtendTreeAn
 	LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: finished one iteration, size of nodes_from_helper_added_by_this_PV is " << nodes_from_helper_added_by_this_PV.size();
 	LOGFILE << "Thread: " << this_id << ", PreExtendTreeAndFastTrackForNNEvaluation: finished one iteration, size of queue_of_vector_of_nodes_from_helper_added_by_this_thread is " << queue_of_vector_of_nodes_from_helper_added_by_this_thread.size();
 	LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: finished one iteration, size of search_stats_->fast_track_extend_and_evaluate_queue_ is " << search_->search_stats_->fast_track_extend_and_evaluate_queue_.size();
+      }
+
+      // Check if search is stopped.
+      if(search_->stop_.load(std::memory_order_acquire)){
+	LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation() returning early because search is stopped";
+	return(bar);
       }
 
       // While we extended nodes, someone could have added more PV:s, update our belief about the current size of the queue.
@@ -3008,28 +3015,21 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
       for(long unsigned int j = 0; j < my_pv_size; j++){
 	Node* n = vector_of_nodes_from_helper_added_by_this_thread[j];
 
-	// divide the amount of support with the current depth ^ scaling factor to the ge current support
-	int current_depth = depth - starting_depth_of_PV + j;
-	int current_amount_of_support = float(amount_of_support) / pow(current_depth, branching_factor);
-	LOGFILE << "MaybeAdjustPolicyForHelperAddedNodes() at a node with current depth (distance from first node in PV) = " << current_depth << ". Starting depth of PV: " << starting_depth_of_PV << ". Distance from root for current node: " << depth << ", number of added nodes: " << my_pv_size << ", amount of support for the PV: " << amount_of_support << " amount of support for this node: " << current_amount_of_support;
-
 	// Strategies for policy adjustment:
 	// a "trust the helper", make sure policy is at least c
 	// b "only trust yourself, even with deep analysis", make sure policy is at least c when the move is promising.
 	// c "only trust yourself, don't trust deep analysis", when the move is promising, make sure policy is at least x, which varies with depth.
 	// d "let Q speak", set policy to equal to the policy of the sibling with highest policy.
+	// e like d, but set policy slightly higher than the policy of the sibling with highest policy if the move is promising.
+	// e is the current strategy
 	
 	std::string strategy;
-	float minimum_policy;
 	float c = 0.6f;
 	float min_c = 0.2f;
-	strategy = "d";
+	float minimum_policy = min_c;
+	strategy = "e";
 
-	if(strategy == "c"){
-	  minimum_policy = std::max(min_c, (1.0f - float(j)/float(my_pv_size)) * c);
-	} else {
-	  minimum_policy = c;	  
-	}
+	if(strategy == "a") minimum_policy = c;
 
 	if(strategy == "d"){
 	  // make sure that policy is at least as good as the best sibling.
@@ -3038,42 +3038,40 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	  for (auto& edge : n->GetParent()->Edges()) {
 	    if(edge.GetP() > highest_p) highest_p = edge.GetP();
 	  }
-	  minimum_policy = highest_p;	  
+	  minimum_policy = highest_p;
 	}
-	// Actually, make it slightly higher to compensate for that the other move already has more visits.
-	minimum_policy = minimum_policy * 1.1;
 
-	if(strategy == "a" || strategy == "d"){
-	  if(n->GetOwnEdge()->GetP() < minimum_policy){
-	    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Increased policy from " << n->GetOwnEdge()->GetP() << " to " << minimum_policy << " since the helper is trusted (strategy a or d) and the policy was lower:";
-	    n->GetOwnEdge()->SetP(minimum_policy);
-	  }
-	} else {
-
-	  // Determine if the move is promising or not
-	  
-	  // if starting node is maximising and we are maximising: are we greater?
-	  // if starting node is maximising and we are minimizing: are (-we) greater?
-	  // if starting node is minimizing and we are maximising: are we greater than (-start node)?
-	  // if starting node is minimizing and we are minimizing: are (-we) greater than (-start node)?
-	  // we are maximising if depth + j % 2 == 1
-	  // startnode is maximising if depth % 2 == 1
-	  signed int factor_for_us = ((depth + j) % 2 == 1) ? 1 : -1;
-	  signed int factor_for_parent = ((depth - 1) % 2 == 1) ? 1 : -1;
+	// Determine if the move is promising or not
+	// if starting node is maximising and we are maximising: are we greater?
+	// if starting node is maximising and we are minimizing: are (-we) greater?
+	// if starting node is minimizing and we are maximising: are we greater than (-start node)?
+	// if starting node is minimizing and we are minimizing: are (-we) greater than (-start node)?
+	// we are maximising if depth + j % 2 == 1
+	// startnode is maximising if depth % 2 == 1
+	signed int factor_for_us = ((depth + j) % 2 == 1) ? 1 : -1;
+	signed int factor_for_parent = ((depth - 1) % 2 == 1) ? 1 : -1;
 	
-	  if(factor_for_us * n->GetQ(0.0f) > factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f)){
-	    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is greater than " << factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " which means this is promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j;
-	    // First very crude adjustment strategy: make sure policy is at least 0.2 if the move is promising
-	    // For nodes near root, use a higher minimum, up to, at most 0.6.
-	    // float minimum_policy = std::max(0.2, (1.0f - float(j)/float(my_pv_size)) * 0.6f);
-	    if(n->GetOwnEdge()->GetP() < minimum_policy){
-	      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Increased policy from " << n->GetOwnEdge()->GetP() << " to " << minimum_policy << " since the move is promising:";
-	      n->GetOwnEdge()->SetP(minimum_policy);
-	    }
-	  } else {
-	    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is smaller than " << factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " which means this is NOT promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j;
-	  }
+	if(factor_for_us * n->GetQ(0.0f) > factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f)){
+
+	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is greater than " << factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " which means this is promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j;
+	  // the move is promising
+	  if(strategy == "b") minimum_policy = c;
+	  if(strategy == "e") minimum_policy = std::min(0.90, minimum_policy * 1.1);
+
+	} else {
+	  // Not promising, just explain why.
+	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is smaller than " << factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " which means this is NOT promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j;
 	}
+
+	// if(strategy == "c"){
+	//   // This is still under construction.
+	//   // divide the amount of support with the current depth ^ scaling factor to the ge current support
+	//   int current_depth = depth - starting_depth_of_PV + j;
+	//   int current_amount_of_support = float(amount_of_support) / pow(current_depth, branching_factor);
+	//   LOGFILE << "MaybeAdjustPolicyForHelperAddedNodes() at a node with current depth (distance from first node in PV) = " << current_depth << ". Starting depth of PV: " << starting_depth_of_PV << ". Distance from root for current node: " << depth << ", number of added nodes: " << my_pv_size << ", amount of support for the PV: " << amount_of_support << " amount of support for this node: " << current_amount_of_support;
+	//   minimum_policy = std::max(min_c, (1.0f - float(j)/float(my_pv_size)) * c);
+	// }
+	
       }
     }
     // Reset the variable, if it was non-empty.

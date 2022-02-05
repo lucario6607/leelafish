@@ -3031,7 +3031,7 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 
 	if(strategy == "a") minimum_policy = c;
 
-	if(strategy == "d"){
+	if(strategy == "d" || strategy == "e"){
 	  // make sure that policy is at least as good as the best sibling.
 	  float highest_p = 0;
 	  // loop through the policies of the siblings.

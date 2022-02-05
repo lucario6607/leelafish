@@ -350,11 +350,13 @@ void Search::AuxEngineWorker() {
 	auxengine_mutex_.lock();
 	root_node_->SetAuxEngineMove(0xfffe); // mark root as pending and queue it
 	nodes_mutex_.unlock_shared(); // unlock the read-lock on noodes.
+	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker() thread 0 released shared lock nodes_mutex_.";
     	// search_stats_->source_of_queued_nodes.push(3); // inform DoAuxEngine() -> where this node came from.
 	auxengine_mutex_.unlock(); // We will be in DoAuxEngine() until search is stopped, so unlock first.
 	DoAuxEngine(root_node_, our_index);
       } else {
 	nodes_mutex_.unlock_shared(); // unlock, nothing more to do until root gets edges.
+	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker() thread 0 released shared lock nodes_mutex_.";	
 	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker() thread 0 found root node has no edges will sleep 100 ms";
 	using namespace std::chrono_literals;
 	std::this_thread::sleep_for(100ms);
@@ -571,23 +573,28 @@ void Search::DoAuxEngine(Node* n, int index){
   }
 
   if (params_.GetAuxEngineVerbosity() >= 9){
+    LOGFILE << "Thread: " << index << ". DoAuxEngine() trying to aquire a lock on nodes_ and was called for node" << n->DebugString() << " thread: " << index;
     nodes_mutex_.lock_shared();
-    LOGFILE << "DoAuxEngine() called for node" << n->DebugString() << " thread: " << index;
+    LOGFILE << "Thread: " << index << ". DoAuxEngine() aquired a lock on nodes_ and was called for node" << n->DebugString() << " thread: " << index;    
     nodes_mutex_.unlock_shared();
+    LOGFILE << "Thread: " << index << ". DoAuxEngine() released a lock on nodes_";
   }
 
   // Calculate depth.
   int depth = 0;
   if(n != root_node_){
     if(stop_.load(std::memory_order_acquire)) {
-      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine caught a stop signal before starting to calculate depth.";
+      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread: " << index << "DoAuxEngine caught a stop signal before starting to calculate depth.";
       return;
     }
+    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread: " << index << "DoAuxEngine() trying to aquire a lock on nodes_";    
     nodes_mutex_.lock_shared();
+    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread: " << index << "DoAuxEngine() aquired a lock on nodes_";
     for (Node* n2 = n; n2 != root_node_; n2 = n2->GetParent()) {
       depth++;
     }
-    nodes_mutex_.unlock_shared();    
+    nodes_mutex_.unlock_shared();
+    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread: " << index << "DoAuxEngine() released a lock on nodes_";    
   }
 
   auxengine_mutex_.lock();
@@ -644,13 +651,16 @@ void Search::DoAuxEngine(Node* n, int index){
       if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine caught a stop signal while populating my_moves.";
       return;
     }
+    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread: " << index << "DoAuxEngine() trying to aquire a lock on nodes_ in order to create the position for the helper.";    
     nodes_mutex_.lock_shared();  
+    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread: " << index << "DoAuxEngine() aquired a lock on nodes_ in order to create the position for the helper.";
     for (Node* n2 = n; n2 != root_node_; n2 = n2->GetParent()) {
       my_moves.push_back(n2->GetOwnEdge()->GetMove(flip));
       my_moves_from_the_white_side.push_back(n2->GetOwnEdge()->GetMove());
       flip = !flip;
     }
     nodes_mutex_.unlock_shared();
+    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine() released a lock on nodes_.";
   }
 
   // Reverse the order

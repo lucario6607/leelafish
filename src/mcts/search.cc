@@ -3063,14 +3063,20 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is smaller than " << factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " which means this is NOT promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j;
 	}
 
-	// if(strategy == "c"){
-	//   // This is still under construction.
-	//   // divide the amount of support with the current depth ^ scaling factor to the ge current support
-	//   int current_depth = depth - starting_depth_of_PV + j;
-	//   int current_amount_of_support = float(amount_of_support) / pow(current_depth, branching_factor);
-	//   LOGFILE << "MaybeAdjustPolicyForHelperAddedNodes() at a node with current depth (distance from first node in PV) = " << current_depth << ". Starting depth of PV: " << starting_depth_of_PV << ". Distance from root for current node: " << depth << ", number of added nodes: " << my_pv_size << ", amount of support for the PV: " << amount_of_support << " amount of support for this node: " << current_amount_of_support;
-	//   minimum_policy = std::max(min_c, (1.0f - float(j)/float(my_pv_size)) * c);
-	// }
+	if(strategy == "c"){
+	  // This is still under construction.
+	  // divide the amount of support with the current depth ^ scaling factor to the ge current support
+	  int current_depth = depth - starting_depth_of_PV + j;
+	  int current_amount_of_support = float(amount_of_support) / pow(current_depth, branching_factor);
+	  LOGFILE << "MaybeAdjustPolicyForHelperAddedNodes() at a node with current depth (distance from first node in PV) = " << current_depth << ". Starting depth of PV: " << starting_depth_of_PV << ". Distance from root for current node: " << depth << ", number of added nodes: " << my_pv_size << ", amount of support for the PV: " << amount_of_support << " amount of support for this node: " << current_amount_of_support;
+	  minimum_policy = std::max(min_c, (1.0f - float(j)/float(my_pv_size)) * c);
+	}
+
+	// Actually adjust the policy to minimum_policy (if it is not already higher than that).
+	if(n->GetOwnEdge()->GetP() < minimum_policy){
+	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Increased policy from " << n->GetOwnEdge()->GetP() << " to " << minimum_policy;
+	  n->GetOwnEdge()->SetP(minimum_policy);
+	}
 	
       }
     }

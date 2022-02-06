@@ -354,7 +354,8 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
 // Decides whether anything important changed in stats and new info should be
 // shown to a user.
 void Search::MaybeOutputInfo() {
-  SharedMutex::Lock lock(nodes_mutex_);
+  // SharedMutex::Lock lock(nodes_mutex_);
+  nodes_mutex_.lock_shared();
   Mutex::Lock counters_lock(counters_mutex_);
   if (!bestmove_is_sent_ && current_best_edge_ &&
       (current_best_edge_.edge() != last_outputted_info_edge_ ||
@@ -375,6 +376,7 @@ void Search::MaybeOutputInfo() {
       uci_responder_->OutputThinkingInfo(&info);
     }
   }
+  nodes_mutex_.unlock_shared();  
 }
 
 int64_t Search::GetTimeSinceStart() const {

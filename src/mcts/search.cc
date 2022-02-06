@@ -1232,7 +1232,9 @@ void Search::CancelSharedCollisions() REQUIRES(nodes_mutex_) {
 Search::~Search() {
   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "About to destroy search.";
   Abort();
+  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "In the search destructor about to Wait().";
   Wait();
+  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "In the search destructor about to get a lock.";
   nodes_mutex_.lock_shared();
   CancelSharedCollisions();
   nodes_mutex_.unlock_shared();

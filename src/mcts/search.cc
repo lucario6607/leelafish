@@ -579,14 +579,15 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
                               StoppersHints* hints) {
   hints->Reset();
 
-  LOGFILE << "MaybeTriggerStop() called. Trying to get a lock on nodes";
-  SharedMutex::Lock nodes_lock(nodes_mutex_);
+  nodes_mutex_.lock_shared();
   Mutex::Lock lock(counters_mutex_);
-  LOGFILE << "MaybeTriggerStop() got the lock.";
-  // Already responded bestmove, nothing to do here.
-  if (bestmove_is_sent_) return;
-  // Don't stop when the root node is not yet expanded.
-  if (total_playouts_ + initial_visits_ == 0) return;
+  // Return early if some other thread already has responded bestmove,
+  // or if the root node is not yet expanded.
+  if (bestmove_is_sent_ || total_playouts_ + initial_visits_ == 0) {
+    nodes_mutex_.unlock_shared();
+    return;
+  }
+
   hints->UpdateIndexOfBestEdge(-1);
   if (!stop_.load(std::memory_order_acquire)) {
     if(stopper_->ShouldStop(stats, hints)){
@@ -774,6 +775,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
   } else {
     if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Finished MaybeTriggerStop() finished, not stopping search yet.";
   }
+  nodes_mutex_.unlock_shared();
 }
 
 // Return the evaluation of the actual best child, regardless of temperature
@@ -1229,11 +1231,10 @@ Search::~Search() {
   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "About to destroy search.";
   Abort();
   Wait();
-  {
-    SharedMutex::Lock lock(nodes_mutex_);
-    CancelSharedCollisions();
-  }
-  AuxWait();  // This can take some time during which we are not ready to respond readyok, so for now increase timemargin.
+  nodes_mutex_.lock_shared();
+  CancelSharedCollisions();
+  nodes_mutex_.unlock_shared();
+  AuxWait();
   LOGFILE << "Search destroyed.";
 }
 

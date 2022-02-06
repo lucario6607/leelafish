@@ -293,33 +293,30 @@ void Search::AuxEngineWorker() {
 		    << " nodes from the query queue due to the move selected by the opponent. " << search_stats_->persistent_queue_of_nodes.size()
 		    << " nodes remain in the queue.";
 	}
+	// Also purge obsolete PV:s
+	if(search_stats_->fast_track_extend_and_evaluate_queue_.size() > 0){
+	  long unsigned int my_size = search_stats_->fast_track_extend_and_evaluate_queue_.size();
+	  std::queue<std::vector<Move>> fast_track_extend_and_evaluate_queue_temp_;
+	  for(long unsigned int i=0; i < my_size; i++){
+	    std::vector<Move> pv = search_stats_->fast_track_extend_and_evaluate_queue_.front();
+	    search_stats_->fast_track_extend_and_evaluate_queue_.pop();
+	    if(pv[0] == root_node_->GetOwnEdge()->GetMove()){
+	      // remove the first move, which is the move the opponent made that lead to the current position
+	      pv.erase(pv.begin());
+	      fast_track_extend_and_evaluate_queue_temp_.push(pv);
+	    }
+	  }
+	  // Empty the queue and copy back the relevant ones.
+	  search_stats_->fast_track_extend_and_evaluate_queue_ = {};
+	  long unsigned int size_kept = fast_track_extend_and_evaluate_queue_temp_.size();
+	  for(long unsigned int i=0; i < size_kept; i++){
+	    search_stats_->fast_track_extend_and_evaluate_queue_.push(fast_track_extend_and_evaluate_queue_temp_.front());
+	    fast_track_extend_and_evaluate_queue_temp_.pop();
+	  }
+	  LOGFILE << "Purged " << my_size - size_kept << " PVs due to the move selected by the opponent. " << size_kept
+		  << " PVs remain in the queue.";
+	}
 	
-	// // Also purge stale nodes from the _added_ queue.
-	// if(search_stats_->nodes_added_by_the_helper.size() > 0){
-	//   int number_of_nodes_before_purging = int(search_stats_->nodes_added_by_the_helper.size() / 2);
-	//   std::queue<Node*> nodes_added_by_the_helper_temp_;
-	//   long unsigned int my_size = search_stats_->nodes_added_by_the_helper.size();      
-	//   for(long unsigned int i=0; i < my_size; i = i + 2){
-	//     Node * n = search_stats_->nodes_added_by_the_helper.front();
-	//     search_stats_->nodes_added_by_the_helper.pop();
-	//     Node * n_parent = search_stats_->nodes_added_by_the_helper.front();
-	//     search_stats_->nodes_added_by_the_helper.pop();
-	//     if(n_parent == root_node_){
-	//       // node is still relevant
-	//       nodes_added_by_the_helper_temp_.push(n);
-	//     }
-	//   }
-	//   // update search_stats_->nodes_added_by_the_helper
-	//   my_size = nodes_added_by_the_helper_temp_.size();
-	//   for(long unsigned int i=0; i < my_size; i++){      
-	//     search_stats_->nodes_added_by_the_helper.push(nodes_added_by_the_helper_temp_.front());
-	//     nodes_added_by_the_helper_temp_.pop();
-	//   }
-	//   if (params_.GetAuxEngineVerbosity() >= 4)
-	//     LOGFILE << "Purged " << number_of_nodes_before_purging - search_stats_->nodes_added_by_the_helper.size()
-	// 	    << " stale nodes from the queue of nodes added by the auxillary helper due to the move seleted by the opponent. " << search_stats_->nodes_added_by_the_helper.size()
-	// 	    << " nodes remain in the queue of nodes added by the auxillary helper.";
-	// }
       }
 
       // More stuff for thread zero only
@@ -894,12 +891,34 @@ void Search::AuxWait() {
   if(search_stats_->fast_track_extend_and_evaluate_queue_.empty()){
     if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE << "No PVs in the fast_track_extend_and_evaluate_queue";
   } else {
-    if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE << search_stats_->fast_track_extend_and_evaluate_queue_.size() << " possibly obsolete PV:s in the queue.";
+    if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE << search_stats_->fast_track_extend_and_evaluate_queue_.size() << " possibly obsolete PV:s in the queue, checking which of them are still relevant based on our move " << final_bestmove_.as_string();
+
+    // Check if the first move in each PV is the move we played
+    // Store the PVs that are still relevant in a temporary queue
+    std::queue<std::vector<Move>> fast_track_extend_and_evaluate_queue_temp_;
+    long unsigned int my_size = search_stats_->fast_track_extend_and_evaluate_queue_.size();
+    for(long unsigned int i=0; i < my_size; i++){
+      std::vector<Move> pv = search_stats_->fast_track_extend_and_evaluate_queue_.front();
+      search_stats_->fast_track_extend_and_evaluate_queue_.pop();
+      // final_bestmove_ is not necessarily from white's point of view.
+      // but pv[0] is always from white's point of view.
+      Move m;
+      Move::ParseMove(&m, pv[0].as_string(), played_history_.IsBlackToMove());
+      // m is now rotated if needed
+      if(m == final_bestmove_){
+	// remove the first move, which is the move we just played
+	pv.erase(pv.begin());
+	fast_track_extend_and_evaluate_queue_temp_.push(pv);
+      }
+    }
+    // Empty the queue and copy back the relevant ones.
     search_stats_->fast_track_extend_and_evaluate_queue_ = {};
-    // Also empty the source queue
-    // search_stats_->source_of_PVs = {};    
-    // TODO save the PV if it is still relevant
-    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Number of PV:s in the queue=" << search_stats_->fast_track_extend_and_evaluate_queue_.size();
+    long unsigned int size_kept = fast_track_extend_and_evaluate_queue_temp_.size();
+    for(long unsigned int i=0; i < size_kept; i++){
+      search_stats_->fast_track_extend_and_evaluate_queue_.push(fast_track_extend_and_evaluate_queue_temp_.front());
+      fast_track_extend_and_evaluate_queue_temp_.pop();
+    }
+    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Number of PV:s in the queue after purging: " << search_stats_->fast_track_extend_and_evaluate_queue_.size();
   }
   fast_track_extend_and_evaluate_queue_mutex_.unlock();  
   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxWait done search_stats_ at: " << &search_stats_ << " size of queue is: " << my_size;

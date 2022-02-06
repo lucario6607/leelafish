@@ -1415,12 +1415,12 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 
   // Check if search is stopped.
   if(search_->stop_.load(std::memory_order_acquire)){
-    LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation_inner() returning early because search is stopped";
+    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation_inner() returning early because search is stopped";
     return;
   }
-  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Trying to get a lock on nodes reading for node: " << my_node->DebugString();
+  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Trying to get a lock on nodes reading for node: " << my_node->DebugString();
   search_->nodes_mutex_.lock_shared();
-  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Got a lock on nodes reading for node: " << my_node->DebugString();
+  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Got a lock on nodes reading for node: " << my_node->DebugString();
 
   // Unless this is the starting position, check what brought us here (for informational purposes)
   if(params_.GetAuxEngineVerbosity() >= 9 && search_->played_history_.GetLength() > 1){
@@ -1448,14 +1448,14 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
     const EdgeAndNode Leelas_favourite = search_->GetBestChildNoTemperature(my_node, ply);
     if(my_node->GetAuxEngineMove() == 0xffff){
       if(Leelas_favourite.HasNode()){
-	LOGFILE << "Leelas favourite move has not been queried, it is " << Leelas_favourite.GetMove(black_to_move).as_string() << ", node: " << Leelas_favourite.DebugString() << ", queueing it now.";
+	if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Leelas favourite move has not been queried, it is " << Leelas_favourite.GetMove(black_to_move).as_string() << ", node: " << Leelas_favourite.DebugString() << ", queueing it now.";
 	AuxMaybeEnqueueNode(Leelas_favourite.node());
       }
     } else {
-      LOGFILE << "Leelas favourite move has already been queried. It is " << Leelas_favourite.GetMove(black_to_move).as_string() << ", node: " << Leelas_favourite.DebugString();
+      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Leelas favourite move has already been queried. It is " << Leelas_favourite.GetMove(black_to_move).as_string() << ", node: " << Leelas_favourite.DebugString();
     }
   } else {
-    LOGFILE << "my_node has no children, so the added node has no obvious challengers to enqueue.";
+    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "my_node has no children, so the added node has no obvious challengers to enqueue.";
   }
 
   // Find the edge
@@ -1474,14 +1474,14 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	  }
 	  // unlock nodes so that the next level can write stuff.
 	  search_->nodes_mutex_.unlock_shared();
-	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Releasing lock before calling PreExtendTreeAndFastTrackForNNEvaluation_inner() recursively.";
+	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Releasing lock before calling PreExtendTreeAndFastTrackForNNEvaluation_inner() recursively.";
 	  PreExtendTreeAndFastTrackForNNEvaluation_inner(edge.node(), my_moves, ply+1, nodes_added, source, nodes_from_helper_added_by_this_PV);
 
 	} else {
 	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "All moves in the PV already expanded, nothing to do.";
 	  // unlock nodes before returning.
 	  search_->nodes_mutex_.unlock_shared();
-	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Releasing lock before returning from PreExtendTreeAndFastTrackForNNEvaluation_inner()";
+	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Releasing lock before returning from PreExtendTreeAndFastTrackForNNEvaluation_inner()";
 	  return;
 	}
       } else {
@@ -1496,9 +1496,7 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	// GetOrSpawnNode() does work with the lock on since it does not modify the tree.
 	Node* child_node = edge.GetOrSpawnNode(my_node, nullptr);
 
-	LOGFILE << "size of nodes_from_helper_added_by_this_PV: " << nodes_from_helper_added_by_this_PV->size();
 	nodes_from_helper_added_by_this_PV->push_back(child_node);
-	LOGFILE << "size of nodes_from_helper_added_by_this_PV after adding nodes: " << nodes_from_helper_added_by_this_PV->size();
 
 	// // Also record the node, and its source, in the global vectors.
 	// search_->pure_stats_mutex_.lock();
@@ -1516,13 +1514,13 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	
 	// unlock the read lock on nodes so that ExtendNode() can get a write lock.
 	search_->nodes_mutex_.unlock_shared();
-	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Releasing lock on nodes so that ExtendNode() can get a write lock.";
+	if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Releasing lock on nodes so that ExtendNode() can get a write lock.";
 	// ExtendNode(child_node, ply+2);	
 	ExtendNode(child_node, ply+2, moves_to_this_node, &history); // This will modify history which will be re-used later here.
 	// Get a read lock again
-	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Trying to aquire the lock on nodes again.";		
+	if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Trying to aquire the lock on nodes again.";		
 	search_->nodes_mutex_.lock_shared();
-	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Aquiring the lock on nodes again.";	
+	if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Aquiring the lock on nodes again.";	
 
 	// queue for NN evaluation.
 	if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Adding newly extended node: " << child_node->DebugString() << " to the minibatch_";
@@ -1566,7 +1564,7 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 
 	// unlock the readlock.
 	search_->nodes_mutex_.unlock_shared();
-	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Releasing lock on nodes. finished adding the node.";	
+	if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Releasing lock on nodes. finished adding the node.";	
 	if (!is_terminal && (int) my_moves.size() > ply+1){
 	  // Go deeper.
 	  PreExtendTreeAndFastTrackForNNEvaluation_inner(child_node, my_moves, ply+1, nodes_added, source, nodes_from_helper_added_by_this_PV);
@@ -1586,12 +1584,11 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	// Increase the number of visits_in_flight to add for each generational step, until the
 	// number is equal to nodes_added.
 	int visits_to_add = 1;
-	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Trying to aquire a lock on nodes to adjust IncrementNInFlight";	
+	if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Trying to aquire a lock on nodes to adjust IncrementNInFlight";	
 	search_->nodes_mutex_.lock();
-	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Aquired a lock on nodes to adjust IncrementNInFlight";
+	if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Aquired a lock on nodes to adjust IncrementNInFlight";
 	for(Node * n = child_node; n != search_->root_node_; n = n->GetParent()){
 	  n->IncrementNInFlight(visits_to_add);  
-	  // LOGFILE << "Added visits_in_flight=" << visits_to_add << " to node " << n->DebugString();
 	  if(visits_to_add < nodes_added){
 	    visits_to_add++;
 	  }
@@ -1599,7 +1596,7 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	// The loop above stops just before root, so fix root too. // TODO fix this ugly off-by-one hack. (perhaps test for n != nullptr)
 	search_->root_node_->IncrementNInFlight(visits_to_add);
 	search_->nodes_mutex_.unlock();
-	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Unlocked the lock on nodes used to adjust IncrementNInFlight.";
+	if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Unlocked the lock on nodes used to adjust IncrementNInFlight.";
 	return;
       }
     }
@@ -1673,14 +1670,14 @@ const std::shared_ptr<Search::adjust_policy_stats> SearchWorker::PreExtendTreeAn
       std::vector<lczero::Move> my_moves = search_->search_stats_->fast_track_extend_and_evaluate_queue_.front(); // read the element
       search_->search_stats_->fast_track_extend_and_evaluate_queue_.pop(); // remove it from the queue.
       int amount_of_support_for_PVs_ = search_->search_stats_->amount_of_support_for_PVs_.front();
-      LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: size of amount_of_support_for_PVs_ is " << search_->search_stats_->amount_of_support_for_PVs_.size();
+      // LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: size of amount_of_support_for_PVs_ is " << search_->search_stats_->amount_of_support_for_PVs_.size();
       search_->search_stats_->amount_of_support_for_PVs_.pop();
       int starting_depth_of_PVs_ = search_->search_stats_->starting_depth_of_PVs_.front();
       search_->search_stats_->starting_depth_of_PVs_.pop();
-      LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: size of starting_depth_of_PVs_ is " << search_->search_stats_->amount_of_support_for_PVs_.size();      
+      // LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: size of starting_depth_of_PVs_ is " << search_->search_stats_->amount_of_support_for_PVs_.size();      
       // int source = search_->search_stats_->source_of_PVs.front();
       // search_->search_stats_->source_of_PVs.pop();
-      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation() popped the node queue (current size: " << search_->search_stats_->fast_track_extend_and_evaluate_queue_.size() << ").";
+      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation() popped the node queue (current size: " << search_->search_stats_->fast_track_extend_and_evaluate_queue_.size() << ").";
       // Finished modifying the queue, release the lock, so that others can add more PVs to it while we extend nodes.
       // long unsigned int queue_size = search_->search_stats_->fast_track_extend_and_evaluate_queue_.size();
       search_->fast_track_extend_and_evaluate_queue_mutex_.unlock(); // unlock
@@ -1697,7 +1694,7 @@ const std::shared_ptr<Search::adjust_policy_stats> SearchWorker::PreExtendTreeAn
       }
       int source = 0; // dummy while we don't track source for the moment.
       std::vector<Node*> nodes_from_helper_added_by_this_PV = {};
-      LOGFILE << "size: " << nodes_from_helper_added_by_this_PV.size();
+      // LOGFILE << "size: " << nodes_from_helper_added_by_this_PV.size();
       PreExtendTreeAndFastTrackForNNEvaluation_inner(search_->root_node_, my_moves, 0, 0, source, &nodes_from_helper_added_by_this_PV);
       if (nodes_from_helper_added_by_this_PV.size() > 0){
 	// add this vector to the queue, since it is not empty
@@ -1716,7 +1713,7 @@ const std::shared_ptr<Search::adjust_policy_stats> SearchWorker::PreExtendTreeAn
 
       // Check if search is stopped.
       if(search_->stop_.load(std::memory_order_acquire)){
-	LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation() returning early because search is stopped";
+	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation() returning early because search is stopped";
 	return(bar);
       }
 
@@ -2987,11 +2984,11 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
   if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << this_id << ", In MaybeAdjustPolicyForHelperAddedNodes(), size of queue to process: " << my_queue_size;
   if(my_queue_size > 0){
     if (!search_->stop_.load(std::memory_order_acquire)) {
-      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "MaybeAdjustPolicy.. trying to aquire a lock on nodes.";      
+      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "MaybeAdjustPolicy.. trying to aquire a lock on nodes.";      
       search_->nodes_mutex_.lock();
-      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "MaybeAdjustPolicy.. aquired a lock on nodes.";
+      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "MaybeAdjustPolicy.. aquired a lock on nodes.";
     } else {
-      LOGFILE << "MaybeAdjustPolicyForHelperAddedNodes() exiting early since search has stopped";
+      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "MaybeAdjustPolicyForHelperAddedNodes() exiting early since search has stopped";
       return;
     }
     while(foo->queue_of_vector_of_nodes_from_helper_added_by_this_thread.size() > 0){    
@@ -3089,7 +3086,7 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
     // Reset the variable, if it was non-empty.
     foo->queue_of_vector_of_nodes_from_helper_added_by_this_thread = {};
     search_->nodes_mutex_.unlock();
-    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "MaybeAdjustPolicy.. released a lock on nodes.";    
+    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "MaybeAdjustPolicy.. released a lock on nodes.";    
   }
   if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "MaybeAdjustPolicyForHelperAddedNodes() finished";
 }

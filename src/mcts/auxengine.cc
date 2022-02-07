@@ -293,7 +293,10 @@ void Search::AuxEngineWorker() {
 		    << " nodes from the query queue due to the move selected by the opponent. " << search_stats_->persistent_queue_of_nodes.size()
 		    << " nodes remain in the queue.";
 	}
-	// Also purge obsolete PV:s
+
+	// Also purge obsolete PV:s, but that requires a different lock
+	auxengine_mutex_.unlock();
+	fast_track_extend_and_evaluate_queue_mutex_.lock();
 	if(search_stats_->fast_track_extend_and_evaluate_queue_.size() > 0){
 	  long unsigned int my_size = search_stats_->fast_track_extend_and_evaluate_queue_.size();
 	  std::queue<std::vector<Move>> fast_track_extend_and_evaluate_queue_temp_;
@@ -313,15 +316,19 @@ void Search::AuxEngineWorker() {
 	    search_stats_->fast_track_extend_and_evaluate_queue_.push(fast_track_extend_and_evaluate_queue_temp_.front());
 	    fast_track_extend_and_evaluate_queue_temp_.pop();
 	  }
+	  if (params_.GetAuxEngineVerbosity() >= 4)	  
 	  LOGFILE << "Purged " << my_size - size_kept << " PVs due to the move selected by the opponent. " << size_kept
 		  << " PVs remain in the queue.";
 	}
+	// switch back locks.
+	fast_track_extend_and_evaluate_queue_mutex_.unlock();
+	auxengine_mutex_.lock();
 	
-      }
+      } // end of if(search_stats_->final_purge_run)
 
       // More stuff for thread zero only
-      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker() finished purging/initiating, will now check if root can be queued";
       search_stats_->initial_purge_run = true; // Inform other threads that they should not purge.
+      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker() finished purging/initiating, will now check if root can be queued";
 
       // switch back the locks
       auxengine_mutex_.unlock();
@@ -365,9 +372,9 @@ void Search::AuxEngineWorker() {
 	auxengine_mutex_.lock();
 	if(!search_stats_->initial_purge_run) {
 	  auxengine_mutex_.unlock();	
-	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker() thread " << our_index << " waiting for thread 0 to purge the queue, will sleep 100 ms";	
+	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker() thread " << our_index << " waiting for thread 0 to purge the queue, will sleep 5 ms";
 	  using namespace std::chrono_literals;
-	  std::this_thread::sleep_for(100ms);
+	  std::this_thread::sleep_for(5ms);
 	} else {
 	  // purge is done, just release the lock.
 	  auxengine_mutex_.unlock();	
@@ -400,12 +407,17 @@ void Search::AuxEngineWorker() {
       }
       // Kickstart root if empty OnRoot options STOP
 
+      // You may only listen if you have this lock: auxengine_listen_mutex_ this way we avoid spurios awakenings.
+      auxengine_listen_mutex_.lock();
+
       {
 	std::unique_lock<std::mutex> lock(auxengine_mutex_);
 	// Wait until there's some work to compute.
 	auxengine_cv_.wait(lock, [&] { return stop_.load(std::memory_order_acquire) || !search_stats_->persistent_queue_of_nodes.empty(); });
+	// at this point, the lock is released and aquired again, which is why we want the outer lock, without which another thread could intercept us here.
 	if (stop_.load(std::memory_order_acquire)) {
 	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxWorker(), thread " << our_index << " caught a stop signal while waiting for a node to process, will exit the while loop now.";
+	  auxengine_listen_mutex_.unlock();
 	  pure_stats_mutex_.lock();
 	  search_stats_->thread_counter--;
 	  // Almost always log the when the last thread exits.
@@ -419,7 +431,8 @@ void Search::AuxEngineWorker() {
 	}
 	n = search_stats_->persistent_queue_of_nodes.front();
 	search_stats_->persistent_queue_of_nodes.pop();
-      } // release the lock
+      } // implictly release the lock on auxengine_mutex_
+      auxengine_listen_mutex_.unlock();
       DoAuxEngine(n, our_index);    
     } // end of not thread zero
   } // end of while loop

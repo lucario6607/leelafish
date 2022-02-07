@@ -92,7 +92,7 @@ class Search {
     int size_of_queue_at_start; // used by Search::AuxEngineWorker() to decide how many node to check for purging at the start of each move. Without this, new nodes added by before the purge happened would cause a crash.
     int current_depth = 1;
     bool final_purge_run = false; // used by maybetriggerstop() to inform auxworker() that final purge happened before initial purge was started.
-    bool initial_purge_run = false; // used by AuxEngineWorker() to inform subsequent threads that they should immediately return.
+    bool initial_purge_run = false; // used by AuxEngineWorker() thread 0 to inform subsequent threads that they should immediately return.
     std::queue<Move*> temporary_queue_of_moves; // 
   };
 
@@ -280,6 +280,7 @@ class Search {
   std::mutex pure_stats_mutex_;
   // std::queue<std::vector<Move>> fast_track_extend_and_evaluate_queue_ GUARDED_BY(fast_track_extend_and_evaluate_queue_mutex_); // for now only used by aux-engine, but could be used by a UCI extension: searchline eg. `go nodes 1000 searchline e2e4 c7c5 g1f3`
   std::mutex auxengine_mutex_;
+  std::mutex auxengine_listen_mutex_;
   std::condition_variable auxengine_cv_;
   std::vector<std::thread> auxengine_threads_;
   int64_t auxengine_total_dur = 0;

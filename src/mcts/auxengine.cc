@@ -102,9 +102,8 @@ void Search::AuxEngineWorker() {
 
   long unsigned int our_index = search_stats_->thread_counter;
 
-  // If we are the first thread, and the final purge already has taken place, then return immediately
-  if(our_index == 0 &&
-     search_stats_->initial_purge_run){
+  // If we are the first thread, and the final purge already has taken place, then return immediately.
+  if(our_index == 0 && search_stats_->final_purge_run){
     pure_stats_mutex_.unlock();    
     return;
   }
@@ -115,7 +114,7 @@ void Search::AuxEngineWorker() {
     return;
   }
   
-  // if our_index is greater than the size of the vectors then we now for sure we must start/initiate everything.
+  // if our_index is greater than the size of the vectors then we know for sure we must start/initiate everything.
   // if our_index + 1 is equal to, or smaller than the size of the vectors then we can safely check search_stats_->vector_of_auxengine_ready_[our_index] and act if it is false
 
   if(our_index + 1 > search_stats_->vector_of_auxengine_ready_.size() ||
@@ -206,6 +205,7 @@ void Search::AuxEngineWorker() {
       search_stats_->AuxEngineTime = params_.GetAuxEngineTime();
       search_stats_->Number_of_nodes_added_by_AuxEngine = 0;
       search_stats_->Total_number_of_nodes = 0;
+      search_stats_->initial_purge_run = true;
       if(search_stats_->New_Game){
 	search_stats_->New_Game = false;
 	// Automatically inactivate the queueing machinery if there is only one instance AND OptionsOnRoot is NON-empty. Could save some time in ultra-bullet.
@@ -340,6 +340,7 @@ void Search::AuxEngineWorker() {
     
   Node* n;
   bool not_yet_notified = true;
+  bool root_is_queued = false;
   while (!stop_.load(std::memory_order_acquire)) {
     // if we are thread zero, don't read from the queue, just take the root node.
     if(our_index == 0 && !params_.GetAuxEngineOptionsOnRoot().empty()){
@@ -384,9 +385,13 @@ void Search::AuxEngineWorker() {
 	not_yet_notified = false;
       }
 
+      // You may only listen if you have this lock: auxengine_listen_mutex_ this way we avoid spurios awakenings.
+      auxengine_listen_mutex_.lock();
+
       // If we are thread 0, (this implies OnRoot is empty) why not kickstart with queueing the root node for a time limited query? Probably an unsual use case, but why not?
       // Kickstart root if empty OnRoot options START
-      if(our_index == 0){
+      if(our_index == 0 && !root_is_queued){
+	if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "AuxEngineWorker() thread 0 adding root node to the queue because AuxEngineOptionsOnRoot is empty.";
 	nodes_mutex_.lock_shared(); // only neede to read GetNumEdges(), SetAuxEngineMove(0xfffe) is already protected by auxengine_mutex_.lock();
 	if(root_node_->GetNumEdges() > 0){
 	  nodes_mutex_.unlock_shared(); // unlock the read-lock on noodes.	  
@@ -398,6 +403,7 @@ void Search::AuxEngineWorker() {
 	    auxengine_cv_.notify_one();
 	  }
 	  auxengine_mutex_.unlock();
+	  root_is_queued = true;
 	} else {
 	  nodes_mutex_.unlock_shared(); // unlock, nothing more to do until root gets edges.
 	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "AuxEngineWorker() thread 0 found root node has no edges will sleep 100 ms";
@@ -406,9 +412,6 @@ void Search::AuxEngineWorker() {
 	}
       }
       // Kickstart root if empty OnRoot options STOP
-
-      // You may only listen if you have this lock: auxengine_listen_mutex_ this way we avoid spurios awakenings.
-      auxengine_listen_mutex_.lock();
 
       {
 	std::unique_lock<std::mutex> lock(auxengine_mutex_);

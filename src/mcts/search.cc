@@ -753,7 +753,9 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     // 		<< "search_stat is at: " << &search_stats_;
     // }
 
+    pure_stats_mutex_.lock();    
     search_stats_->final_purge_run = true; // Inform Search::AuxEngineWorker(), which can start *AFTER* us, that we have already purged stuff. If they also do it, things will break badly.
+    pure_stats_mutex_.unlock();
     
     auxengine_mutex_.unlock(); // play nice with Search::AuxEngineWorker()
 
@@ -1655,6 +1657,16 @@ const std::shared_ptr<Search::adjust_policy_stats> SearchWorker::PreExtendTreeAn
   std::queue<std::vector<Node*>> queue_of_vector_of_nodes_from_helper_added_by_this_thread = {};
   const std::shared_ptr<Search::adjust_policy_stats> bar = std::make_unique<Search::adjust_policy_stats>();
 
+  // Check if search_stats_->initial_purge_run == true. If it is not, then return early, because than AuxWorker() thread 0 hasn't purged the PV:s yet.
+  // to read search_stats_->initial_purge_run, take a lock on auxengine_
+  
+  search_->pure_stats_mutex_.lock();
+  if(!search_->search_stats_->initial_purge_run){
+    search_->pure_stats_mutex_.unlock();
+    return(bar);
+  }
+  search_->pure_stats_mutex_.unlock();
+      
   search_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before reading from it.
   if(search_->search_stats_->fast_track_extend_and_evaluate_queue_.size() > 0){
 
@@ -1666,7 +1678,7 @@ const std::shared_ptr<Search::adjust_policy_stats> SearchWorker::PreExtendTreeAn
 	  ){
       // relase the lock, we only needed it to test if to continue or not
       search_->pure_stats_mutex_.unlock();
-      
+
       if (params_.GetAuxEngineVerbosity() >= 9) {
 	LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: size of minibatch_ is " << minibatch_.size();
 	LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: size of search_stats_->fast_track_extend_and_evaluate_queue_ is " << search_->search_stats_->fast_track_extend_and_evaluate_queue_.size();

@@ -402,7 +402,8 @@ void Search::AuxEngineWorker() {
 	  // root is extended, we can enqueue it
 	  // This is exactly what SearchWorker::AuxMaybeEnqueueNode() does, but we are in class Search:: now, so that function is not available.
 	  auxengine_mutex_.lock();
-	  if(search_stats_->persistent_queue_of_nodes.size() < 10000) { // safety net for too low values of AuxEngineThreshold, which would cause this queue to overflow somehow, or just take too much time to check between moves.
+	  if(! search_stats_->final_purge_run && // Note that final purge may already have happened.
+	     search_stats_->persistent_queue_of_nodes.size() < 10000) { // safety net for too low values of AuxEngineThreshold, which would cause this queue to overflow somehow, or just take too much time to check between moves.
 	    search_stats_->persistent_queue_of_nodes.push(root_node_);
 	    auxengine_cv_.notify_one();
 	  }

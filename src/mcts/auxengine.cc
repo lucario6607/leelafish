@@ -251,19 +251,15 @@ void Search::AuxEngineWorker() {
 
 	search_stats_->New_Game = false;
 
-	// change lock
+	// change lock to purge queue of PVs
 	pure_stats_mutex_.unlock();
+	fast_track_extend_and_evaluate_queue_mutex_.lock();
+	search_stats_->fast_track_extend_and_evaluate_queue_ = {};
+	fast_track_extend_and_evaluate_queue_mutex_.unlock();
+
+	// different lock for queue of nodes
 	auxengine_mutex_.lock();
-    
-	// Occasionally, we get a new pointer to search_stats_ between games (not sure when/why that happens). When it happens, make sure the queues are empty, or the purging of them can fail.
-	// Normally, everything works fine without the next four lines.
-	// search_stats_->persistent_queue_of_nodes = {};
-	// search_stats_->amount_of_support_for_PVs_ = {};
-	// search_stats_->starting_depth_of_PVs_ = {};
-	// search_stats_->nodes_added_by_the_helper = {};
-	// // search_stats_->source_of_PVs = {};
-	// search_stats_->source_of_queued_nodes = {};
-	// search_stats_->source_of_added_nodes = {};
+	search_stats_->persistent_queue_of_nodes = {};
 
       } else {
 	// aquire the right lock

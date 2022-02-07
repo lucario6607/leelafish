@@ -753,10 +753,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     // 		<< "search_stat is at: " << &search_stats_;
     // }
 
-    pure_stats_mutex_.lock();    
     search_stats_->final_purge_run = true; // Inform Search::AuxEngineWorker(), which can start *AFTER* us, that we have already purged stuff. If they also do it, things will break badly.
-    pure_stats_mutex_.unlock();
-    
     auxengine_mutex_.unlock(); // play nice with Search::AuxEngineWorker()
 
     uci_responder_->OutputBestMove(&info);
@@ -1638,7 +1635,7 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
     }
     // Release the read lock before returning
     search_->nodes_mutex_.unlock_shared();
-    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Released the lock on nodes in debugging.";    
+    if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Released the lock on nodes in debugging.";    
   }
 }
 
@@ -1658,7 +1655,7 @@ const std::shared_ptr<Search::adjust_policy_stats> SearchWorker::PreExtendTreeAn
   const std::shared_ptr<Search::adjust_policy_stats> bar = std::make_unique<Search::adjust_policy_stats>();
 
   // Check if search_stats_->initial_purge_run == true. If it is not, then return early, because than AuxWorker() thread 0 hasn't purged the PV:s yet.
-  // to read search_stats_->initial_purge_run, take a lock on auxengine_
+  // to read search_stats_->initial_purge_run, take a lock on pure_stats_.
   
   search_->pure_stats_mutex_.lock();
   if(!search_->search_stats_->initial_purge_run){

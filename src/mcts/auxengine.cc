@@ -103,13 +103,20 @@ void Search::AuxEngineWorker() {
   long unsigned int our_index = search_stats_->thread_counter;
 
   // If we are the first thread, and the final purge already has taken place, then return immediately.
+  // search_stats_->final_purge_run is protected by auxengine_mutex_.
+
+  auxengine_mutex_.lock();    
   if(our_index == 0 && search_stats_->final_purge_run){
+    LOGFILE << "AuxEngineWorker() Thread 0 returning early because purge as already taken place";
+    auxengine_mutex_.unlock();    
     pure_stats_mutex_.unlock();    
     return;
   }
-
+  auxengine_mutex_.unlock();
+  
   // Also, if search has stopped, do not spawn a another helper instance until the next move.
   if(stop_.load(std::memory_order_acquire)){
+    LOGFILE << "AuxEngineWorker() Thread 0 returning early because search has already stopped.";
     pure_stats_mutex_.unlock();
     return;
   }
@@ -250,7 +257,7 @@ void Search::AuxEngineWorker() {
     
 	// Occasionally, we get a new pointer to search_stats_ between games (not sure when/why that happens). When it happens, make sure the queues are empty, or the purging of them can fail.
 	// Normally, everything works fine without the next four lines.
-	search_stats_->persistent_queue_of_nodes = {};
+	// search_stats_->persistent_queue_of_nodes = {};
 	// search_stats_->amount_of_support_for_PVs_ = {};
 	// search_stats_->starting_depth_of_PVs_ = {};
 	// search_stats_->nodes_added_by_the_helper = {};
@@ -326,13 +333,14 @@ void Search::AuxEngineWorker() {
 	
       } // end of if(search_stats_->final_purge_run)
 
-      // More stuff for thread zero only
-      search_stats_->initial_purge_run = true; // Inform other threads that they should not purge.
-      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker() finished purging/initiating, will now check if root can be queued";
-
       // switch back the locks
       auxengine_mutex_.unlock();
       pure_stats_mutex_.lock();
+
+      // More stuff for thread zero only
+      search_stats_->initial_purge_run = true; // Inform other threads that they should not purge.
+      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker() finished purging/initiating, will now check if root can be queued";
+      
     } // Thread zero
   } // Not starting from scratch
 
@@ -370,15 +378,15 @@ void Search::AuxEngineWorker() {
       // Not thread 0, or empty OnRoot options
       if(not_yet_notified){
 	// Wait for search_stats_->initial_purge_run == true before starting to work.
-	auxengine_mutex_.lock();
+	pure_stats_mutex_.lock();	
 	if(!search_stats_->initial_purge_run) {
-	  auxengine_mutex_.unlock();	
+	  pure_stats_mutex_.unlock();
 	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker() thread " << our_index << " waiting for thread 0 to purge the queue, will sleep 5 ms";
 	  using namespace std::chrono_literals;
 	  std::this_thread::sleep_for(5ms);
 	} else {
 	  // purge is done, just release the lock.
-	  auxengine_mutex_.unlock();	
+	  pure_stats_mutex_.unlock();
 	}
 	// OK, we are good to go.
 	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker() thread: " << our_index << " entered main loop.";
@@ -896,11 +904,13 @@ void Search::AuxWait() {
   // Reset counters for the next move:
   search_stats_->Number_of_nodes_added_by_AuxEngine = 0;
   search_stats_->Total_number_of_nodes = 0;
-  search_stats_->initial_purge_run = false;
-  
   long unsigned int my_size = search_stats_->persistent_queue_of_nodes.size();
+  auxengine_mutex_.unlock();
 
-  auxengine_mutex_.unlock();  
+  // initial_purge_run needs another lock.
+  pure_stats_mutex_.lock();
+  search_stats_->initial_purge_run = false;
+  pure_stats_mutex_.unlock();
   
   // Empty the other queue.
   fast_track_extend_and_evaluate_queue_mutex_.lock();

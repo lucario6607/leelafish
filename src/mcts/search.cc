@@ -652,7 +652,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	for (Node* n2 = n; n2 != root_node_ ; n2 = n2->GetParent()) {
 	  // if purge at search start never happened (because of only one move possible, auxworker() never started), then we can have disconnected nodes in the queue.
 	  // if(n2->GetParent() == nullptr || n2->GetParent()->GetParent() == nullptr) break;
-	  if(n2->GetParent() == nullptr || n2->GetParent()->GetParent() == nullptr || n2->GetParent()->GetOwnEdge() == nullptr) break;	  
+	  if(n2->GetParent() == nullptr || n2->GetParent()->GetParent() == nullptr || n2->GetParent()->GetOwnEdge() == nullptr) break;
 	  if(n2->GetParent()->GetParent() == root_node_){
 	    if(n2->GetParent()->GetOwnEdge()->GetMove(played_history_.IsBlackToMove()) == final_bestmove_){
 	      persistent_queue_of_nodes_temp.push(n);

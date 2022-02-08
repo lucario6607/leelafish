@@ -77,7 +77,7 @@ void SearchWorker::AuxMaybeEnqueueNode(Node* n) {
     //   << search_->search_stats_->persistent_queue_of_nodes.size()
     //   << " The source was " << source;
     n->SetAuxEngineMove(0xfffe); // magic for pending
-    if(search_->search_stats_->persistent_queue_of_nodes.size() < 5000) { // safety net for too low values of AuxEngineThreshold, which would cause this queue to overflow somehow, or just take too much time to check between moves.
+    if(search_->search_stats_->persistent_queue_of_nodes.size() < 1000) { // safety net for too low values of AuxEngineThreshold, which would cause this queue to overflow somehow, or just take too much time to check between moves.
       search_->search_stats_->persistent_queue_of_nodes.push(n);
       // search_->search_stats_->source_of_queued_nodes.push(source);
       search_->auxengine_cv_.notify_one();
@@ -532,20 +532,20 @@ void Search::AuxEngineWorker() {
     if (pv == "depth") {
       // Figure out which depth was reached (can be zero).
       iss >> depth_reached >> std::ws;
-      // Safe time by ignoring PVs with low depth.
-      if(require_some_depth && depth_reached < 15) return;
+      // // Safe time by ignoring PVs with low depth.
+      // if(require_some_depth && depth_reached < 15) return;
     }
     if (pv == "nodes") {
       // Figure out how many nodes this PV is based on.
       iss >> nodes_to_support >> std::ws;
       // Save time by ignoring PVs with low support.
-      if(nodes_to_support < 10000){
-	return;
-      }
+      // if(nodes_to_support < 10000){
+      // 	return;
+      // }
     }
 
     // Either "don't require depth" or depth > 14
-    if (pv == "pv" && (! require_some_depth || depth_reached > 14)) {
+    if (pv == "pv" && (nodes_to_support >= 10000 || depth_reached > 14)) {
       while(iss >> pv >> std::ws &&
 	    pv_length < depth_reached &&
 	    pv_length < max_pv_length) {

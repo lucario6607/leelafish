@@ -310,7 +310,7 @@ bool SmartPruningStopper::ShouldStop(const IterationStats& stats,
 
     // Reject early stop if Expected Q and N disagrees.
     if(index_of_largest_n != index_of_highest_q){
-      LOGFILE << "ratio evaluated/budgeted=" << nodes/(nodes + remaining_playouts) << " Rejected smart pruning since child (" << index_of_largest_n << ") is the child with largest n=" << stats.edge_n[index_of_largest_n] << ", but has lower Expected Q=" << expected_q[index_of_largest_n] << "(raw Q=" << stats.q[index_of_largest_n] << ") than child (" << index_of_highest_q << ") which has Expected Q=" << expected_q[index_of_highest_q] << "(raw Q=" << stats.q[index_of_highest_q] << ") and n=" << stats.edge_n[index_of_highest_q] << " beta_prior=" << beta_prior << " beta_prior_base=" << beta_prior_base << " beta_prior_scaler=" << beta_prior_scaler << " nodes=" << nodes << " remaining playouts=" << remaining_playouts; 
+      // LOGFILE << "ratio evaluated/budgeted=" << nodes/(nodes + remaining_playouts) << " Rejected smart pruning since child (" << index_of_largest_n << ") is the child with largest n=" << stats.edge_n[index_of_largest_n] << ", but has lower Expected Q=" << expected_q[index_of_largest_n] << "(raw Q=" << stats.q[index_of_largest_n] << ") than child (" << index_of_highest_q << ") which has Expected Q=" << expected_q[index_of_highest_q] << "(raw Q=" << stats.q[index_of_highest_q] << ") and n=" << stats.edge_n[index_of_highest_q] << " beta_prior=" << beta_prior << " beta_prior_base=" << beta_prior_base << " beta_prior_scaler=" << beta_prior_scaler << " nodes=" << nodes << " remaining playouts=" << remaining_playouts; 
       // Help search to focus on this child:
       hints->UpdateIndexOfBestEdge(index_of_highest_q);
       return false;

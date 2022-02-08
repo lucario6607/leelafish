@@ -77,7 +77,7 @@ void SearchWorker::AuxMaybeEnqueueNode(Node* n) {
     //   << search_->search_stats_->persistent_queue_of_nodes.size()
     //   << " The source was " << source;
     n->SetAuxEngineMove(0xfffe); // magic for pending
-    if(search_->search_stats_->persistent_queue_of_nodes.size() < 10000) { // safety net for too low values of AuxEngineThreshold, which would cause this queue to overflow somehow, or just take too much time to check between moves.
+    if(search_->search_stats_->persistent_queue_of_nodes.size() < 5000) { // safety net for too low values of AuxEngineThreshold, which would cause this queue to overflow somehow, or just take too much time to check between moves.
       search_->search_stats_->persistent_queue_of_nodes.push(n);
       // search_->search_stats_->source_of_queued_nodes.push(source);
       search_->auxengine_cv_.notify_one();
@@ -213,6 +213,7 @@ void Search::AuxEngineWorker() {
       search_stats_->Number_of_nodes_added_by_AuxEngine = 0;
       search_stats_->Total_number_of_nodes = 0;
       search_stats_->initial_purge_run = true;
+      search_stats_->my_pv_cache_.clear(); // Clear the PV cache.
       if(search_stats_->New_Game){
 	search_stats_->New_Game = false;
 	// Automatically inactivate the queueing machinery if there is only one instance AND OptionsOnRoot is NON-empty. Could save some time in ultra-bullet.
@@ -220,7 +221,6 @@ void Search::AuxEngineWorker() {
 	   !params_.GetAuxEngineOptionsOnRoot().empty()
 	   ){
 	  search_stats_->AuxEngineThreshold = 0;
-	  search_stats_->my_pv_cache_.clear(); // Clear the PV cache.
 	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Inactivating the queueing machinery since there is exactly one instance and OnRoot is non-empty.";
 	} else  {
 	  search_stats_->AuxEngineThreshold = params_.GetAuxEngineThreshold();
@@ -300,16 +300,42 @@ void Search::AuxEngineWorker() {
 	// Also purge obsolete PV:s, but that requires a different lock
 	auxengine_mutex_.unlock();
 	fast_track_extend_and_evaluate_queue_mutex_.lock();
-	if(search_stats_->fast_track_extend_and_evaluate_queue_.size() > 0){
-	  long unsigned int my_size = search_stats_->fast_track_extend_and_evaluate_queue_.size();
+
+	nodes_mutex_.lock_shared();
+	// LOGFILE << "AuxWorker() Thread 0 succeeded in switching locks";
+	// Not sure if there is guarantee this edge is still present
+	// LOGFILE << "AuxEngineWorker() testing for nullptr for root node: " << root_node_->DebugString();
+	bool root_valid_move_found = false;
+	Move valid_move;	
+	if(root_node_->GetOwnEdge() == nullptr) {
+	  nodes_mutex_.unlock_shared();	  
+	  LOGFILE << "AuxEngineWorker() found nullptr at the edge to the root_node_";
+	  search_stats_->fast_track_extend_and_evaluate_queue_ = {};
+	} else {
+	  valid_move = root_node_->GetOwnEdge()->GetMove();
+	  nodes_mutex_.unlock_shared();
+	  root_valid_move_found = true;
+	}
+	
+	if(root_valid_move_found &&
+	   search_stats_->fast_track_extend_and_evaluate_queue_.size() > 0){
 	  std::queue<std::vector<Move>> fast_track_extend_and_evaluate_queue_temp_;
-	  for(long unsigned int i=0; i < my_size; i++){
+	  long unsigned int my_size = search_stats_->fast_track_extend_and_evaluate_queue_.size();
+	  while(search_stats_->fast_track_extend_and_evaluate_queue_.size() > 0){
 	    std::vector<Move> pv = search_stats_->fast_track_extend_and_evaluate_queue_.front();
 	    search_stats_->fast_track_extend_and_evaluate_queue_.pop();
-	    if(pv[0] == root_node_->GetOwnEdge()->GetMove()){
-	      // remove the first move, which is the move the opponent made that lead to the current position
-	      pv.erase(pv.begin());
-	      fast_track_extend_and_evaluate_queue_temp_.push(pv);
+	    if(pv.size() > 1){
+	      // LOGFILE << "will test if pv0 is the valid_move: ";
+	      if(pv[0] == valid_move){
+		// remove the first move, which is the move the opponent made that lead to the current position
+		// LOGFILE << "AuxEngineWorker() trying to erase the first move, size is " << pv.size();
+		pv.erase(pv.begin());
+		fast_track_extend_and_evaluate_queue_temp_.push(pv);
+	      } else {
+		// LOGFILE << pv[0].as_string() << " is not equal to " << root_node_->GetOwnEdge()->GetMove().as_string();
+	      }
+	    } else {
+	      LOGFILE << "AuxEngineWorker() found PV of size less than 2, discarding it." << pv.size();		  
 	    }
 	  }
 	  // Empty the queue and copy back the relevant ones.
@@ -506,12 +532,16 @@ void Search::AuxEngineWorker() {
     if (pv == "depth") {
       // Figure out which depth was reached (can be zero).
       iss >> depth_reached >> std::ws;
-      // if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Reached depth: " << depth_reached << " for node with depth: " << depth;
+      // Safe time by ignoring PVs with low depth.
+      if(require_some_depth && depth_reached < 15) return;
     }
     if (pv == "nodes") {
       // Figure out how many nodes this PV is based on.
       iss >> nodes_to_support >> std::ws;
-      // if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Nodes in support for this PV: " << nodes_to_support;
+      // Save time by ignoring PVs with low support.
+      if(nodes_to_support < 10000){
+	return;
+      }
     }
 
     // Either "don't require depth" or depth > 14
@@ -556,6 +586,7 @@ void Search::AuxEngineWorker() {
     std::copy(pv_moves.begin(), pv_moves.end()-1, std::ostream_iterator<int>(oss, ","));
     // Now add the last element with no delimiter
     oss << pv_moves.back();
+    // TODO protect the PV cache with a mutex? Stockfish does not, and worst case scenario is that the same PV is sent again, so probably not needed.
     // https://stackoverflow.com/questions/8581832/converting-a-vectorint-to-string
     if ( search_stats_->my_pv_cache_.find(oss.str()) == search_stats_->my_pv_cache_.end() ) {
       if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "string not found in the cache, adding it.";
@@ -594,10 +625,12 @@ void Search::AuxEngineWorker() {
 	fast_track_extend_and_evaluate_queue_mutex_.unlock();
 	// search_stats_->source_of_PVs.push(source);
       } else {
+	if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Thread " << thread << ": Silently discarded a PV starting at depth " << depth << " with " << nodes_to_support  << " nodes to support it. Queue has size: " << size;
 	// just unlock
 	fast_track_extend_and_evaluate_queue_mutex_.unlock();	
       }
-      if (params_.GetAuxEngineVerbosity() >= 7) LOGFILE << "Thread " << thread << ": Added a PV starting at depth " << depth << " with " << nodes_to_support  << " nodes to support it. Queue has size: " << size;
+      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread " << thread << ": Added a PV starting at depth " << depth << " with " << nodes_to_support  << " nodes to support it. Queue has size: " << size;
+      
     } else {
       if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread " << thread << ": Discarding a nice PV because the final purge was already made, so this PV could be irrelevant already." << source; // get some use for source :-)
     }
@@ -648,18 +681,20 @@ void Search::DoAuxEngine(Node* n, int index){
   }
 
   if (search_stats_->persistent_queue_of_nodes.size() > 0){ // if there is no node in the queue then accept unconditionally.
-    float sample = distribution(generator);
     if(depth > 0 &&
-       depth > params_.GetAuxEngineMaxDepth() &&
-       float(1.0f)/(depth) < sample){
-      // This is exactly what SearchWorker::AuxMaybeEnqueueNode() does, but we are in class Search:: now, so that function is not available.
-      // int source = search_stats_->source_of_queued_nodes.front();
-      // search_stats_->source_of_queued_nodes.pop();
-      search_stats_->persistent_queue_of_nodes.push(n);
-      // search_stats_->source_of_queued_nodes.push(source);
-      auxengine_cv_.notify_one(); // unnecessary?
-      auxengine_mutex_.unlock();
-      return;
+       depth > params_.GetAuxEngineMaxDepth()
+       ){
+      // Only generate a random sample if these parameters are true, save a few random samples
+      if(float(1.0f)/(depth) < distribution(generator)){
+	// This is exactly what SearchWorker::AuxMaybeEnqueueNode() does, but we are in class Search:: now, so that function is not available.
+	// int source = search_stats_->source_of_queued_nodes.front();
+	// search_stats_->source_of_queued_nodes.pop();
+	search_stats_->persistent_queue_of_nodes.push(n);
+	// search_stats_->source_of_queued_nodes.push(source);
+	auxengine_cv_.notify_one(); // unnecessary?
+	auxengine_mutex_.unlock();
+	return;
+      }
     }
   }
 
@@ -734,8 +769,10 @@ void Search::DoAuxEngine(Node* n, int index){
   }
   *search_stats_->vector_of_opstreams[index] << s << std::endl;
   auto auxengine_start_time = std::chrono::steady_clock::now();
+  bool infinite_exploration = false;
   if(index == 0 &&
      !params_.GetAuxEngineOptionsOnRoot().empty()){
+    infinite_exploration = true;
     if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Starting infinite query from root node for thread 0 using the opstream at: " << &search_stats_->vector_of_opstreams[index];
     *search_stats_->vector_of_opstreams[index] << "go infinite " << std::endl;
     if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Started infinite query from root node for thread 0 using the opstream at: " << &search_stats_->vector_of_opstreams[index];    
@@ -805,7 +842,8 @@ void Search::DoAuxEngine(Node* n, int index){
       } else {
 	// Since we are not stopping, do the ordinary stuff
 	// parse and queue PV:s even before the search is finished, if the depth is high enough (which will be determined by AuxEncode_and_Enqueue().
-	if (token == "info") {
+	// but only use this if this is indefinite exploration, otherwise we just get a lot of junk.	
+	if (token == "info" && infinite_exploration) {
 	  // Since we (possibly) now create multiple PV:s per node, also (possibly) add a source.
 	  // auxengine_mutex_.lock(); // take a lock even if we are just reading
 	  // int source = search_stats_->source_of_queued_nodes.front();
@@ -886,7 +924,7 @@ void Search::AuxWait() {
   // Decrease the EngineTime if we're in an endgame.
   ChessBoard my_board = played_history_.Last().GetBoard();
   if((my_board.ours() | my_board.theirs()).count() < 20){
-    search_stats_->AuxEngineTime = std::max(10, int(std::round(params_.GetAuxEngineTime() * 0.50f))); // minimum 30 ms.
+    search_stats_->AuxEngineTime = std::max(10, int(std::round(params_.GetAuxEngineTime() * 0.50f))); // minimum 10 ms.
   }
 
   // Time based queries    
@@ -896,13 +934,16 @@ void Search::AuxWait() {
       << " AuxEngineTime for next iteration " << search_stats_->AuxEngineTime
       << " New AuxEngineThreshold for next iteration " << search_stats_->AuxEngineThreshold
       << " Number of evals " << auxengine_num_evals
-      << " Number of added nodes " << search_stats_->Number_of_nodes_added_by_AuxEngine;
+      << " Number of added nodes " << search_stats_->Number_of_nodes_added_by_AuxEngine
+      << " Entries in the PV cache: " << search_stats_->my_pv_cache_.size();
 
   // Reset counters for the next move:
   search_stats_->Number_of_nodes_added_by_AuxEngine = 0;
   search_stats_->Total_number_of_nodes = 0;
-  long unsigned int my_size = search_stats_->persistent_queue_of_nodes.size();
   auxengine_mutex_.unlock();
+
+  // Clear the PV cache.
+  search_stats_->my_pv_cache_.clear();
 
   // initial_purge_run needs another lock.
   pure_stats_mutex_.lock();
@@ -943,8 +984,8 @@ void Search::AuxWait() {
     }
     if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Number of PV:s in the queue after purging: " << search_stats_->fast_track_extend_and_evaluate_queue_.size();
   }
-  fast_track_extend_and_evaluate_queue_mutex_.unlock();  
-  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxWait done search_stats_ at: " << &search_stats_ << " size of queue is: " << my_size;
+  fast_track_extend_and_evaluate_queue_mutex_.unlock();
+  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxWait done search_stats_ at: " << &search_stats_;
 }
 
 }  // namespace lczero

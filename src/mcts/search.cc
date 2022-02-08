@@ -1452,7 +1452,12 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
     if(my_node->GetAuxEngineMove() == 0xffff){
       if(Leelas_favourite.HasNode()){
 	if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Leelas favourite move has not been queried, it is " << Leelas_favourite.GetMove(black_to_move).as_string() << ", node: " << Leelas_favourite.DebugString() << ", queueing it now.";
-	AuxMaybeEnqueueNode(Leelas_favourite.node());
+	if(!my_node->IsTerminal() &&
+	   my_node->HasChildren()){
+	  AuxMaybeEnqueueNode(Leelas_favourite.node());
+	} else {
+	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Leelas favourite move is probably terminal, do not queue it.";
+	}
       }
     } else {
       if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Leelas favourite move has already been queried. It is " << Leelas_favourite.GetMove(black_to_move).as_string() << ", node: " << Leelas_favourite.DebugString();
@@ -1651,6 +1656,8 @@ const std::shared_ptr<Search::adjust_policy_stats> SearchWorker::PreExtendTreeAn
   // Never add more than 256 nodes to the batch (or you may get these errrors: exception.h:39] Exception: CUDNN error: CUDNN_STATUS_BAD_PARAM (../../src/neural/cuda/layers.cc:228) if max_batch=512
   // options.GetOrDefault<int>("max_batch", 1024)
 
+  // Also never add more than 20 PV:s per batch, or search risks getting stuck adding nodes instead of evaluating them.
+
   std::queue<std::vector<Node*>> queue_of_vector_of_nodes_from_helper_added_by_this_thread = {};
   const std::shared_ptr<Search::adjust_policy_stats> bar = std::make_unique<Search::adjust_policy_stats>();
 
@@ -1669,9 +1676,11 @@ const std::shared_ptr<Search::adjust_policy_stats> SearchWorker::PreExtendTreeAn
 
     search_->pure_stats_mutex_.lock();
     int number_of_added_nodes_at_start = search_->search_stats_->Number_of_nodes_added_by_AuxEngine;
+    int number_of_PVs_added = 0;
     
     while(search_->search_stats_->fast_track_extend_and_evaluate_queue_.size() > 0 &&
-	  search_->search_stats_->Number_of_nodes_added_by_AuxEngine - number_of_added_nodes_at_start < 190 // Need some margin to 256 for the final iteration.
+	  search_->search_stats_->Number_of_nodes_added_by_AuxEngine - number_of_added_nodes_at_start < 190 && // Need some margin to 256 for the final iteration.
+	  number_of_PVs_added < 20
 	  ){
       // relase the lock, we only needed it to test if to continue or not
       search_->pure_stats_mutex_.unlock();
@@ -1709,6 +1718,7 @@ const std::shared_ptr<Search::adjust_policy_stats> SearchWorker::PreExtendTreeAn
       std::vector<Node*> nodes_from_helper_added_by_this_PV = {};
       // LOGFILE << "size: " << nodes_from_helper_added_by_this_PV.size();
       PreExtendTreeAndFastTrackForNNEvaluation_inner(search_->root_node_, my_moves, 0, 0, source, &nodes_from_helper_added_by_this_PV);
+      number_of_PVs_added++;
       if (nodes_from_helper_added_by_this_PV.size() > 0){
 	// add this vector to the queue, since it is not empty
 	// queue_of_vector_of_nodes_from_helper_added_by_this_thread.push(nodes_from_helper_added_by_this_PV);

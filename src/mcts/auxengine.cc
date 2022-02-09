@@ -58,6 +58,7 @@ void Search::OpenAuxEngine() REQUIRES(threads_mutex_) {
 // void SearchWorker::AuxMaybeEnqueueNode(Node* n, int source) {
 void SearchWorker::AuxMaybeEnqueueNode(Node* n) {
   // the caller (DoBackupUpdate()->DoBackupUpdateSingleNode()) has a lock on search_->nodes_mutex_, so no other thread will change n right now.
+  // There are two callers, also PreExtend() which also has that lock
 
   // Since we take a lock below, have to check if search is stopped.
   // No, the real reason is that we must not add nodes after purging has started.
@@ -77,7 +78,7 @@ void SearchWorker::AuxMaybeEnqueueNode(Node* n) {
     //   << search_->search_stats_->persistent_queue_of_nodes.size()
     //   << " The source was " << source;
     n->SetAuxEngineMove(0xfffe); // magic for pending
-    if(search_->search_stats_->persistent_queue_of_nodes.size() < 1000) { // safety net for too low values of AuxEngineThreshold, which would cause this queue to overflow somehow, or just take too much time to check between moves.
+    if(search_->search_stats_->persistent_queue_of_nodes.size() < 15000) { // safety net for too low values of AuxEngineThreshold, which would cause this queue to overflow somehow, or just take too much time to check between moves.
       search_->search_stats_->persistent_queue_of_nodes.push(n);
       // search_->search_stats_->source_of_queued_nodes.push(source);
       search_->auxengine_cv_.notify_one();
@@ -429,7 +430,7 @@ void Search::AuxEngineWorker() {
 	  // This is exactly what SearchWorker::AuxMaybeEnqueueNode() does, but we are in class Search:: now, so that function is not available.
 	  auxengine_mutex_.lock();
 	  if(! search_stats_->final_purge_run && // Note that final purge may already have happened.
-	     search_stats_->persistent_queue_of_nodes.size() < 10000) { // safety net for too low values of AuxEngineThreshold, which would cause this queue to overflow somehow, or just take too much time to check between moves.
+	     search_stats_->persistent_queue_of_nodes.size() < 15000) { // safety net for too low values of AuxEngineThreshold, which would cause this queue to overflow somehow, or just take too much time to check between moves.
 	    search_stats_->persistent_queue_of_nodes.push(root_node_);
 	    auxengine_cv_.notify_one();
 	  }
@@ -545,7 +546,7 @@ void Search::AuxEngineWorker() {
     }
 
     // Either "don't require depth" or depth > 14
-    if (pv == "pv" && (nodes_to_support >= 10000 || depth_reached > 14)) {
+    if (pv == "pv" && (nodes_to_support >= 1000 || depth_reached > 12)) {
       while(iss >> pv >> std::ws &&
 	    pv_length < depth_reached &&
 	    pv_length < max_pv_length) {
@@ -618,7 +619,7 @@ void Search::AuxEngineWorker() {
       long unsigned int size;
       fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before starting to modify it
       size = search_stats_->fast_track_extend_and_evaluate_queue_.size();
-      if(size < 10000){ // safety net, silently drop PV:s if we cannot extend nodes fast enough. lc0 stalls when this number is too high.
+      if(size < 20000){ // safety net, silently drop PV:s if we cannot extend nodes fast enough. lc0 stalls when this number is too high.
 	search_stats_->fast_track_extend_and_evaluate_queue_.push(my_moves_from_the_white_side);
 	search_stats_->starting_depth_of_PVs_.push(depth);
 	search_stats_->amount_of_support_for_PVs_.push(nodes_to_support);
@@ -917,7 +918,57 @@ void Search::AuxWait() {
   }
   if (params_.GetAuxEngineVerbosity() >= 7) LOGFILE << "AuxWait finished shutting down AuxEngineWorker() threads.";
 
-  auxengine_mutex_.lock();  
+  auxengine_mutex_.lock();
+
+  // Store the size of the queue, for possible adjustment of threshold and time
+  search_stats_->AuxEngineQueueSizeAtMoveSelectionTime = search_stats_->persistent_queue_of_nodes.size();
+  search_stats_->Total_number_of_nodes = search_stats_->Total_number_of_nodes + root_node_->GetN();
+  if(params_.GetAuxEngineVerbosity() >= 4) LOGFILE << search_stats_->AuxEngineQueueSizeAtMoveSelectionTime << " nodes left in the query queue at move selection time. Threshold used: " << search_stats_->AuxEngineThreshold;
+
+  // purge obsolete nodes in the helper queues. Note that depending on the move of the opponent more nodes can become obsolete.
+  if(search_stats_->persistent_queue_of_nodes.size() > 0){
+    std::queue<Node*> persistent_queue_of_nodes_temp;
+    // std::queue<int> source_of_queued_nodes_temp;
+    long unsigned int my_size = search_stats_->persistent_queue_of_nodes.size();
+    for(long unsigned int i=0; i < my_size; i++){
+      Node * n = search_stats_->persistent_queue_of_nodes.front(); // read the element
+      search_stats_->persistent_queue_of_nodes.pop(); // remove it from the queue.
+      // int source = search_stats_->source_of_queued_nodes.front(); // read the element
+      // search_stats_->source_of_queued_nodes.pop(); // remove it from the queue.
+      for (Node* n2 = n; n2 != root_node_ ; n2 = n2->GetParent()) {
+	// if purge at search start never happened (because of only one move possible, auxworker() never started), then we can have disconnected nodes in the queue.
+	// if(n2->GetParent() == nullptr || n2->GetParent()->GetParent() == nullptr) break;
+	if(n2->GetParent() == nullptr || n2->GetParent()->GetParent() == nullptr || n2->GetParent()->GetOwnEdge() == nullptr) break;
+	if(n2->GetParent()->GetParent() == root_node_){
+	  if(n2->GetParent()->GetOwnEdge()->GetMove(played_history_.IsBlackToMove()) == final_bestmove_){
+	    persistent_queue_of_nodes_temp.push(n);
+	    // in order to be able to purge nodes that became obsolete and deallocated due to the move of the opponent,
+	    // also save the grandparent that will become root at next iteration if this node is still relevant by then.
+	    persistent_queue_of_nodes_temp.push(n2);
+	    // source_of_queued_nodes_temp.push(source);
+	  }
+	  break;
+	}
+      }
+    }
+    long unsigned int size_kept = persistent_queue_of_nodes_temp.size() / 2;
+    for(long unsigned int i=0; i < size_kept * 2; i++){
+      search_stats_->persistent_queue_of_nodes.push(persistent_queue_of_nodes_temp.front());
+      persistent_queue_of_nodes_temp.pop();
+    }
+      
+    if(params_.GetAuxEngineVerbosity() >= 4)
+      LOGFILE << "Purged " << my_size - size_kept
+	      << " nodes in the query queue based the selected move: " << final_bestmove_.as_string()
+	      << ". " << size_kept << " nodes remain. Sanity check size is " << search_stats_->persistent_queue_of_nodes.size();
+    search_stats_->AuxEngineQueueSizeAfterPurging = size_kept;
+  } else {
+    if(params_.GetAuxEngineVerbosity() >= 4)      
+      LOGFILE << "No nodes in the query queue at move selection";
+  }
+
+  // search_stats_->final_purge_run = true; // Inform Search::AuxEngineWorker(), which can start *AFTER* us, that we have already purged stuff. If they also do it, things will break badly.
+  
   search_stats_->Number_of_nodes_added_by_AuxEngine = search_stats_->Number_of_nodes_added_by_AuxEngine + auxengine_num_updates;
   float observed_ratio = float(search_stats_->Number_of_nodes_added_by_AuxEngine) / search_stats_->Total_number_of_nodes;
 

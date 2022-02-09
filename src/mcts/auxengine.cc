@@ -416,8 +416,8 @@ void Search::AuxEngineWorker() {
 	not_yet_notified = false;
       }
 
-      // You may only listen if you have this lock: auxengine_listen_mutex_ this way we avoid spurios awakenings.
-      auxengine_listen_mutex_.lock();
+      // // You may only listen if you have this lock: auxengine_listen_mutex_ this way we avoid spurios awakenings.
+      // auxengine_listen_mutex_.lock();
 
       // If we are thread 0, (this implies OnRoot is empty) why not kickstart with queueing the root node for a time limited query? Probably an unsual use case, but why not?
       // Kickstart root if empty OnRoot options START
@@ -452,7 +452,7 @@ void Search::AuxEngineWorker() {
 	// at this point, the lock is released and aquired again, which is why we want the outer lock, without which another thread could intercept us here.
 	if (stop_.load(std::memory_order_acquire)) {
 	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxWorker(), thread " << our_index << " caught a stop signal while waiting for a node to process, will exit the while loop now.";
-	  auxengine_listen_mutex_.unlock();
+	  // auxengine_listen_mutex_.unlock();
 	  pure_stats_mutex_.lock();
 	  search_stats_->thread_counter--;
 	  // Almost always log the when the last thread exits.
@@ -467,7 +467,7 @@ void Search::AuxEngineWorker() {
 	n = search_stats_->persistent_queue_of_nodes.front();
 	search_stats_->persistent_queue_of_nodes.pop();
       } // implictly release the lock on auxengine_mutex_
-      auxengine_listen_mutex_.unlock();
+      // auxengine_listen_mutex_.unlock();
       DoAuxEngine(n, our_index);    
     } // end of not thread zero
   } // end of while loop

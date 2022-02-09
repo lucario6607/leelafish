@@ -545,8 +545,8 @@ void Search::AuxEngineWorker() {
       // }
     }
 
-    // Either "don't require depth" or depth > 14
-    if (pv == "pv" && (nodes_to_support >= 1000 || depth_reached > 12)) {
+    // Either "don't require depth" or depth > 14 or at least 10000 nodes
+    if (pv == "pv" && (!require_some_depth || nodes_to_support >= 10000 || depth_reached > 14)) {
       while(iss >> pv >> std::ws &&
 	    pv_length < depth_reached &&
 	    pv_length < max_pv_length) {
@@ -579,7 +579,8 @@ void Search::AuxEngineWorker() {
     }
   }
 
-  if (pv_moves.size() > 0){
+  // Smaller sizes are probably due to bad parsing of strange UCI info.
+  if (pv_moves.size() > 10){
 
     // check if the PV is new
     std::ostringstream oss;
@@ -986,23 +987,32 @@ void Search::AuxWait() {
       << " New AuxEngineThreshold for next iteration " << search_stats_->AuxEngineThreshold
       << " Number of evals " << auxengine_num_evals
       << " Number of added nodes " << search_stats_->Number_of_nodes_added_by_AuxEngine
-      << " Entries in the PV cache: " << search_stats_->my_pv_cache_.size();
+      << " Entries in the PV cache: " << search_stats_->my_pv_cache_.size()
+      << " Called AuxMaybeEnqueueNode() " << number_of_times_called_AuxMaybeEnqueueNode_ << " times.";
 
   // Reset counters for the next move:
+  LOGFILE << "1";
   search_stats_->Number_of_nodes_added_by_AuxEngine = 0;
+  LOGFILE << "2";
   search_stats_->Total_number_of_nodes = 0;
+  LOGFILE << "3";  
   auxengine_mutex_.unlock();
+  LOGFILE << "4";    
 
   // Clear the PV cache.
   search_stats_->my_pv_cache_.clear();
+  LOGFILE << "5";    
 
   // initial_purge_run needs another lock.
   pure_stats_mutex_.lock();
+  LOGFILE << "6";      
   search_stats_->initial_purge_run = false;
+  LOGFILE << "7";      
   pure_stats_mutex_.unlock();
-  
+  LOGFILE << "8";      
   // Empty the other queue.
   fast_track_extend_and_evaluate_queue_mutex_.lock();
+  LOGFILE << "9";        
   if(search_stats_->fast_track_extend_and_evaluate_queue_.empty()){
     if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE << "No PVs in the fast_track_extend_and_evaluate_queue";
   } else {

@@ -178,7 +178,7 @@ Search::Search(const NodeTree& tree, Network* network,
     pending_searchers_.store(params_.GetMaxConcurrentSearchers(),
                              std::memory_order_release);
   }
-  auxengine_mutex_.lock();
+  search_stats_->auxengine_mutex_.lock();
   search_stats_->size_of_queue_at_start = search_stats_->persistent_queue_of_nodes.size();
   search_stats_->final_purge_run = false;
   search_stats_->thread_counter = 0;
@@ -191,7 +191,7 @@ Search::Search(const NodeTree& tree, Network* network,
        << "Search called with search_stats at: " << &search_stats_
        << " size of persistent_queue: " << search_stats_->persistent_queue_of_nodes.size()
        << " threshold=" << search_stats_->AuxEngineThreshold;
-  auxengine_mutex_.unlock();
+  search_stats_->auxengine_mutex_.unlock();
 }
 
 namespace {
@@ -328,11 +328,11 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
       // 	auxengine_stopped_mutex_.lock();
       // 	if(! auxengine_stopped_){
       // 	  iter.node()->SetAuxEngineMove(0xfffe); // magic for pending
-      // 	  auxengine_mutex_.lock();
+      // 	  search_stats_->auxengine_mutex_.lock();
       // 	  search_stats_->persistent_queue_of_nodes.push(iter.node());
       // 	  search_stats_->source_of_queued_nodes.push(2);
       // 	  auxengine_cv_.notify_one();
-      // 	  auxengine_mutex_.unlock();
+      // 	  search_stats_->auxengine_mutex_.unlock();
 	
       // 	  number_of_times_called_AuxMaybeEnqueueNode_ += 1;
       // 	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << " Adding this node from the PV (rank: " << multipv << ") at depth " << depth << " and visits: " << iter.node()->GetN() << " to the helper queue" << iter.node()->DebugString();
@@ -611,7 +611,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
       !bestmove_is_sent_) {
 
     this_tread_triggered_stop = true;
-    auxengine_stopped_mutex_.lock();
+    search_stats_->auxengine_stopped_mutex_.lock();
     // Check the status for each thread, and act accordingly
     for(long unsigned int i = 0; i < search_stats_->auxengine_stopped_.size() ; i++){
       if(!search_stats_->auxengine_stopped_[i]){
@@ -623,7 +623,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "MaybeTriggerStop() Not stopping the A/B helper for thread=" << i << ".";      	
       }
     }
-    auxengine_stopped_mutex_.unlock();
+    search_stats_->auxengine_stopped_mutex_.unlock();
 
     SendUciInfo();
     EnsureBestMoveKnown();
@@ -1379,10 +1379,10 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	nodes_from_helper_added_by_this_PV->push_back(child_node);
 
 	// // Also record the node, and its source, in the global vectors.
-	// search_->pure_stats_mutex_.lock();
+	// search_->search_stats_->pure_stats_mutex_.lock();
 	// search_->search_stats_->nodes_added_by_the_helper.push(child_node);
 	// search_->search_stats_->source_of_added_nodes.push(source);
-	// search_->pure_stats_mutex_.unlock();
+	// search_->search_stats_->pure_stats_mutex_.unlock();
 
 	nodes_added++;
 
@@ -1451,9 +1451,9 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	  return; // someone further down has already added visits_in_flight;
 	}
 	
-	search_->pure_stats_mutex_.lock();
+	search_->search_stats_->pure_stats_mutex_.lock();
 	search_->search_stats_->Number_of_nodes_added_by_AuxEngine += nodes_added;
-	search_->pure_stats_mutex_.unlock();
+	search_->search_stats_->pure_stats_mutex_.unlock();
 	
 	// Not going deeper now, either because the PV is finished, or because we hit a terminal node.
 	// Aquire a write lock to adjust visits_in_flight.
@@ -1536,17 +1536,17 @@ const std::shared_ptr<Search::adjust_policy_stats> SearchWorker::PreExtendTreeAn
   // Check if search_stats_->initial_purge_run == true. If it is not, then return early, because than AuxWorker() thread 0 hasn't purged the PV:s yet.
   // to read search_stats_->initial_purge_run, take a lock on pure_stats_.
   
-  search_->pure_stats_mutex_.lock();
+  search_->search_stats_->pure_stats_mutex_.lock();
   if(!search_->search_stats_->initial_purge_run){
-    search_->pure_stats_mutex_.unlock();
+    search_->search_stats_->pure_stats_mutex_.unlock();
     return(bar);
   }
-  search_->pure_stats_mutex_.unlock();
+  search_->search_stats_->pure_stats_mutex_.unlock();
       
-  search_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before reading from it.
+  search_->search_stats_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before reading from it.
   if(search_->search_stats_->fast_track_extend_and_evaluate_queue_.size() > 0){
 
-    search_->pure_stats_mutex_.lock();
+    search_->search_stats_->pure_stats_mutex_.lock();
     int number_of_added_nodes_at_start = search_->search_stats_->Number_of_nodes_added_by_AuxEngine;
     int number_of_PVs_added = 0;
     
@@ -1555,7 +1555,7 @@ const std::shared_ptr<Search::adjust_policy_stats> SearchWorker::PreExtendTreeAn
 	  number_of_PVs_added < 20
 	  ){
       // relase the lock, we only needed it to test if to continue or not
-      search_->pure_stats_mutex_.unlock();
+      search_->search_stats_->pure_stats_mutex_.unlock();
 
       if (params_.GetAuxEngineVerbosity() >= 9) {
 	LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: size of minibatch_ is " << minibatch_.size();
@@ -1574,7 +1574,7 @@ const std::shared_ptr<Search::adjust_policy_stats> SearchWorker::PreExtendTreeAn
       if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation() popped the node queue (current size: " << search_->search_stats_->fast_track_extend_and_evaluate_queue_.size() << ").";
       // Finished modifying the queue, release the lock, so that others can add more PVs to it while we extend nodes.
       // long unsigned int queue_size = search_->search_stats_->fast_track_extend_and_evaluate_queue_.size();
-      search_->fast_track_extend_and_evaluate_queue_mutex_.unlock(); // unlock
+      search_->search_stats_->fast_track_extend_and_evaluate_queue_mutex_.unlock(); // unlock
       
       if (params_.GetAuxEngineVerbosity() >= 9) {	
 	// show full my_moves
@@ -1613,13 +1613,13 @@ const std::shared_ptr<Search::adjust_policy_stats> SearchWorker::PreExtendTreeAn
       }
 
       // While we extended nodes, someone could have added more PV:s, update our belief about the current size of the queue.
-      search_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before reading from it again.
-      search_->pure_stats_mutex_.lock();
+      search_->search_stats_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before reading from it again.
+      search_->search_stats_->pure_stats_mutex_.lock();
 
     } // Always end the while loop with the lock on.
-    search_->pure_stats_mutex_.unlock();
+    search_->search_stats_->pure_stats_mutex_.unlock();
   }
-  search_->fast_track_extend_and_evaluate_queue_mutex_.unlock(); // unlock
+  search_->search_stats_->fast_track_extend_and_evaluate_queue_mutex_.unlock(); // unlock
   // LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: finished.";
   return(bar);
 }

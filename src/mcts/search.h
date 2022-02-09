@@ -93,7 +93,15 @@ class Search {
     int current_depth = 1;
     bool final_purge_run = false; // used by maybetriggerstop() to inform auxworker() that final purge happened before initial purge was started.
     bool initial_purge_run = false; // used by AuxEngineWorker() thread 0 to inform subsequent threads that they should immediately return.
-    std::queue<Move*> temporary_queue_of_moves; // 
+    std::queue<Move*> temporary_queue_of_moves; //
+
+    std::mutex fast_track_extend_and_evaluate_queue_mutex_;
+    std::mutex pure_stats_mutex_;
+    std::mutex auxengine_mutex_;
+    std::mutex auxengine_listen_mutex_;
+    std::mutex auxengine_stopped_mutex_;
+    std::mutex my_pv_cache_mutex_;    
+
   };
 
   Search(const NodeTree& tree, Network* network,
@@ -276,18 +284,17 @@ class Search {
   // static boost::process::opstream auxengine_os_;
   // static boost::process::child auxengine_c_;
   // static bool auxengine_ready_;
-  std::mutex fast_track_extend_and_evaluate_queue_mutex_;
-  std::mutex pure_stats_mutex_;
-  // std::queue<std::vector<Move>> fast_track_extend_and_evaluate_queue_ GUARDED_BY(fast_track_extend_and_evaluate_queue_mutex_); // for now only used by aux-engine, but could be used by a UCI extension: searchline eg. `go nodes 1000 searchline e2e4 c7c5 g1f3`
-  std::mutex auxengine_mutex_;
-  std::mutex auxengine_listen_mutex_;
+  // std::mutex fast_track_extend_and_evaluate_queue_mutex_;
+  // std::mutex pure_stats_mutex_;
+  // // std::queue<std::vector<Move>> fast_track_extend_and_evaluate_queue_ GUARDED_BY(fast_track_extend_and_evaluate_queue_mutex_); // for now only used by aux-engine, but could be used by a UCI extension: searchline eg. `go nodes 1000 searchline e2e4 c7c5 g1f3`
+  // std::mutex auxengine_mutex_;
+  // std::mutex auxengine_listen_mutex_;
   std::condition_variable auxengine_cv_;
   std::vector<std::thread> auxengine_threads_;
   int64_t auxengine_total_dur = 0;
   int64_t auxengine_num_evals = 0;
   int64_t auxengine_num_updates = 0;
   // when stop_ is issued, only send "Stop" via UCI to once, either from MaybeTriggerStop() or from DoAuxNode(). Once for every thread.
-  std::mutex auxengine_stopped_mutex_;
   std::vector<bool> auxengine_stopped_;
 
   friend class SearchWorker;

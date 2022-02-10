@@ -183,6 +183,7 @@ Search::Search(const NodeTree& tree, Network* network,
   search_stats_->final_purge_run = false;
   search_stats_->thread_counter = 0;
   search_stats_->Number_of_nodes_added_by_AuxEngine = 0;
+  search_stats_->Total_number_of_nodes = root_node_->GetN();  
   if (search_stats_->AuxEngineThreshold == 0 &&
       params_.GetAuxEngineInstances() > 1){
     search_stats_->AuxEngineThreshold = params_.GetAuxEngineThreshold();
@@ -190,6 +191,7 @@ Search::Search(const NodeTree& tree, Network* network,
   if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE
        << "Search called with search_stats at: " << &search_stats_
        << " size of persistent_queue: " << search_stats_->persistent_queue_of_nodes.size()
+       << " size of search tree at start: " << search_stats_->Total_number_of_nodes
        << " threshold=" << search_stats_->AuxEngineThreshold;
   search_stats_->auxengine_mutex_.unlock();
 }
@@ -613,6 +615,8 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     this_tread_triggered_stop = true;
     search_stats_->auxengine_stopped_mutex_.lock();
     // Check the status for each thread, and act accordingly
+    // give the helper engines some slack, perhaps they were started just a millisecond ago.
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
     for(long unsigned int i = 0; i < search_stats_->auxengine_stopped_.size() ; i++){
       if(!search_stats_->auxengine_stopped_[i]){
 	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "MaybeTriggerStop() Stopping the A/B helper Start for thread=" << i << " Start.";
@@ -1552,7 +1556,7 @@ const std::shared_ptr<Search::adjust_policy_stats> SearchWorker::PreExtendTreeAn
     
     while(search_->search_stats_->fast_track_extend_and_evaluate_queue_.size() > 0 &&
 	  search_->search_stats_->Number_of_nodes_added_by_AuxEngine - number_of_added_nodes_at_start < 190 && // Need some margin to 256 for the final iteration.
-	  number_of_PVs_added < 20
+	  number_of_PVs_added < 20 // don't drag the speed down.
 	  ){
       // relase the lock, we only needed it to test if to continue or not
       search_->search_stats_->pure_stats_mutex_.unlock();

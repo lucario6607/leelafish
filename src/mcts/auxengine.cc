@@ -581,8 +581,8 @@ void Search::AuxEngineWorker() {
     }
   }
 
-  // Smaller sizes are probably due to bad parsing of strange UCI info.
-  if (pv_moves.size() > 2){
+  // Too short PV are probably not reliable (> 4 seems to suffice), too high bar can be bad with low values of AuxEngineTime
+  if (pv_moves.size() > 4){
 
     // check if the PV is new
     std::ostringstream oss;
@@ -793,7 +793,8 @@ void Search::DoAuxEngine(Node* n, int index){
   std::string token;
   std::string my_token;  
   bool stopping = false;
-  bool second_stopping = false;  
+  bool second_stopping = false;
+  bool third_stopping = false;
   bool second_stopping_notification = false;
   while(std::getline(*search_stats_->vector_of_ipstreams[index], line)) {
     if (params_.GetAuxEngineVerbosity() >= 9 &&
@@ -856,15 +857,14 @@ void Search::DoAuxEngine(Node* n, int index){
     } else {
       // Stopping is true, but did it happen before or after the helper sent its info line? Assume it was after, in which case the helper is all good.
       if(second_stopping){
-	// No, this was definitely not the first iteration. If it was the second iteration, then act, otherwise just try again
-	if (params_.GetAuxEngineVerbosity() >= 1 &&
-	    !second_stopping_notification) {
-	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "thread: " << index << " We found that search was stopped on the previous iteration, but the current line from the helper was not 'bestmove'. Probably the helper engine does not repond to stop until it has search for some minimum amount of time (like 10 ms). As a workaround send yet another stop";
-	  // We were stopping already before going into this iteration, but the helper did not respond "bestmove", as it ought to have done. Send stop again
-	  search_stats_->auxengine_stopped_mutex_.lock();
-	  *search_stats_->vector_of_opstreams[index] << "stop" << std::endl; // stop the A/B helper
-	  search_stats_->auxengine_stopped_mutex_.unlock();
-	  second_stopping_notification = true;
+	// inspecting the output from the helpers, suggest that it is harmless, just a normal info pv line.
+	// perhaps they output at least one such line, and bestmove will come next?
+	search_stats_->auxengine_stopped_mutex_.lock();
+	*search_stats_->vector_of_opstreams[index] << "stop" << std::endl; // stop the A/B helper
+	search_stats_->auxengine_stopped_mutex_.unlock();
+	if (third_stopping && params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "thread: " << index << " We found that search was stopped on the previous iteration, but the current line from the helper was not 'bestmove'. Probably the helper engine does not repond to stop until it has search for some minimum amount of time (like 10 ms). As a workaround send yet another stop. This is the output from the helper: " << line;
+	if(!third_stopping){
+	  third_stopping = true;
 	}
       } else {
         second_stopping = true;
@@ -886,6 +886,9 @@ void Search::DoAuxEngine(Node* n, int index){
   }
   if(prev_line == ""){
     if (params_.GetAuxEngineVerbosity() >= 1) LOGFILE << "Thread: " << index << " Empty PV, returning early from doAuxEngine().";
+    // TODO restart the helper engine?
+    using namespace std::chrono_literals;
+    std::this_thread::sleep_for(100ms);
     return;
   }
   if (! search_stats_->vector_of_children[index]->running()) {
@@ -929,7 +932,7 @@ void Search::AuxWait() {
 
   // Store the size of the queue, for possible adjustment of threshold and time
   search_stats_->AuxEngineQueueSizeAtMoveSelectionTime = search_stats_->persistent_queue_of_nodes.size();
-  search_stats_->Total_number_of_nodes = search_stats_->Total_number_of_nodes + root_node_->GetN();
+  search_stats_->Total_number_of_nodes = root_node_->GetN() - search_stats_->Total_number_of_nodes;
   if(params_.GetAuxEngineVerbosity() >= 4) LOGFILE << search_stats_->AuxEngineQueueSizeAtMoveSelectionTime << " nodes left in the query queue at move selection time. Threshold used: " << search_stats_->AuxEngineThreshold;
 
   // purge obsolete nodes in the helper queues. Note that depending on the move of the opponent more nodes can become obsolete.

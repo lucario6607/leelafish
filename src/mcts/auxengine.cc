@@ -982,11 +982,11 @@ void Search::AuxWait() {
   search_stats_->Number_of_nodes_added_by_AuxEngine = search_stats_->Number_of_nodes_added_by_AuxEngine + auxengine_num_updates;
   float observed_ratio = float(search_stats_->Number_of_nodes_added_by_AuxEngine) / search_stats_->Total_number_of_nodes;
 
-  // Decrease the EngineTime if we're in an endgame.
-  ChessBoard my_board = played_history_.Last().GetBoard();
-  if((my_board.ours() | my_board.theirs()).count() < 20){
-    search_stats_->AuxEngineTime = std::max(10, int(std::round(params_.GetAuxEngineTime() * 0.50f))); // minimum 10 ms.
-  }
+  // // Decrease the EngineTime if we're in an endgame.
+  // ChessBoard my_board = played_history_.Last().GetBoard();
+  // if((my_board.ours() | my_board.theirs()).count() < 20){
+  //   search_stats_->AuxEngineTime = std::max(10, int(std::round(params_.GetAuxEngineTime() * 0.50f))); // minimum 10 ms.
+  // }
 
   // Time based queries    
   if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Summaries per move: (Time based queries) persistent_queue_of_nodes size at the end of search: " << search_stats_->AuxEngineQueueSizeAtMoveSelectionTime

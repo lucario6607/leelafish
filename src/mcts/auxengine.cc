@@ -558,23 +558,16 @@ void Search::AuxEngineWorker() {
 	  break;
 	  // why not return instead of break?
 	}
+	// m is always from the white side, pv is not. No need to mirror the board then? Actually, yes.
 	// convert to Modern encoding, update the board and the position
-	// For the conversion never flip the board. Only flip the board when you need to apply the move!
+
 	Move m_in_modern_encoding = my_board.GetModernMove(m);
-
-	if (my_board.flipped()) m_in_modern_encoding.Mirror();
-	// Should the move applied be modern or legacy, or does it not matter?
-	m_in_modern_encoding = my_board.GetModernMove(m_in_modern_encoding);
-	// my_board.ApplyMove(m_in_modern_encoding); // Todo verify the correctness here, e.g. by printing a FEN.
-	my_board.ApplyMove(m); // Todo verify the correctness here, e.g. by printing a FEN.	
-	my_position = Position(my_position, m_in_modern_encoding);
-
-	if (my_board.flipped()) m_in_modern_encoding.Mirror();
-	my_board.Mirror();
-
-	// my_moves.push_back(m); // Add the PV to the queue
-	my_moves_from_the_white_side.push_back(m_in_modern_encoding); // Add the PV to the queue	
+	my_moves_from_the_white_side.push_back(m_in_modern_encoding); // Add the PV to the queue 
 	pv_moves.push_back(m_in_modern_encoding.as_packed_int());
+	my_position = Position(my_position, m_in_modern_encoding);	
+	my_board.ApplyMove(m_in_modern_encoding);
+	my_board.Mirror();	
+
 	flip = !flip;
 	pv_length++;
       }

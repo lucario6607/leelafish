@@ -1446,9 +1446,11 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 				 std::move(minibatch_[minibatch_.size()-1].probabilities_to_cache));
 
 	} else {
+	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "The newly extended node is terminal";
 	  minibatch_.push_back(NodeToProcess::Visit(child_node, 1)); // Only one visit, since this is a terminal
 	  minibatch_[minibatch_.size()-1].nn_queried = false;
 	  minibatch_[minibatch_.size()-1].ooo_completed = false;
+	  search_->nodes_mutex_.unlock_shared();	  	  
 	  search_->nodes_mutex_.lock();	  
 	  child_node->IncrementNInFlight(1); // seems necessary.
 	  search_->nodes_mutex_.unlock();

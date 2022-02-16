@@ -1332,13 +1332,13 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
     const EdgeAndNode Leelas_favourite = search_->GetBestChildNoTemperature(my_node, ply);
     if(my_node->GetAuxEngineMove() == 0xffff){
       if(Leelas_favourite.HasNode()){
-	if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Leelas favourite move has not been queried, it is " << Leelas_favourite.GetMove(black_to_move).as_string() << ", node: " << Leelas_favourite.DebugString() << ", queueing it now.";
-	if(!my_node->IsTerminal() &&
-	   my_node->HasChildren()){
-	  AuxMaybeEnqueueNode(Leelas_favourite.node());
-	} else {
-	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Leelas favourite move is probably terminal, do not queue it.";
-	}
+       if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Leelas favourite move has not been queried, it is " << Leelas_favourite.GetMove(black_to_move).as_string() << ", node: " << Leelas_favourite.DebugString() << ", queueing it now.";
+       if(!my_node->IsTerminal() &&
+          my_node->HasChildren()){
+         AuxMaybeEnqueueNode(Leelas_favourite.node());
+       } else {
+         if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Leelas favourite move is probably terminal, do not queue it.";
+       }
       }
     } else {
       if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Leelas favourite move has already been queried. It is " << Leelas_favourite.GetMove(black_to_move).as_string() << ", node: " << Leelas_favourite.DebugString();
@@ -1346,6 +1346,7 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
   } else {
     if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "my_node has no children, so the added node has no obvious challengers to enqueue.";
   }
+  
 
   // Find the edge
   for (auto& edge : my_node->Edges()) {
@@ -1394,18 +1395,8 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	search_->nodes_mutex_.lock();
 	// GetOrSpawnNode() does work with the lock on since it does not modify the tree.
 	Node* child_node = edge.GetOrSpawnNode(my_node, nullptr);
-	// search_->nodes_mutex_.unlock();	
-	// // try switching back a to shared lock
-	// search_->nodes_mutex_.lock_shared();	
-
-	// // Also record the node, and its source, in the global vectors.
-	// search_->search_stats_->pure_stats_mutex_.lock();
-	// search_->search_stats_->nodes_added_by_the_helper.push(child_node);
-	// search_->search_stats_->source_of_added_nodes.push(source);
-	// search_->search_stats_->pure_stats_mutex_.unlock();
-
+	if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Node spawned";
 	ExtendNode(child_node, ply+1, moves_to_this_node, &history); // This will modify history which will be re-used later here.
-
 	// queue for NN evaluation.
 	if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Adding newly extended node: " << child_node->DebugString() << " to the minibatch_";
 
@@ -2120,7 +2111,7 @@ void SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
         int best_idx = -1;
         float best_without_u = std::numeric_limits<float>::lowest();
         float second_best = std::numeric_limits<float>::lowest();
-        bool can_exit = false;
+        // bool can_exit = false;
         best_edge.Reset();
         for (int idx = 0; idx < max_needed; ++idx) {
           if (idx > cache_filled_idx) {
@@ -2172,13 +2163,13 @@ void SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
             second_best_edge = cur_iters[idx];
           }
 
-          if (can_exit) break;
-          if (nstarted == 0) {
-            // One more loop will get 2 unvisited nodes, which is sufficient to
-            // ensure second best is correct. This relies upon the fact that
-            // edges are sorted in policy decreasing order.
-            can_exit = true;
-          }
+          // if (can_exit) break;
+          // if (nstarted == 0) {
+          //   // One more loop will get 2 unvisited nodes, which is sufficient to
+          //   // ensure second best is correct. This relies upon the fact that
+          //   // edges are sorted in policy decreasing order.
+          //   can_exit = true;
+          // }
         }
 
 	// Hack the scores if the child with highest expected Q does not have most visits, ie boost exploration of that child.
@@ -2692,7 +2683,7 @@ void SearchWorker::FetchSingleNodeResult(NodeToProcess* node_to_process,
     ApplyDirichletNoise(node, params_.GetNoiseEpsilon(),
                         params_.GetNoiseAlpha());
   }
-  node->SortEdges();
+  // node->SortEdges();
 }
 
 // 6. Propagate the new nodes' information to all their parents in the tree.
@@ -2885,128 +2876,128 @@ bool SearchWorker::MaybeSetBounds(Node* p, float m, int* n_to_fix,
 
   // 6.5
 void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Search::adjust_policy_stats> foo){
-  std::thread::id this_id = std::this_thread::get_id();
-  long unsigned int my_queue_size = foo->queue_of_vector_of_nodes_from_helper_added_by_this_thread.size();
-  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << this_id << ", In MaybeAdjustPolicyForHelperAddedNodes(), size of queue to process: " << my_queue_size;
-  if(my_queue_size > 0){
-    if (!search_->stop_.load(std::memory_order_acquire)) {
-      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "MaybeAdjustPolicy.. trying to aquire a lock on nodes.";      
-      search_->nodes_mutex_.lock();
-      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "MaybeAdjustPolicy.. aquired a lock on nodes.";
-    } else {
-      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "MaybeAdjustPolicyForHelperAddedNodes() exiting early since search has stopped";
-      return;
-    }
-    while(foo->queue_of_vector_of_nodes_from_helper_added_by_this_thread.size() > 0){    
-      std::vector<Node*> vector_of_nodes_from_helper_added_by_this_thread = foo->queue_of_vector_of_nodes_from_helper_added_by_this_thread.front();
-      foo->queue_of_vector_of_nodes_from_helper_added_by_this_thread.pop();
+  // std::thread::id this_id = std::this_thread::get_id();
+  // long unsigned int my_queue_size = foo->queue_of_vector_of_nodes_from_helper_added_by_this_thread.size();
+  // if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << this_id << ", In MaybeAdjustPolicyForHelperAddedNodes(), size of queue to process: " << my_queue_size;
+  // if(my_queue_size > 0){
+  //   if (!search_->stop_.load(std::memory_order_acquire)) {
+  //     if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "MaybeAdjustPolicy.. trying to aquire a lock on nodes.";      
+  //     search_->nodes_mutex_.lock();
+  //     if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "MaybeAdjustPolicy.. aquired a lock on nodes.";
+  //   } else {
+  //     if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "MaybeAdjustPolicyForHelperAddedNodes() exiting early since search has stopped";
+  //     return;
+  //   }
+  //   while(foo->queue_of_vector_of_nodes_from_helper_added_by_this_thread.size() > 0){    
+  //     std::vector<Node*> vector_of_nodes_from_helper_added_by_this_thread = foo->queue_of_vector_of_nodes_from_helper_added_by_this_thread.front();
+  //     foo->queue_of_vector_of_nodes_from_helper_added_by_this_thread.pop();
 
-      float branching_factor = 1.6f;
-      // int length_of_pv = foo->length_of_PVs_.front();
-      // foo->length_of_PVs_.pop();
-      int starting_depth_of_PV = foo->starting_depth_of_PVs_.front();
-      foo->starting_depth_of_PVs_.pop();
-      int amount_of_support = foo->amount_of_support_for_PVs_.front();
-      foo->amount_of_support_for_PVs_.pop();
+  //     float branching_factor = 1.6f;
+  //     // int length_of_pv = foo->length_of_PVs_.front();
+  //     // foo->length_of_PVs_.pop();
+  //     int starting_depth_of_PV = foo->starting_depth_of_PVs_.front();
+  //     foo->starting_depth_of_PVs_.pop();
+  //     int amount_of_support = foo->amount_of_support_for_PVs_.front();
+  //     foo->amount_of_support_for_PVs_.pop();
 
-      // Until we get the actual length of the PV, work with the number of added nodes instead.
-      long unsigned int my_pv_size = vector_of_nodes_from_helper_added_by_this_thread.size();
+  //     // Until we get the actual length of the PV, work with the number of added nodes instead.
+  //     long unsigned int my_pv_size = vector_of_nodes_from_helper_added_by_this_thread.size();
 
-      // Do we want to maximize or minimize Q?
-      // At root, and thus at even depth, we want to _minimize_ Q (Q is from the perspective of the player who _made the move_ leading up the current position.
-      // Calculate depth.
-      int depth = 0;
-      for (Node* n2 = vector_of_nodes_from_helper_added_by_this_thread[0]; n2 != search_->root_node_; n2 = n2->GetParent()) {
-	depth++;
-      }
-      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "How good is this line I just added based on recommendations from the helper?";
-      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Q of parent to the first added node in the line: " << vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " depth: " << depth - 1;
-      for(long unsigned int j = 0; j < my_pv_size; j++){
-	Node* n = vector_of_nodes_from_helper_added_by_this_thread[j];
+  //     // Do we want to maximize or minimize Q?
+  //     // At root, and thus at even depth, we want to _minimize_ Q (Q is from the perspective of the player who _made the move_ leading up the current position.
+  //     // Calculate depth.
+  //     int depth = 0;
+  //     for (Node* n2 = vector_of_nodes_from_helper_added_by_this_thread[0]; n2 != search_->root_node_; n2 = n2->GetParent()) {
+  // 	depth++;
+  //     }
+  //     if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "How good is this line I just added based on recommendations from the helper?";
+  //     if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Q of parent to the first added node in the line: " << vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " depth: " << depth - 1;
+  //     for(long unsigned int j = 0; j < my_pv_size; j++){
+  // 	Node* n = vector_of_nodes_from_helper_added_by_this_thread[j];
 
-	// Strategies for policy adjustment:
-	// a "trust the helper", make sure policy is at least c
-	// b "only trust yourself, even with deep analysis", make sure policy is at least c when the move is promising.
-	// c "only trust yourself, don't trust deep analysis", when the move is promising, make sure policy is at least x, which varies with depth.
-	// d "let Q speak", set policy to equal to the policy of the sibling with highest policy.
-	// e like d, but set policy slightly higher than the policy of the sibling with highest policy if the move is promising.
-	// e is the current strategy
+  // 	// Strategies for policy adjustment:
+  // 	// a "trust the helper", make sure policy is at least c
+  // 	// b "only trust yourself, even with deep analysis", make sure policy is at least c when the move is promising.
+  // 	// c "only trust yourself, don't trust deep analysis", when the move is promising, make sure policy is at least x, which varies with depth.
+  // 	// d "let Q speak", set policy to equal to the policy of the sibling with highest policy.
+  // 	// e like d, but set policy slightly higher than the policy of the sibling with highest policy if the move is promising.
+  // 	// e is the current strategy
 	
-	std::string strategy;
-	float c = 0.6f;
-	float min_c = 0.0f;
-	float minimum_policy = min_c;
-	strategy = "e";
+  // 	std::string strategy;
+  // 	float c = 0.6f;
+  // 	float min_c = 0.0f;
+  // 	float minimum_policy = min_c;
+  // 	strategy = "d";
 
-	if(strategy == "a") minimum_policy = c;
+  // 	if(strategy == "a") minimum_policy = c;
 
-	if(strategy == "d" || strategy == "e"){
-	  // make sure that policy is at least as good as the best sibling.
-	  float highest_p = 0;
-	  // loop through the policies of the siblings.
-	  for (auto& edge : n->GetParent()->Edges()) {
-	    if(edge.GetP() > highest_p) highest_p = edge.GetP();
-	  }
-	  minimum_policy = highest_p;
-	}
+  // 	if(strategy == "d" || strategy == "e"){
+  // 	  // make sure that policy is at least as good as the best sibling.
+  // 	  float highest_p = 0;
+  // 	  // loop through the policies of the siblings.
+  // 	  for (auto& edge : n->GetParent()->Edges()) {
+  // 	    if(edge.GetP() > highest_p) highest_p = edge.GetP();
+  // 	  }
+  // 	  minimum_policy = highest_p;
+  // 	}
 
-	// Determine if the move is promising or not
-	// if starting node is maximising and we are maximising: are we greater?
-	// if starting node is maximising and we are minimizing: are (-we) greater?
-	// if starting node is minimizing and we are maximising: are we greater than (-start node)?
-	// if starting node is minimizing and we are minimizing: are (-we) greater than (-start node)?
-	// we are maximising if depth + j % 2 == 1
-	// startnode is maximising if depth % 2 == 1
-	signed int factor_for_us = ((depth + j) % 2 == 1) ? 1 : -1;
-	signed int factor_for_parent = ((depth - 1) % 2 == 1) ? 1 : -1;
+  // 	// Determine if the move is promising or not
+  // 	// if starting node is maximising and we are maximising: are we greater?
+  // 	// if starting node is maximising and we are minimizing: are (-we) greater?
+  // 	// if starting node is minimizing and we are maximising: are we greater than (-start node)?
+  // 	// if starting node is minimizing and we are minimizing: are (-we) greater than (-start node)?
+  // 	// we are maximising if depth + j % 2 == 1
+  // 	// startnode is maximising if depth % 2 == 1
+  // 	signed int factor_for_us = ((depth + j) % 2 == 1) ? 1 : -1;
+  // 	signed int factor_for_parent = ((depth - 1) % 2 == 1) ? 1 : -1;
 	
-	if(factor_for_us * n->GetQ(0.0f) > factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f)){
+  // 	if(factor_for_us * n->GetQ(0.0f) > factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f)){
 
-	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is greater than " << factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " which means this is promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j;
-	  // the move is promising
-	  if(strategy == "b") minimum_policy = c;
-	  if(strategy == "e") minimum_policy = std::min(0.90, minimum_policy * 1.1);
+  // 	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is greater than " << factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " which means this is promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j;
+  // 	  // the move is promising
+  // 	  if(strategy == "b") minimum_policy = c;
+  // 	  if(strategy == "e") minimum_policy = std::min(0.90, minimum_policy * 1.1);
 
-	} else {
-	  // Not promising
-	  minimum_policy = 0.0f;
-	  // if a move (e.g. leelas favourite move) has the highest policy, reduce its policy to the policy of the highest sibling.
-	  float highest_p_siblings = 0;
-	  // loop through the policies of the siblings.
-	  for (auto& edge : n->GetParent()->Edges()) {
-	    if(edge.edge() != n->GetOwnEdge() && edge.GetP() > highest_p_siblings) highest_p_siblings = edge.GetP();
-	  }
-	  if(n->GetOwnEdge()->GetP() >= highest_p_siblings){
-	    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is smaller than " << factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " which means this is NOT promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j << " This node has highest policy even though it is not promising, adjusting policy down to that of best sibling: " << highest_p_siblings;
-	    n->GetOwnEdge()->SetP(highest_p_siblings);
-	  } else {
-	    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is smaller than " << factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " which means this is NOT promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j;
-	  }	    
-	}
+  // 	} else {
+  // 	  // Not promising
+  // 	  minimum_policy = 0.2f;
+  // 	  // // if a move (e.g. leelas favourite move) has the highest policy, reduce its policy to the policy of the highest sibling.
+  // 	  // float highest_p_siblings = 0;
+  // 	  // // loop through the policies of the siblings.
+  // 	  // for (auto& edge : n->GetParent()->Edges()) {
+  // 	  //   if(edge.edge() != n->GetOwnEdge() && edge.GetP() > highest_p_siblings) highest_p_siblings = edge.GetP();
+  // 	  // }
+  // 	  // if(n->GetOwnEdge()->GetP() >= highest_p_siblings){
+  // 	  //   if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is smaller than " << factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " which means this is NOT promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j << " This node has highest policy even though it is not promising, adjusting policy down to that of best sibling: " << highest_p_siblings;
+  // 	  //   n->GetOwnEdge()->SetP(highest_p_siblings);
+  // 	  // } else {
+  // 	  //   if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is smaller than " << factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " which means this is NOT promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j;
+  // 	  // }	    
+  // 	}
 
-	if(strategy == "c"){
-	  // This is still under construction.
-	  // divide the amount of support with the current depth ^ scaling factor to the ge current support
-	  int current_depth = depth - starting_depth_of_PV + j;
-	  int current_amount_of_support = float(amount_of_support) / pow(current_depth, branching_factor);
-	  LOGFILE << "MaybeAdjustPolicyForHelperAddedNodes() at a node with current depth (distance from first node in PV) = " << current_depth << ". Starting depth of PV: " << starting_depth_of_PV << ". Distance from root for current node: " << depth << ", number of added nodes: " << my_pv_size << ", amount of support for the PV: " << amount_of_support << " amount of support for this node: " << current_amount_of_support;
-	  minimum_policy = std::max(min_c, (1.0f - float(j)/float(my_pv_size)) * c);
-	}
+  // 	if(strategy == "c"){
+  // 	  // This is still under construction.
+  // 	  // divide the amount of support with the current depth ^ scaling factor to the ge current support
+  // 	  int current_depth = depth - starting_depth_of_PV + j;
+  // 	  int current_amount_of_support = float(amount_of_support) / pow(current_depth, branching_factor);
+  // 	  LOGFILE << "MaybeAdjustPolicyForHelperAddedNodes() at a node with current depth (distance from first node in PV) = " << current_depth << ". Starting depth of PV: " << starting_depth_of_PV << ". Distance from root for current node: " << depth << ", number of added nodes: " << my_pv_size << ", amount of support for the PV: " << amount_of_support << " amount of support for this node: " << current_amount_of_support;
+  // 	  minimum_policy = std::max(min_c, (1.0f - float(j)/float(my_pv_size)) * c);
+  // 	}
 
-	// Actually adjust the policy to minimum_policy (if it is not already higher than that).
-	if(n->GetOwnEdge()->GetP() < minimum_policy){
-	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Increased policy from " << n->GetOwnEdge()->GetP() << " to " << minimum_policy;
-	  n->GetOwnEdge()->SetP(minimum_policy);
-	}
+  // 	// Actually adjust the policy to minimum_policy (if it is not already higher than that).
+  // 	if(n->GetOwnEdge()->GetP() < minimum_policy){
+  // 	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Increased policy from " << n->GetOwnEdge()->GetP() << " to " << minimum_policy;
+  // 	  n->GetOwnEdge()->SetP(minimum_policy);
+  // 	}
 	
-      }
-    }
-    // Reset the variable, if it was non-empty.
-    foo->queue_of_vector_of_nodes_from_helper_added_by_this_thread = {};
-    search_->nodes_mutex_.unlock();
-    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "MaybeAdjustPolicy.. released a lock on nodes.";    
-  }
-  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "MaybeAdjustPolicyForHelperAddedNodes() finished";
+  //     }
+  //   }
+  //   // Reset the variable, if it was non-empty.
+  //   foo->queue_of_vector_of_nodes_from_helper_added_by_this_thread = {};
+  //   search_->nodes_mutex_.unlock();
+  //   if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "MaybeAdjustPolicy.. released a lock on nodes.";    
+  // }
+  // if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "MaybeAdjustPolicyForHelperAddedNodes() finished";
 }
 
   

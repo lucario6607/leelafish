@@ -1377,8 +1377,14 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	  }
 	}
 
+	search_->nodes_mutex_.unlock_shared();
+	// Get a unique lock since GetOrSpawnNode() writes to the parent.
+	search_->nodes_mutex_.lock();
 	// GetOrSpawnNode() does work with the lock on since it does not modify the tree.
 	Node* child_node = edge.GetOrSpawnNode(my_node, nullptr);
+	search_->nodes_mutex_.unlock();	
+	// try switching back a to shared lock
+	search_->nodes_mutex_.lock_shared();	
 
 	nodes_from_helper_added_by_this_PV->push_back(child_node);
 
@@ -1397,14 +1403,14 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	std::copy_n(my_moves.begin(), ply+1, std::back_inserter(moves_to_this_node));
 	
 	// unlock the read lock on nodes so that ExtendNode() can get a write lock.
-	search_->nodes_mutex_.unlock_shared();
-	if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Releasing lock on nodes so that ExtendNode() can get a write lock.";
+	// search_->nodes_mutex_.unlock_shared();
+	// if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Releasing lock on nodes so that ExtendNode() can get a write lock.";
 	// ExtendNode(child_node, ply+2);	
 	ExtendNode(child_node, ply+2, moves_to_this_node, &history); // This will modify history which will be re-used later here.
 	// Get a read lock again
-	if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Trying to aquire the lock on nodes again.";		
-	search_->nodes_mutex_.lock_shared();
-	if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Aquiring the lock on nodes again.";	
+	// if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Trying to aquire the lock on nodes again.";		
+	// search_->nodes_mutex_.lock_shared();
+	// if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Aquiring the lock on nodes again.";	
 
 	// queue for NN evaluation.
 	if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Adding newly extended node: " << child_node->DebugString() << " to the minibatch_";
@@ -1443,7 +1449,10 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	  minibatch_.push_back(NodeToProcess::Visit(child_node, 1)); // Only one visit, since this is a terminal
 	  minibatch_[minibatch_.size()-1].nn_queried = false;
 	  minibatch_[minibatch_.size()-1].ooo_completed = false;
+	  search_->nodes_mutex_.lock();	  
 	  child_node->IncrementNInFlight(1); // seems necessary.
+	  search_->nodes_mutex_.unlock();
+	  search_->nodes_mutex_.lock_shared();	  
 	}
 
 	// unlock the readlock.
@@ -1509,8 +1518,8 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
       }
     }
     if(edge_found){
-      // throw Exception("Leelas node has edges, but the recommended move was not found among them!");
       LOGFILE << "Leelas node has edges, but the recommended move was not found among them! Is this a case of https://github.com/hans-ekbrand/lc0/issues/2 where we mistakenly belive a move is castling when it isn't?";
+      throw Exception("Leelas node has edges, but the recommended move was not found among them!");
     } else {
       LOGFILE << "No edges found, repetition?";
     }

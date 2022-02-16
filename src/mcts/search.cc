@@ -1323,34 +1323,42 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
     return;
   }
 
-  // Before finding the edge that corresponds to the move suggested by
-  // the helper, find leelas preferred move, and if that move hasn't
-  // already been queried, enqueue it
-
-  // Find out if there are extended siblings
-  if(my_node->GetN() > 1){
-    const EdgeAndNode Leelas_favourite = search_->GetBestChildNoTemperature(my_node, ply);
-    if(my_node->GetAuxEngineMove() == 0xffff){
-      if(Leelas_favourite.HasNode()){
-       if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Leelas favourite move has not been queried, it is " << Leelas_favourite.GetMove(black_to_move).as_string() << ", node: " << Leelas_favourite.DebugString() << ", queueing it now.";
-       if(!my_node->IsTerminal() &&
-          my_node->HasChildren()){
-         AuxMaybeEnqueueNode(Leelas_favourite.node());
-       } else {
-         if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Leelas favourite move is probably terminal, do not queue it.";
-       }
-      }
-    } else {
-      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Leelas favourite move has already been queried. It is " << Leelas_favourite.GetMove(black_to_move).as_string() << ", node: " << Leelas_favourite.DebugString();
-    }
-  } else {
-    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "my_node has no children, so the added node has no obvious challengers to enqueue.";
-  }
-  
-
   // Find the edge
   for (auto& edge : my_node->Edges()) {
     if(edge.GetMove() == my_moves[ply] ){
+
+      // Queue Leelas favourite node START
+      // If there are children, find leelas preferred move, and if that move hasn't
+      // already been queried, enqueue it, unless it is the same move as the helper suggests
+      if(my_node->GetN() > 0){
+	const EdgeAndNode Leelas_favourite = search_->GetBestChildNoTemperature(my_node, ply); // is this safe, or does it change my_node?
+	if(Leelas_favourite.edge() != edge.edge()){
+	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Leelas favourite move: " << Leelas_favourite.GetMove(black_to_move).as_string() << " is not the same has the helper recommendation " << edge.GetMove(black_to_move).as_string();
+	  if(Leelas_favourite.HasNode()){
+	    if(Leelas_favourite.node()->GetAuxEngineMove() == 0xffff){
+	      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Leelas favourite move has not been queried, it is " << Leelas_favourite.GetMove(black_to_move).as_string() << ", node: " << Leelas_favourite.DebugString() << ", queueing it now.";
+	      Node * n = Leelas_favourite.node();
+	      // Check that it's not terminal
+	      if(!n->IsTerminal()){
+		AuxMaybeEnqueueNode(n);
+	      } else {
+		if(params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Leelas favourite move leads to a terminal node: " << n->DebugString();
+	      }
+	    } else {
+	      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Leelas favourite move has already been queried. It is " << Leelas_favourite.GetMove(black_to_move).as_string() << ", node: " << Leelas_favourite.DebugString();
+	    }
+	  }
+	} else {
+	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Leelas favourite move is the same as the move recommmended by the helper.";
+	  // queue it anyway, if has a visited node, unless it was already queued.
+	  if(Leelas_favourite.HasNode() && Leelas_favourite.node()->GetN() > 0 && Leelas_favourite.node()->GetAuxEngineMove() == 0xffff && !Leelas_favourite.node()->IsTerminal()){	    
+	    Node * n = Leelas_favourite.node();
+	    AuxMaybeEnqueueNode(n);
+	  }
+	}
+      }
+      // Queue Leelas favourite node STOP
+        
       edge_found = true;
       // If the edge is already extended, then just recursively call PreExtendTreeAndFastTrackForNNEvaluation_inner() with this node and ply increased by one.
       if(edge.HasNode()){
@@ -1401,7 +1409,6 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Adding newly extended node: " << child_node->DebugString() << " to the minibatch_";
 
 	bool is_terminal=child_node->IsTerminal(); // while we have the lock.
-	search_->nodes_mutex_.unlock();	// feeling wild and crazy.
 
 	nodes_from_helper_added_by_this_PV->push_back(child_node); // shouldn't need a mutex.
 	nodes_added++;
@@ -1439,11 +1446,10 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	  minibatch_.push_back(NodeToProcess::Visit(child_node, 1)); // Only one visit, since this is a terminal
 	  minibatch_[minibatch_.size()-1].nn_queried = false;
 	  minibatch_[minibatch_.size()-1].ooo_completed = false;
-	  search_->nodes_mutex_.lock();	  
 	  child_node->IncrementNInFlight(1); // seems necessary.
-	  search_->nodes_mutex_.unlock();
 	}
 
+	search_->nodes_mutex_.unlock();
 	// // unlock the readlock.
 	// search_->nodes_mutex_.unlock_shared();
 	// if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Releasing lock on nodes. finished adding the node.";	

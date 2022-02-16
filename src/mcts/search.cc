@@ -1224,11 +1224,13 @@ void SearchWorker::ExecuteOneIteration() {
   const std::shared_ptr<Search::adjust_policy_stats> foo = PreExtendTreeAndFastTrackForNNEvaluation();
   // std::queue<std::vector<Node*>> queue_of_vector_of_nodes_from_helper_added_by_this_thread = PreExtendTreeAndFastTrackForNNEvaluation();
 
+  if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << std::this_thread::get_id() << " PreExtendTreeAndFastTrackForNNEvaluation() finished in ExecuteOneIteration().";
   // 2. Gather minibatch.
   GatherMinibatch2();
   task_count_.store(-1, std::memory_order_release);
   search_->backend_waiting_counter_.fetch_add(1, std::memory_order_relaxed);
-
+  if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "GatherMinibatch2() finished in ExecuteOneIteration().";
+  
   // 2b. Collect collisions.
   CollectCollisions();
 
@@ -1242,15 +1244,18 @@ void SearchWorker::ExecuteOneIteration() {
   // 4. Run NN computation.
   RunNNComputation();
   search_->backend_waiting_counter_.fetch_add(-1, std::memory_order_relaxed);
-
+  if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << std::this_thread::get_id() << " RunNNComputation() finished in ExecuteOneIteration().";
+  
   // 5. Retrieve NN computations (and terminal values) into nodes.
   FetchMinibatchResults();
-
+  if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << std::this_thread::get_id() << " FetchMinibatchResults() finished in ExecuteOneIteration().";
+  
   // 6. Propagate the new nodes' information to all their parents in the tree.
   DoBackupUpdate();
+  if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << std::this_thread::get_id() << " DoBackupUpdate() finished in ExecuteOneIteration().";
 
   MaybeAdjustPolicyForHelperAddedNodes(foo);
-  // MaybeAdjustPolicyForHelperAddedNodes(queue_of_vector_of_nodes_from_helper_added_by_this_thread);
+  if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << std::this_thread::get_id() << " MaybeAdjustPolicyForHelperAddedNodes() finished in ExecuteOneIteration().";
 
   // 7. Update the Search's status and progress information.
   UpdateCounters();
@@ -1491,8 +1496,8 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
     // show full my_moves
     std::string s;
     PositionHistory ph = search_->played_history_;
-    for(int i = 0; i < (int) my_moves.size(); i++){
-      LOGFILE << "debugging: " << GetFen(ph.Last());
+    for(int i = 0; i <= ply; i++){
+      LOGFILE << "debugging: ply = " << i << " " << GetFen(ph.Last());
       ph.Append(my_moves[i]);
       s = s + my_moves[i].as_string() + " ";
     }
@@ -1557,8 +1562,8 @@ const std::shared_ptr<Search::adjust_policy_stats> SearchWorker::PreExtendTreeAn
     int number_of_PVs_added = 0;
     
     while(search_->search_stats_->fast_track_extend_and_evaluate_queue_.size() > 0 &&
-	  search_->search_stats_->Number_of_nodes_added_by_AuxEngine - number_of_added_nodes_at_start < 190 && // Need some margin to 256 for the final iteration.
-	  number_of_PVs_added < 20 // don't drag the speed down.
+	  search_->search_stats_->Number_of_nodes_added_by_AuxEngine - number_of_added_nodes_at_start < 100 && 
+	  number_of_PVs_added < 15 // don't drag the speed down.
 	  ){
       // relase the lock, we only needed it to test if to continue or not
       search_->search_stats_->pure_stats_mutex_.unlock();
@@ -2929,7 +2934,7 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	
 	std::string strategy;
 	float c = 0.6f;
-	float min_c = 0.2f;
+	float min_c = 0.0f;
 	float minimum_policy = min_c;
 	strategy = "e";
 
@@ -2963,8 +2968,20 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	  if(strategy == "e") minimum_policy = std::min(0.90, minimum_policy * 1.1);
 
 	} else {
-	  // Not promising, just explain why.
-	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is smaller than " << factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " which means this is NOT promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j;
+	  // Not promising
+	  minimum_policy = 0.0f;
+	  // if a move (e.g. leelas favourite move) has the highest policy, reduce its policy to the policy of the highest sibling.
+	  float highest_p_siblings = 0;
+	  // loop through the policies of the siblings.
+	  for (auto& edge : n->GetParent()->Edges()) {
+	    if(edge.edge() != n->GetOwnEdge() && edge.GetP() > highest_p_siblings) highest_p_siblings = edge.GetP();
+	  }
+	  if(n->GetOwnEdge()->GetP() >= highest_p_siblings){
+	    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is smaller than " << factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " which means this is NOT promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j << " This node has highest policy even though it is not promising, adjusting policy down to that of best sibling: " << highest_p_siblings;
+	    n->GetOwnEdge()->SetP(highest_p_siblings);
+	  } else {
+	    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is smaller than " << factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " which means this is NOT promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j;
+	  }	    
 	}
 
 	if(strategy == "c"){

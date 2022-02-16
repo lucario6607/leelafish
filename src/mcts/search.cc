@@ -2909,10 +2909,10 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	// e is the current strategy
 	
 	std::string strategy;
-	float c = 0.6f;
+	float c = 0.25f;
 	float min_c = 0.0f;
 	float minimum_policy = min_c;
-	strategy = "d";
+	strategy = "a";
 
 	if(strategy == "a") minimum_policy = c;
 
@@ -2926,43 +2926,46 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	  minimum_policy = highest_p;
 	}
 
-	// Determine if the move is promising or not
-	// if starting node is maximising and we are maximising: are we greater?
-	// if starting node is maximising and we are minimizing: are (-we) greater?
-	// if starting node is minimizing and we are maximising: are we greater than (-start node)?
-	// if starting node is minimizing and we are minimizing: are (-we) greater than (-start node)?
-	// we are maximising if depth + j % 2 == 1
-	// startnode is maximising if depth % 2 == 1
-	signed int factor_for_us = ((depth + j) % 2 == 1) ? 1 : -1;
-	signed int factor_for_parent = ((depth - 1) % 2 == 1) ? 1 : -1;
+	if(strategy != "a"){
+
+	  // Determine if the move is promising or not
+	  // if starting node is maximising and we are maximising: are we greater?
+	  // if starting node is maximising and we are minimizing: are (-we) greater?
+	  // if starting node is minimizing and we are maximising: are we greater than (-start node)?
+	  // if starting node is minimizing and we are minimizing: are (-we) greater than (-start node)?
+	  // we are maximising if depth + j % 2 == 1
+	  // startnode is maximising if depth % 2 == 1
+	  signed int factor_for_us = ((depth + j) % 2 == 1) ? 1 : -1;
+	  signed int factor_for_parent = ((depth - 1) % 2 == 1) ? 1 : -1;
 	
-	if(factor_for_us * n->GetQ(0.0f) > factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f)){
+	  if(factor_for_us * n->GetQ(0.0f) > factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f)){
 
-	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is greater than " << factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " which means this is promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j;
-	  // the move is promising
-	  if(strategy == "b") minimum_policy = c;
-	  if(strategy == "e") minimum_policy = std::min(0.90, minimum_policy * 1.1);
+	    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is greater than " << factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " which means this is promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j;
+	    // the move is promising
+	    if(strategy == "b") minimum_policy = c;
+	    if(strategy == "e") minimum_policy = std::min(0.90, minimum_policy * 1.1);
 
-	} else {
-	  // Not promising
-	  // minimum_policy = 0.2f;
-	  minimum_policy = 0.0f;
-	  // if a move (e.g. leelas favourite move) has the highest policy, reduce its policy to the policy of the highest sibling.
-	  float highest_p_siblings = 0;
-	  // loop through the policies of the siblings.
-	  for (auto& edge : n->GetParent()->Edges()) {
-	    if(edge.edge() != n->GetOwnEdge() && edge.GetP() > highest_p_siblings) highest_p_siblings = edge.GetP();
-	  }
-	  if(n->GetOwnEdge()->GetP() >= highest_p_siblings){
-	    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is smaller than " << factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " which means this is NOT promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j << " This node has highest policy even though it is not promising, adjusting policy down to that of best sibling: " << highest_p_siblings;
-	    search_->nodes_mutex_.unlock_shared();
-	    search_->nodes_mutex_.lock();	    
-	    n->GetOwnEdge()->SetP(highest_p_siblings);
-	    search_->nodes_mutex_.unlock();
-	    search_->nodes_mutex_.lock_shared();	    
 	  } else {
-	    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is smaller than " << factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " which means this is NOT promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j;
-	  }	    
+	    // Not promising
+	    // minimum_policy = 0.2f;
+	    minimum_policy = 0.0f;
+	    // if a move (e.g. leelas favourite move) has the highest policy, reduce its policy to the policy of the highest sibling.
+	    float highest_p_siblings = 0;
+	    // loop through the policies of the siblings.
+	    for (auto& edge : n->GetParent()->Edges()) {
+	      if(edge.edge() != n->GetOwnEdge() && edge.GetP() > highest_p_siblings) highest_p_siblings = edge.GetP();
+	    }
+	    if(n->GetOwnEdge()->GetP() >= highest_p_siblings){
+	      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is smaller than " << factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " which means this is NOT promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j << " This node has highest policy even though it is not promising, adjusting policy down to that of best sibling: " << highest_p_siblings;
+	      search_->nodes_mutex_.unlock_shared();
+	      search_->nodes_mutex_.lock();	    
+	      n->GetOwnEdge()->SetP(highest_p_siblings);
+	      search_->nodes_mutex_.unlock();
+	      search_->nodes_mutex_.lock_shared();	    
+	    } else {
+	      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is smaller than " << factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " which means this is NOT promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j;
+	    }	    
+	  }
 	}
 
 	if(strategy == "c"){

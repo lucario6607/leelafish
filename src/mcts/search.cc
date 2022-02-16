@@ -1378,23 +1378,6 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	}
 
 	search_->nodes_mutex_.unlock_shared();
-	// Get a unique lock since GetOrSpawnNode() writes to the parent.
-	search_->nodes_mutex_.lock();
-	// GetOrSpawnNode() does work with the lock on since it does not modify the tree.
-	Node* child_node = edge.GetOrSpawnNode(my_node, nullptr);
-	search_->nodes_mutex_.unlock();	
-	// try switching back a to shared lock
-	search_->nodes_mutex_.lock_shared();	
-
-	nodes_from_helper_added_by_this_PV->push_back(child_node);
-
-	// // Also record the node, and its source, in the global vectors.
-	// search_->search_stats_->pure_stats_mutex_.lock();
-	// search_->search_stats_->nodes_added_by_the_helper.push(child_node);
-	// search_->search_stats_->source_of_added_nodes.push(source);
-	// search_->search_stats_->pure_stats_mutex_.unlock();
-
-	nodes_added++;
 
 	// Create a history variable that will be filled by the four argument version of ExtendNode().
 	lczero::PositionHistory history = search_->played_history_;
@@ -1402,20 +1385,30 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	std::vector<lczero::Move> moves_to_this_node;
 	std::copy_n(my_moves.begin(), ply+1, std::back_inserter(moves_to_this_node));
 	
-	// unlock the read lock on nodes so that ExtendNode() can get a write lock.
-	// search_->nodes_mutex_.unlock_shared();
-	// if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Releasing lock on nodes so that ExtendNode() can get a write lock.";
-	// ExtendNode(child_node, ply+2);	
-	ExtendNode(child_node, ply+2, moves_to_this_node, &history); // This will modify history which will be re-used later here.
-	// Get a read lock again
-	// if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Trying to aquire the lock on nodes again.";		
-	// search_->nodes_mutex_.lock_shared();
-	// if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Aquiring the lock on nodes again.";	
+	// Get a unique lock since GetOrSpawnNode() writes to the parent.
+	search_->nodes_mutex_.lock();
+	// GetOrSpawnNode() does work with the lock on since it does not modify the tree.
+	Node* child_node = edge.GetOrSpawnNode(my_node, nullptr);
+	// search_->nodes_mutex_.unlock();	
+	// // try switching back a to shared lock
+	// search_->nodes_mutex_.lock_shared();	
+
+	// // Also record the node, and its source, in the global vectors.
+	// search_->search_stats_->pure_stats_mutex_.lock();
+	// search_->search_stats_->nodes_added_by_the_helper.push(child_node);
+	// search_->search_stats_->source_of_added_nodes.push(source);
+	// search_->search_stats_->pure_stats_mutex_.unlock();
+
+	ExtendNode(child_node, ply+1, moves_to_this_node, &history); // This will modify history which will be re-used later here.
 
 	// queue for NN evaluation.
 	if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Adding newly extended node: " << child_node->DebugString() << " to the minibatch_";
 
-	bool is_terminal=child_node->IsTerminal(); // while we have the read lock.
+	bool is_terminal=child_node->IsTerminal(); // while we have the lock.
+	search_->nodes_mutex_.unlock();	// feeling wild and crazy.
+
+	nodes_from_helper_added_by_this_PV->push_back(child_node); // shouldn't need a mutex.
+	nodes_added++;
 
 	// This part mostly copy/pasted from ProcessPickedTask
 	if (!child_node->IsTerminal()) {
@@ -1450,16 +1443,14 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	  minibatch_.push_back(NodeToProcess::Visit(child_node, 1)); // Only one visit, since this is a terminal
 	  minibatch_[minibatch_.size()-1].nn_queried = false;
 	  minibatch_[minibatch_.size()-1].ooo_completed = false;
-	  search_->nodes_mutex_.unlock_shared();	  	  
 	  search_->nodes_mutex_.lock();	  
 	  child_node->IncrementNInFlight(1); // seems necessary.
 	  search_->nodes_mutex_.unlock();
-	  search_->nodes_mutex_.lock_shared();	  
 	}
 
-	// unlock the readlock.
-	search_->nodes_mutex_.unlock_shared();
-	if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Releasing lock on nodes. finished adding the node.";	
+	// // unlock the readlock.
+	// search_->nodes_mutex_.unlock_shared();
+	// if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Releasing lock on nodes. finished adding the node.";	
 	if (!is_terminal && (int) my_moves.size() > ply+1){
 	  // Go deeper.
 	  PreExtendTreeAndFastTrackForNNEvaluation_inner(child_node, my_moves, ply+1, nodes_added, source, nodes_from_helper_added_by_this_PV);

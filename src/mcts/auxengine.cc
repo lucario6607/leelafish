@@ -405,9 +405,9 @@ void Search::AuxEngineWorker() {
       } else {
 	nodes_mutex_.unlock_shared(); // unlock, nothing more to do until root gets edges.
 	if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "AuxEngineWorker() thread 0 released shared lock nodes_mutex_.";	
-	if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "AuxEngineWorker() thread 0 found root node has no edges will sleep 100 ms";
+	if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "AuxEngineWorker() thread 0 found root node has no edges will sleep 30 ms";
 	using namespace std::chrono_literals;
-	std::this_thread::sleep_for(100ms);
+	std::this_thread::sleep_for(30ms);
       }
     } else {
       // Not thread 0, or empty OnRoot options
@@ -451,9 +451,9 @@ void Search::AuxEngineWorker() {
 	  root_is_queued = true;
 	} else {
 	  nodes_mutex_.unlock_shared(); // unlock, nothing more to do until root gets edges.
-	  if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "AuxEngineWorker() thread 0 found root node has no edges will sleep 100 ms";
+	  if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "AuxEngineWorker() thread 0 found root node has no edges will sleep 30 ms";
 	  using namespace std::chrono_literals;
-	  std::this_thread::sleep_for(100ms);
+	  std::this_thread::sleep_for(30ms);
 	}
       }
       // Kickstart root if empty OnRoot options STOP
@@ -470,7 +470,7 @@ void Search::AuxEngineWorker() {
 	auxengine_cv_.wait(lock, [&] { return stop_.load(std::memory_order_acquire) || !search_stats_->persistent_queue_of_nodes.empty(); });
 	// at this point, the lock is released and aquired again, which is why we want the outer lock, without which another thread could intercept us here.
 	if (stop_.load(std::memory_order_acquire)) {
-	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxWorker(), thread " << our_index << " caught a stop signal while waiting for a node to process, will exit the while loop now.";
+	  if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "AuxWorker(), thread " << our_index << " caught a stop signal while waiting for a node to process, will exit the while loop now.";
 	  // auxengine_listen_mutex_.unlock();
 	  search_stats_->pure_stats_mutex_.lock();
 	  search_stats_->thread_counter--;
@@ -478,7 +478,7 @@ void Search::AuxEngineWorker() {
 	  if(search_stats_->thread_counter == 0){
 	    if (params_.GetAuxEngineVerbosity() >= 1) LOGFILE << "All AuxEngineWorker threads are now idle";
 	  } else {
-	    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker thread " << our_index << " done. The thread counter is now " << search_stats_->thread_counter;
+	    if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "AuxEngineWorker thread " << our_index << " done. The thread counter is now " << search_stats_->thread_counter;
 	  }
 	  search_stats_->pure_stats_mutex_.unlock();
 	  return;
@@ -491,7 +491,7 @@ void Search::AuxEngineWorker() {
     } // end of not thread zero
   } // end of while loop
 
-  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxWorker(), thread " << our_index << " caught a stop signal (possibly after returning from DoAuxEngine()), will exit the while loop now.";
+  if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "AuxWorker(), thread " << our_index << " caught a stop signal (possibly after returning from DoAuxEngine()), will exit the while loop now.";
   // Decrement the thread counter so that purge in search.cc does not start before all threads are done.
   search_stats_->pure_stats_mutex_.lock();  
   search_stats_->thread_counter--;
@@ -499,7 +499,7 @@ void Search::AuxEngineWorker() {
   if(search_stats_->thread_counter == 0){
     if (params_.GetAuxEngineVerbosity() >= 1) LOGFILE << "All AuxEngineWorker threads are now idle";
   } else {
-    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker thread " << our_index << " done. The thread counter is now " << search_stats_->thread_counter;
+    if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "AuxEngineWorker thread " << our_index << " done. The thread counter is now " << search_stats_->thread_counter;
   }
   search_stats_->pure_stats_mutex_.unlock();
 }

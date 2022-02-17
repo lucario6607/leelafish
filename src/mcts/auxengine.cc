@@ -106,23 +106,29 @@ void Search::AuxEngineWorker() {
   // If we are the first thread, and the final purge already has taken place, then return immediately.
   // search_stats_->final_purge_run is protected by search_stats_->auxengine_mutex_.
 
-  search_stats_->auxengine_mutex_.lock();    
-  if(our_index == 0 && search_stats_->final_purge_run){
-    LOGFILE << "AuxEngineWorker() Thread 0 returning early because purge as already taken place";
-    search_stats_->auxengine_mutex_.unlock();    
-    search_stats_->pure_stats_mutex_.unlock();    
-    return;
-  }
-  search_stats_->auxengine_mutex_.unlock();
+  // Only check this if we are thread 0, because otherwise we can
+  // create a deadlock with the main loop which has the other order of
+  // the locks.
 
-  // But we still need to purge the queue.
-  // // Also, if search has stopped, do not spawn a another helper instance until the next move.
-  // if(stop_.load(std::memory_order_acquire)){
-  //   LOGFILE << "AuxEngineWorker() Thread 0 returning early because search has already stopped.";
-  //   search_stats_->pure_stats_mutex_.unlock();
-  //   return;
-  // }
-  
+  if(our_index == 0){
+    search_stats_->auxengine_mutex_.lock();    
+    if(search_stats_->final_purge_run){
+      LOGFILE << "AuxEngineWorker() Thread 0 returning early because purge as already taken place";
+      search_stats_->auxengine_mutex_.unlock();    
+      search_stats_->pure_stats_mutex_.unlock();    
+      return;
+    }
+    search_stats_->auxengine_mutex_.unlock();
+  } else {
+    // Since we are not thread 0 we can exit early, we do not have to purge the queue.
+    // If search has stopped, do not spawn a another helper instance until the next move.
+    if(stop_.load(std::memory_order_acquire)){
+      LOGFILE << "AuxEngineWorker() Thread " << our_index << " returning early because search has already stopped.";
+      search_stats_->pure_stats_mutex_.unlock();
+      return;
+    }
+  }
+
   // if our_index is greater than the size of the vectors then we know for sure we must start/initiate everything.
   // if our_index + 1 is equal to, or smaller than the size of the vectors then we can safely check search_stats_->vector_of_auxengine_ready_[our_index] and act if it is false
 

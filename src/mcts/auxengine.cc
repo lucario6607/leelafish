@@ -364,7 +364,7 @@ void Search::AuxEngineWorker() {
       search_stats_->pure_stats_mutex_.lock();
 
       // More stuff for thread zero only
-      search_stats_->initial_purge_run = true; // inform other threads that they should not purge.
+      // search_stats_->initial_purge_run = true; // inform other threads that they should not purge.
       if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "AuxEngineWorker() finished purging/initiating, will now check if root can be queued";
       
     } // Thread zero

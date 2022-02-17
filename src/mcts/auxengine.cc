@@ -407,9 +407,9 @@ void Search::AuxEngineWorker() {
 	search_stats_->pure_stats_mutex_.lock();	
 	if(!search_stats_->initial_purge_run) {
 	  search_stats_->pure_stats_mutex_.unlock();
-	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker() thread " << our_index << " waiting for thread 0 to purge the queue, will sleep 5 ms";
+	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker() thread " << our_index << " waiting for thread 0 to purge the queue, will sleep 50 ms";
 	  using namespace std::chrono_literals;
-	  std::this_thread::sleep_for(5ms);
+	  std::this_thread::sleep_for(50ms);
 	} else {
 	  // purge is done, just release the lock.
 	  search_stats_->pure_stats_mutex_.unlock();

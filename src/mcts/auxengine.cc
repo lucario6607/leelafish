@@ -213,7 +213,7 @@ void Search::AuxEngineWorker() {
       search_stats_->AuxEngineTime = params_.GetAuxEngineTime();
       search_stats_->Number_of_nodes_added_by_AuxEngine = 0;
       search_stats_->Total_number_of_nodes = 0;
-      search_stats_->initial_purge_run = true;
+      // search_stats_->initial_purge_run = true;
       search_stats_->my_pv_cache_mutex_.lock();      
       search_stats_->my_pv_cache_.clear(); // Clear the PV cache.
       search_stats_->my_pv_cache_mutex_.unlock();      

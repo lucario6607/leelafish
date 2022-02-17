@@ -253,7 +253,6 @@ void Search::AuxEngineWorker() {
 	search_stats_->size_of_queue_at_start = 0;
 
 	search_stats_->New_Game = false;
-	search_stats_->initial_purge_run = true;
 
 	// change lock to purge queue of PVs
 	search_stats_->pure_stats_mutex_.unlock();
@@ -384,12 +383,20 @@ void Search::AuxEngineWorker() {
       // edges for any other reason (e.g. being terminal), in which case
       // we should wait and try again later.
       if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "AuxEngineWorker() thread 0 about to aquire a shared lock nodes_mutex_ in order to read root";
-      nodes_mutex_.lock_shared(); // only neede to read GetNumEdges(), SetAuxEngineMove(0xfffe) is already protected by search_stats_->auxengine_mutex_.lock();
+      nodes_mutex_.lock_shared(); // only needed to read GetNumEdges(), SetAuxEngineMove(0xfffe) is already protected by search_stats_->auxengine_mutex_.lock();
       if(root_node_->GetNumEdges() > 0){
 	// root is extended.
-	// search_stats_->auxengine_mutex_.lock();
-	root_node_->SetAuxEngineMove(0xfffe); // mark root as pending and queue it
 	nodes_mutex_.unlock_shared(); // unlock the read-lock on noodes.
+
+	search_stats_->auxengine_mutex_.lock();
+	root_node_->SetAuxEngineMove(0xfffe); // mark root as pending and queue it
+	search_stats_->auxengine_mutex_.unlock();
+
+	// This acts like a signal for other threads that they can start working. No point in starting them before root has edges.
+	search_stats_->pure_stats_mutex_.lock();
+	search_stats_->initial_purge_run = true;
+	search_stats_->pure_stats_mutex_.unlock();
+	
 	if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "AuxEngineWorker() thread 0 released shared lock nodes_mutex_.";
     	// search_stats_->source_of_queued_nodes.push(3); // inform DoAuxEngine() -> where this node came from.
 	// search_stats_->auxengine_mutex_.unlock(); // We will be in DoAuxEngine() until search is stopped, so unlock first.
@@ -416,7 +423,7 @@ void Search::AuxEngineWorker() {
 	  search_stats_->pure_stats_mutex_.unlock();
 	}
 	// OK, we are good to go.
-	if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "AuxEngineWorker() thread: " << our_index << " entered main loop.";
+	if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "AuxEngineWorker() thread: " << our_index << " ready to enter the main loop.";
 	not_yet_notified = false;
       }
 

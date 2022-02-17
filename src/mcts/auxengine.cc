@@ -263,6 +263,7 @@ void Search::AuxEngineWorker() {
 	// different lock for queue of nodes
 	search_stats_->auxengine_mutex_.lock();
 	search_stats_->persistent_queue_of_nodes = {};
+	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread 0 has initiated the global variables, since a new game has started.";
 
       } else {
 	// aquire the right lock
@@ -447,6 +448,12 @@ void Search::AuxEngineWorker() {
       }
       // Kickstart root if empty OnRoot options STOP
 
+      // This is the main loop for in-tree helpers. Before trying to get locks to enter it, check if search has not already been stopped.
+      if (stop_.load(std::memory_order_acquire)) {
+	LOGFILE << "AuxWorker(), thread " << our_index << " breaking the main loop becuase search is stopped.";
+	break;
+      }
+
       {
 	std::unique_lock<std::mutex> lock(search_stats_->auxengine_mutex_);
 	// Wait until there's some work to compute.
@@ -474,7 +481,7 @@ void Search::AuxEngineWorker() {
     } // end of not thread zero
   } // end of while loop
 
-  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxWorker(), thread " << our_index << " caught a stop signal after returning from DoAuxEngine(), will exit the while loop now.";
+  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxWorker(), thread " << our_index << " caught a stop signal (possibly after returning from DoAuxEngine()), will exit the while loop now.";
   // Decrement the thread counter so that purge in search.cc does not start before all threads are done.
   search_stats_->pure_stats_mutex_.lock();  
   search_stats_->thread_counter--;

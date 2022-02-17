@@ -253,6 +253,7 @@ void Search::AuxEngineWorker() {
 	search_stats_->size_of_queue_at_start = 0;
 
 	search_stats_->New_Game = false;
+	search_stats_->initial_purge_run = true;
 
 	// change lock to purge queue of PVs
 	search_stats_->pure_stats_mutex_.unlock();
@@ -276,7 +277,7 @@ void Search::AuxEngineWorker() {
       if(search_stats_->final_purge_run){
 	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Either we are not the first thread, or there is an unexpected order of execution, and final purging has already taken place. In either case not purging now.";
       } else {
-	if(search_stats_->size_of_queue_at_start > 0){
+	if(!search_stats_->initial_purge_run && search_stats_->size_of_queue_at_start > 0){
 	  int number_of_nodes_before_purging = int(search_stats_->size_of_queue_at_start / 2);
 	  std::queue<Node*> persistent_queue_of_nodes_temp_;
 	  for(int i=0; i < search_stats_->size_of_queue_at_start; i = i + 2){
@@ -364,7 +365,7 @@ void Search::AuxEngineWorker() {
       search_stats_->pure_stats_mutex_.lock();
 
       // More stuff for thread zero only
-      search_stats_->initial_purge_run = true; // Inform other threads that they should not purge.
+      search_stats_->initial_purge_run = true; // inform other threads that they should not purge.
       if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker() finished purging/initiating, will now check if root can be queued";
       
     } // Thread zero

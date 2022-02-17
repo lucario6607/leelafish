@@ -114,13 +114,14 @@ void Search::AuxEngineWorker() {
     return;
   }
   search_stats_->auxengine_mutex_.unlock();
-  
-  // Also, if search has stopped, do not spawn a another helper instance until the next move.
-  if(stop_.load(std::memory_order_acquire)){
-    LOGFILE << "AuxEngineWorker() Thread 0 returning early because search has already stopped.";
-    search_stats_->pure_stats_mutex_.unlock();
-    return;
-  }
+
+  // But we still need to purge the queue.
+  // // Also, if search has stopped, do not spawn a another helper instance until the next move.
+  // if(stop_.load(std::memory_order_acquire)){
+  //   LOGFILE << "AuxEngineWorker() Thread 0 returning early because search has already stopped.";
+  //   search_stats_->pure_stats_mutex_.unlock();
+  //   return;
+  // }
   
   // if our_index is greater than the size of the vectors then we know for sure we must start/initiate everything.
   // if our_index + 1 is equal to, or smaller than the size of the vectors then we can safely check search_stats_->vector_of_auxengine_ready_[our_index] and act if it is false

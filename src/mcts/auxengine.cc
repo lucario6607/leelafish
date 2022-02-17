@@ -919,7 +919,6 @@ void Search::AuxWait() {
   int pv_cache_size = search_stats_->my_pv_cache_.size();
   search_stats_->my_pv_cache_.clear();
   search_stats_->my_pv_cache_mutex_.unlock();  
-  LOGFILE << "5";    
 
   search_stats_->auxengine_mutex_.lock();
 
@@ -993,24 +992,16 @@ void Search::AuxWait() {
       << " Called AuxMaybeEnqueueNode() " << number_of_times_called_AuxMaybeEnqueueNode_ << " times.";
 
   // Reset counters for the next move:
-  LOGFILE << "1";
   search_stats_->Number_of_nodes_added_by_AuxEngine = 0;
-  LOGFILE << "2";
   search_stats_->Total_number_of_nodes = 0;
-  LOGFILE << "3";  
   search_stats_->auxengine_mutex_.unlock();
-  LOGFILE << "4";    
 
   // initial_purge_run needs another lock.
   search_stats_->pure_stats_mutex_.lock();
-  LOGFILE << "6";      
   search_stats_->initial_purge_run = false;
-  LOGFILE << "7";      
   search_stats_->pure_stats_mutex_.unlock();
-  LOGFILE << "8";      
   // Empty the other queue.
   search_stats_->fast_track_extend_and_evaluate_queue_mutex_.lock();
-  LOGFILE << "9";        
   if(search_stats_->fast_track_extend_and_evaluate_queue_.empty()){
     if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE << "No PVs in the fast_track_extend_and_evaluate_queue";
   } else {

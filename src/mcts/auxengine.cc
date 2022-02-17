@@ -397,7 +397,7 @@ void Search::AuxEngineWorker() {
 	search_stats_->initial_purge_run = true;
 	search_stats_->pure_stats_mutex_.unlock();
 	
-	if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "AuxEngineWorker() thread 0 released shared lock nodes_mutex_.";
+	if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "AuxEngineWorker() thread 0 found edges on root, allowed other threads to enter their main loop by setting initial_purge_run, and, finally, released shared lock nodes_mutex_.";
     	// search_stats_->source_of_queued_nodes.push(3); // inform DoAuxEngine() -> where this node came from.
 	// search_stats_->auxengine_mutex_.unlock(); // We will be in DoAuxEngine() until search is stopped, so unlock first.
 	DoAuxEngine(root_node_, our_index);
@@ -410,7 +410,8 @@ void Search::AuxEngineWorker() {
       }
     } else {
       // Not thread 0, or empty OnRoot options
-      if(not_yet_notified){
+      while(not_yet_notified){
+	// Only check this until it has passed once.
 	// Wait for search_stats_->initial_purge_run == true before starting to work.
 	search_stats_->pure_stats_mutex_.lock();	
 	if(!search_stats_->initial_purge_run) {
@@ -421,10 +422,10 @@ void Search::AuxEngineWorker() {
 	} else {
 	  // purge is done, just release the lock.
 	  search_stats_->pure_stats_mutex_.unlock();
+	  // OK, we are good to go.
+	  if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "AuxEngineWorker() thread: " << our_index << " ready to enter the main loop.";
+	  not_yet_notified = false; // never check again.
 	}
-	// OK, we are good to go.
-	if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "AuxEngineWorker() thread: " << our_index << " ready to enter the main loop.";
-	not_yet_notified = false;
       }
 
       // // You may only listen if you have this lock: auxengine_listen_mutex_ this way we avoid spurios awakenings.

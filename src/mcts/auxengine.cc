@@ -283,6 +283,7 @@ void Search::AuxEngineWorker() {
       if(search_stats_->final_purge_run){
 	if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Either we are not the first thread, or there is an unexpected order of execution, and final purging has already taken place. In either case not purging now.";
       } else {
+	if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Thread 0 starting to purge nodes/PV:s.";
 	if(!search_stats_->initial_purge_run && search_stats_->size_of_queue_at_start > 0){
 	  int number_of_nodes_before_purging = int(search_stats_->size_of_queue_at_start / 2);
 	  std::queue<Node*> persistent_queue_of_nodes_temp_;
@@ -360,12 +361,16 @@ void Search::AuxEngineWorker() {
 	  LOGFILE << "Purged " << my_size - size_kept << " PVs due to the move selected by the opponent. " << size_kept
 		  << " PVs remain in the queue.";
 	}
+
+	if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Thread 0 finished to purge nodes/PV:s. Switching locks";
 	// switch back locks.
 	search_stats_->fast_track_extend_and_evaluate_queue_mutex_.unlock();
 	search_stats_->auxengine_mutex_.lock();
+	if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Thread 0 Switched locks OK.";	
 	
       } // end of if(search_stats_->final_purge_run)
 
+      if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Thread 0 about to switch lock from auxengine to pure_stats";
       // switch back the locks
       search_stats_->auxengine_mutex_.unlock();
       search_stats_->pure_stats_mutex_.lock();

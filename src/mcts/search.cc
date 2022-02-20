@@ -2913,7 +2913,7 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	float d = 0.225f;
 	float min_c = 0.0f;
 	float minimum_policy = min_c;
-	strategy = "b";
+	strategy = "e";
 
 	if(strategy == "a") minimum_policy = c;
 

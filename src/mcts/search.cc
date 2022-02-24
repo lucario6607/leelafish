@@ -2878,15 +2878,13 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
       foo->queue_of_vector_of_nodes_from_helper_added_by_this_thread.pop();
 
       float branching_factor = 1.6f;
-      // int length_of_pv = foo->length_of_PVs_.front();
-      // foo->length_of_PVs_.pop();
       int starting_depth_of_PV = foo->starting_depth_of_PVs_.front();
       foo->starting_depth_of_PVs_.pop();
       int amount_of_support = foo->amount_of_support_for_PVs_.front();
       foo->amount_of_support_for_PVs_.pop();
 
-      // Until we get the actual length of the PV, work with the number of added nodes instead.
-      long unsigned int my_pv_size = vector_of_nodes_from_helper_added_by_this_thread.size();
+      // // Until we get the actual length of the PV, work with the number of added nodes instead.
+      // long unsigned int my_pv_size = vector_of_nodes_from_helper_added_by_this_thread.size();
 
       // Do we want to maximize or minimize Q?
       // At root, and thus at even depth, we want to _minimize_ Q (Q is from the perspective of the player who _made the move_ leading up the current position.
@@ -2897,8 +2895,13 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
       }
       if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "How good is this line I just added based on recommendations from the helper?";
       if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Q of parent to the first added node in the line: " << vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " depth: " << depth - 1;
-      for(long unsigned int j = 0; j < my_pv_size; j++){
+      for(long unsigned int j = 0; j < vector_of_nodes_from_helper_added_by_this_thread.size(); j++){
 	Node* n = vector_of_nodes_from_helper_added_by_this_thread[j];
+
+	// divide the amount of support with the current depth ^ scaling factor to the ge current support
+	int current_depth = depth - starting_depth_of_PV + j;
+	int current_amount_of_support = float(amount_of_support) / pow(current_depth, branching_factor);
+	LOGFILE << "MaybeAdjustPolicyForHelperAddedNodes() at a node with current depth (distance from first node in PV) = " << current_depth << ". Starting depth of PV: " << starting_depth_of_PV << ". Distance from root for current node: " << depth << ", amount of support for the PV: " << amount_of_support << " amount of support for this node: " << current_amount_of_support;
 
 	// Strategies for policy adjustment:
 	// a "trust the helper", make sure policy is at least c
@@ -2917,15 +2920,18 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 
 	if(strategy == "a") minimum_policy = c;
 
-	// if(strategy == "d" || strategy == "e"){
-	//   // make sure that policy is at least as good as the best sibling.
-	//   float highest_p = 0;
-	//   // loop through the policies of the siblings.
-	//   for (auto& edge : n->GetParent()->Edges()) {
-	//     if(edge.GetP() > highest_p) highest_p = edge.GetP();
-	//   }
-	//   minimum_policy = highest_p;
-	// }
+	if(strategy == "d" || strategy == "e"){
+	  // make sure that policy is at least as good as the best sibling.
+	  float highest_p = 0;
+	  // loop through the policies of the siblings.
+	  for (auto& edge : n->GetParent()->Edges()) {
+	    if(edge.GetP() > highest_p) highest_p = edge.GetP();
+	  }
+	  minimum_policy = highest_p;
+	}
+
+	// boost nodes with a lot of support
+	if(current_amount_of_support > 100000) minimum_policy = std::min(0.90, minimum_policy * 1.1);	    
 
 	if(strategy != "a"){
 
@@ -2945,11 +2951,11 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	    // the move is promising
 	    if(strategy == "b" || strategy == "e") minimum_policy = d;
 	    if(strategy == "e") minimum_policy = std::min(0.90, minimum_policy * 1.1);
-
 	  } else {
 	    // Not promising
+	    if(strategy == "e") minimum_policy = std::min(0.90, minimum_policy * 0.9);	    
 	    // minimum_policy = 0.2f;
-	    minimum_policy = c;
+	    // minimum_policy = c;
 	  //   // if a move (e.g. leelas favourite move) has the highest policy, reduce its policy to the policy of the highest sibling.
 	  //   float highest_p_siblings = 0;
 	  //   // loop through the policies of the siblings.
@@ -2969,14 +2975,14 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	  }
 	}
 
-	if(strategy == "c"){
-	  // This is still under construction.
-	  // divide the amount of support with the current depth ^ scaling factor to the ge current support
-	  int current_depth = depth - starting_depth_of_PV + j;
-	  int current_amount_of_support = float(amount_of_support) / pow(current_depth, branching_factor);
-	  LOGFILE << "MaybeAdjustPolicyForHelperAddedNodes() at a node with current depth (distance from first node in PV) = " << current_depth << ". Starting depth of PV: " << starting_depth_of_PV << ". Distance from root for current node: " << depth << ", number of added nodes: " << my_pv_size << ", amount of support for the PV: " << amount_of_support << " amount of support for this node: " << current_amount_of_support;
-	  minimum_policy = std::max(min_c, (1.0f - float(j)/float(my_pv_size)) * c);
-	}
+	// if(strategy == "c"){
+	//   // This is still under construction.
+	//   // divide the amount of support with the current depth ^ scaling factor to the ge current support
+	//   int current_depth = depth - starting_depth_of_PV + j;
+	//   int current_amount_of_support = float(amount_of_support) / pow(current_depth, branching_factor);
+	//   LOGFILE << "MaybeAdjustPolicyForHelperAddedNodes() at a node with current depth (distance from first node in PV) = " << current_depth << ". Starting depth of PV: " << starting_depth_of_PV << ". Distance from root for current node: " << depth << ", number of added nodes: " << my_pv_size << ", amount of support for the PV: " << amount_of_support << " amount of support for this node: " << current_amount_of_support;
+	//   minimum_policy = std::max(min_c, (1.0f - float(j)/float(my_pv_size)) * c);
+	// }
 
 	// Actually adjust the policy to minimum_policy (if it is not already higher than that).
 	if(n->GetOwnEdge()->GetP() < minimum_policy){

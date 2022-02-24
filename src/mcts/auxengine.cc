@@ -103,32 +103,6 @@ void Search::AuxEngineWorker() {
 
   long unsigned int our_index = search_stats_->thread_counter;
 
-  // If we are the first thread, and the final purge already has taken place, then return immediately.
-  // search_stats_->final_purge_run is protected by search_stats_->auxengine_mutex_.
-
-  // Only check this if we are thread 0, because otherwise we can
-  // create a deadlock with the main loop which has the other order of
-  // the locks.
-
-  if(our_index == 0){
-    search_stats_->auxengine_mutex_.lock();    
-    if(search_stats_->final_purge_run){
-      if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "AuxEngineWorker() Thread 0 returning early because purge as already taken place";
-      search_stats_->auxengine_mutex_.unlock();    
-      search_stats_->pure_stats_mutex_.unlock();    
-      return;
-    }
-    search_stats_->auxengine_mutex_.unlock();
-  } else {
-    // Since we are not thread 0 we can exit early, we do not have to purge the queue.
-    // If search has stopped, do not spawn a another helper instance until the next move.
-    if(stop_.load(std::memory_order_acquire)){
-      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker() Thread " << our_index << " returning early because search has already stopped.";
-      search_stats_->pure_stats_mutex_.unlock();
-      return;
-    }
-  }
-
   // if our_index is greater than the size of the vectors then we know for sure we must start/initiate everything.
   // if our_index + 1 is equal to, or smaller than the size of the vectors then we can safely check search_stats_->vector_of_auxengine_ready_[our_index] and act if it is false
 
@@ -235,9 +209,10 @@ void Search::AuxEngineWorker() {
 	  search_stats_->AuxEngineThreshold = params_.GetAuxEngineThreshold();
 	}
       }
+    } else {
+      // only unlock if not thread 0
+      search_stats_->pure_stats_mutex_.unlock();
     }
-    search_stats_->pure_stats_mutex_.unlock();
-    
   } else {
 
     // AuxEngine(s) were already started. If we are thread zero then (1) Purge the queue(s) and (2) kickstart root if the queue is empty and root has edges.
@@ -250,8 +225,8 @@ void Search::AuxEngineWorker() {
 
       if(search_stats_->New_Game){
 
-	bool needs_to_purge_nodes  = false;
-	bool needs_to_purge_PVs  = false;      
+	needs_to_purge_nodes  = false;
+	needs_to_purge_PVs  = false;
 	
 	search_stats_->AuxEngineTime = params_.GetAuxEngineTime();
 	// Automatically inactivate the queueing machinery if there is only one instance and OptionsOnRoot is non-empty. Could save some time in ultra-bullet.
@@ -282,7 +257,7 @@ void Search::AuxEngineWorker() {
 	search_stats_->auxengine_mutex_.unlock();
       }
 
-      if(needs_to_purge_nodes || needs_to_purge_nodes){
+      if(needs_to_purge_nodes || needs_to_purge_PVs){
 	// no need for the pure_stats mutex anymore.
 	search_stats_->pure_stats_mutex_.unlock();
 	search_stats_->auxengine_mutex_.lock();
@@ -329,14 +304,10 @@ void Search::AuxEngineWorker() {
 	    std::vector<Move> pv = search_stats_->fast_track_extend_and_evaluate_queue_.front();
 	    search_stats_->fast_track_extend_and_evaluate_queue_.pop();
 	    if(pv.size() > 1){
-	      // LOGFILE << "will test if pv0 is the valid_move: ";
 	      if(pv[0] == valid_move){
 		// remove the first move, which is the move the opponent made that lead to the current position
-		// LOGFILE << "AuxEngineWorker() trying to erase the first move, size is " << pv.size();
 		pv.erase(pv.begin());
 		fast_track_extend_and_evaluate_queue_temp_.push(pv);
-	      } else {
-		// LOGFILE << pv[0].as_string() << " is not equal to " << root_node_->GetOwnEdge()->GetMove().as_string();
 	      }
 	    } else {
 	      LOGFILE << "AuxEngineWorker() found PV of size less than 2, discarding it." << pv.size();		  
@@ -365,8 +336,8 @@ void Search::AuxEngineWorker() {
       search_stats_->pure_stats_mutex_.unlock();      
     }
   } // Not starting from scratch
-  
-  // search_stats_->pure_stats_mutex_.unlock();
+
+  // at this point thread zero has pure_stats_mutex, the other threads has no lock.
     
   Node* n;
   bool not_yet_notified = true;
@@ -380,6 +351,7 @@ void Search::AuxEngineWorker() {
       // we should wait and try again later.
       if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker() thread 0 about to aquire a shared lock nodes_mutex_ in order to read root";
       nodes_mutex_.lock_shared(); // only needed to read GetNumEdges(), SetAuxEngineMove(0xfffe) is already protected by search_stats_->auxengine_mutex_.lock();
+      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker() thread 0 aquired a shared lock nodes_mutex_ in order to read root";      
       if(root_node_->GetNumEdges() > 0){
 	// root is extended.
 	nodes_mutex_.unlock_shared(); // unlock the read-lock on noodes.
@@ -389,7 +361,6 @@ void Search::AuxEngineWorker() {
 	search_stats_->auxengine_mutex_.unlock();
 
 	// This acts like a signal for other threads that they can start working. No point in starting them before root has edges.
-	search_stats_->pure_stats_mutex_.lock();
 	search_stats_->initial_purge_run = true;
 	search_stats_->pure_stats_mutex_.unlock();
 	

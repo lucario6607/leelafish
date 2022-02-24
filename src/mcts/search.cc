@@ -2901,7 +2901,7 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	// divide the amount of support with the current depth ^ scaling factor to the ge current support
 	int current_depth = depth - starting_depth_of_PV + j;
 	int current_amount_of_support = float(amount_of_support) / pow(current_depth, branching_factor);
-	LOGFILE << "MaybeAdjustPolicyForHelperAddedNodes() at a node with current depth (distance from first node in PV) = " << current_depth << ". Starting depth of PV: " << starting_depth_of_PV << ". Distance from root for current node: " << depth << ", amount of support for the PV: " << amount_of_support << " amount of support for this node: " << current_amount_of_support;
+	if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "MaybeAdjustPolicyForHelperAddedNodes() at a node with current depth (distance from first node in PV) = " << current_depth << ". Starting depth of PV: " << starting_depth_of_PV << ". Distance from root for current node: " << depth+current_depth << ", amount of support for the PV: " << amount_of_support << " amount of support for this node: " << current_amount_of_support;
 
 	// Strategies for policy adjustment:
 	// a "trust the helper", make sure policy is at least c

@@ -333,7 +333,7 @@ void Search::AuxEngineWorker() {
       } // end of needs_to_purge*
     } else {
       // We are not thread zero so just release the lock after we have increased the thread counter.
-      search_stats_->pure_stats_mutex_.unlock();      
+      search_stats_->pure_stats_mutex_.unlock();
     }
   } // Not starting from scratch
 
@@ -342,6 +342,7 @@ void Search::AuxEngineWorker() {
   Node* n;
   bool not_yet_notified = true;
   bool root_is_queued = false;
+
   while (!stop_.load(std::memory_order_acquire)) {
     // if we are thread zero, don't read from the queue, just take the root node.
     if(our_index == 0 && !params_.GetAuxEngineOptionsOnRoot().empty()){
@@ -367,6 +368,7 @@ void Search::AuxEngineWorker() {
 	if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "AuxEngineWorker() thread 0 found edges on root, allowed other threads to enter their main loop by setting initial_purge_run, and, finally, released shared lock nodes_mutex_.";
     	// search_stats_->source_of_queued_nodes.push(3); // inform DoAuxEngine() -> where this node came from.
 	// search_stats_->auxengine_mutex_.unlock(); // We will be in DoAuxEngine() until search is stopped, so unlock first.
+	root_is_queued = true;
 	DoAuxEngine(root_node_, our_index);
       } else {
 	nodes_mutex_.unlock_shared(); // unlock, nothing more to do until root gets edges.
@@ -468,7 +470,12 @@ void Search::AuxEngineWorker() {
 
   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxWorker(), thread " << our_index << " caught a stop signal (possibly after returning from DoAuxEngine()), will exit the while loop now.";
   // Decrement the thread counter so that purge in search.cc does not start before all threads are done.
-  search_stats_->pure_stats_mutex_.lock();
+  // if we are thread 0 and root_is_queued is false, then we still have the lock, we never entered the while loop, because search was already stopped.
+  if(!(our_index == 0 && !root_is_queued)){
+    search_stats_->pure_stats_mutex_.lock();
+  } else {
+    LOGFILE << "Thread 0 stopped before entering the while loop, that's rare. Now just don't try to take the lock again, because we already hold it.";
+  }
   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxWorker(), thread " << our_index << " aquired a lock on pure_stats.";
   search_stats_->thread_counter--;
   // Almost always log the when the last thread exits.
@@ -647,7 +654,7 @@ void Search::DoAuxEngine(Node* n, int index){
   }
 
   if (params_.GetAuxEngineVerbosity() >= 9){
-    LOGFILE << "Thread: " << index << ". DoAuxEngine() trying to aquire a lock on nodes_ and was called for node" << n->DebugString() << " thread: " << index;
+    LOGFILE << "Thread: " << index << ". DoAuxEngine() trying to aquire a lock on nodes_";
     nodes_mutex_.lock_shared();
     LOGFILE << "Thread: " << index << ". DoAuxEngine() aquired a lock on nodes_ and was called for node" << n->DebugString() << " thread: " << index;    
     nodes_mutex_.unlock_shared();

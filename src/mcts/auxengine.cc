@@ -362,8 +362,8 @@ void Search::AuxEngineWorker() {
 
 	// This acts like a signal for other threads that they can start working. No point in starting them before root has edges.
 	search_stats_->initial_purge_run = true;
+	if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "AuxEngineWorker() thread 0 about to release shared lock pure_stats_mutex_.";
 	search_stats_->pure_stats_mutex_.unlock();
-	
 	if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "AuxEngineWorker() thread 0 found edges on root, allowed other threads to enter their main loop by setting initial_purge_run, and, finally, released shared lock nodes_mutex_.";
     	// search_stats_->source_of_queued_nodes.push(3); // inform DoAuxEngine() -> where this node came from.
 	// search_stats_->auxengine_mutex_.unlock(); // We will be in DoAuxEngine() until search is stopped, so unlock first.
@@ -382,17 +382,22 @@ void Search::AuxEngineWorker() {
 	// Wait for search_stats_->initial_purge_run == true before starting to work.
 	// if search has already stopped, return early.
 	if (stop_.load(std::memory_order_acquire)) return;
-	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker() thread " << our_index << " trying to obtain a lock on search_stats_->pure_stats_mutex_.";	
-	search_stats_->pure_stats_mutex_.lock();
-	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker() thread " << our_index << " obtained a lock on search_stats_->pure_stats_mutex_.";		
-	if(!search_stats_->initial_purge_run) {
-	  search_stats_->pure_stats_mutex_.unlock();
+	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker() thread " << our_index << " trying to obtain a lock on search_stats_->pure_stats_mutex_.";
+	bool initial_purge_run;
+	{
+	  std::unique_lock<std::mutex> lock(search_stats_->pure_stats_mutex_);
+	  // search_stats_->pure_stats_mutex_.lock();
+	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker() thread " << our_index << " obtained a lock on search_stats_->pure_stats_mutex_.";
+	  initial_purge_run = search_stats_->initial_purge_run;
+	}
+	  if(!initial_purge_run) {
+	  // search_stats_->pure_stats_mutex_.unlock();
 	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker() thread " << our_index << " waiting for thread 0 to purge the queues and check that root has edges, will sleep in cycles of 10 ms until that happens or search is stopped.";
 	  using namespace std::chrono_literals;
 	  std::this_thread::sleep_for(10ms);
 	} else {
-	  // purge is done, just release the lock.
-	  search_stats_->pure_stats_mutex_.unlock();
+	  // // purge is done, just release the lock.
+	  // search_stats_->pure_stats_mutex_.unlock();
 	  // OK, we are good to go.
 	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker() thread: " << our_index << " ready to enter the main loop.";
 	  not_yet_notified = false; // never check again.
@@ -463,7 +468,8 @@ void Search::AuxEngineWorker() {
 
   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxWorker(), thread " << our_index << " caught a stop signal (possibly after returning from DoAuxEngine()), will exit the while loop now.";
   // Decrement the thread counter so that purge in search.cc does not start before all threads are done.
-  search_stats_->pure_stats_mutex_.lock();  
+  search_stats_->pure_stats_mutex_.lock();
+  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxWorker(), thread " << our_index << " aquired a lock on pure_stats.";
   search_stats_->thread_counter--;
   // Almost always log the when the last thread exits.
   if(search_stats_->thread_counter == 0){
@@ -472,6 +478,7 @@ void Search::AuxEngineWorker() {
     if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker thread " << our_index << " done. The thread counter is now " << search_stats_->thread_counter;
   }
   search_stats_->pure_stats_mutex_.unlock();
+  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxWorker(), thread " << our_index << " released the lock on pure_stats.";
 }
 
   void Search::AuxEncode_and_Enqueue(std::string pv_as_string, int depth, ChessBoard my_board, Position my_position, std::vector<lczero::Move> my_moves_from_the_white_side, int source, bool require_some_depth, int thread) {
@@ -510,6 +517,8 @@ void Search::AuxEngineWorker() {
   int depth_reached = 0;
   int nodes_to_support = 0;
   int max_pv_length = 99; // Dirty work around for too many levels of recursion.
+  int eval;
+  bool winning = false;
 
   while(iss >> pv >> std::ws) {
     if (pv == "info"){
@@ -522,6 +531,16 @@ void Search::AuxEngineWorker() {
     if (pv == "depth") {
       // Figure out which depth was reached (can be zero).
       iss >> depth_reached >> std::ws;
+      // // Safe time by ignoring PVs with low depth.
+      // if(require_some_depth && depth_reached < 15) return;
+    }
+    if (pv == "cp") {
+      // Figure out which depth was reached (can be zero).
+      iss >> eval >> std::ws;
+      if(depth == 0 && eval > 200 && params_.GetAuxEngineVerbosity() >= 5) {
+	winning = true;
+	LOGFILE << "The helper engine thinks root position is a win: cp = " << eval;
+      }
       // // Safe time by ignoring PVs with low depth.
       // if(require_some_depth && depth_reached < 15) return;
     }
@@ -564,6 +583,8 @@ void Search::AuxEngineWorker() {
   // Too short PV are probably not reliable (> 4 seems to suffice), too high bar can be bad with low values of AuxEngineTime
   if (pv_moves.size() > 4){
 
+    // todo: if the helper claims it has a win: then force leela to play that move, by increasing its policy, give it fake visits, and maybe even adjust its Q so that it above the current best.
+    
     // check if the PV is new
     std::ostringstream oss;
     // Convert all but the last element to avoid a trailing "," https://stackoverflow.com/questions/8581832/converting-a-vectorint-to-string

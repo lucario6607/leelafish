@@ -262,8 +262,7 @@ void Search::AuxEngineWorker() {
       search_stats_->auxengine_mutex_.unlock();
     }
 
-    // If the helper now claims a win, reroute all resoures to the root
-    // explorer.
+    // If the helper now claims a win, reroute all resources to the root explorer.
     int threads_when_winning = 0;
     
     if(search_stats_->winning_){

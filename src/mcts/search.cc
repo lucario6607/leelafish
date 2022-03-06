@@ -184,7 +184,6 @@ Search::Search(const NodeTree& tree, Network* network,
   search_stats_->thread_counter = 0;
   search_stats_->Number_of_nodes_added_by_AuxEngine = 0;
   search_stats_->Total_number_of_nodes = root_node_->GetN();
-  search_stats_->winning_ = false;
   if (search_stats_->AuxEngineThreshold == 0 &&
       params_.GetAuxEngineInstances() > 1){
     search_stats_->AuxEngineThreshold = params_.GetAuxEngineThreshold();

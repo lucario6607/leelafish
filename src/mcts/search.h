@@ -68,6 +68,8 @@ class Search {
     // std::queue<int> source_of_PVs; // 0 = SearchWorker::PickNodesToExtendTask(); 1 = Search::DoBackupUpdateSingleNode(); 2 = Search::SendUciInfo(); 3 = Search::AuxEngineWorker() node is root. Whenever k (=1 or more) PVs are created from a single node, add k elements with value source from source_of_queued_nodes into this queue.
     std::queue<int> amount_of_support_for_PVs_; // Whenever an element from fast_track_extend_and_evaluate_queue_ is popped by PreExt...(), record the number of nodes to support for that PV in this vector. This way MaybeAdjustPolicyForHelperAddedNodes() can guesstimate the number of nodes there are to backup an added node.
     std::queue<int> starting_depth_of_PVs_; // needed to calculate the estimated number of nodes in support for a recommended move.
+    bool winning_;
+    Move winning_move_;
 
     std::vector<std::shared_ptr<boost::process::ipstream>> vector_of_ipstreams;
     std::vector<std::shared_ptr<boost::process::opstream>> vector_of_opstreams;
@@ -96,7 +98,9 @@ class Search {
     std::queue<Move*> temporary_queue_of_moves; //
 
     std::mutex fast_track_extend_and_evaluate_queue_mutex_;
-    std::mutex pure_stats_mutex_;
+    // std::mutex pure_stats_mutex_;
+    mutable std::shared_mutex pure_stats_mutex_;
+    // SharedMutex pure_stats_mutex_;
     std::mutex auxengine_mutex_;
     std::mutex auxengine_listen_mutex_;
     std::mutex auxengine_stopped_mutex_;

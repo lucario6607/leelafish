@@ -183,7 +183,8 @@ Search::Search(const NodeTree& tree, Network* network,
   search_stats_->final_purge_run = false;
   search_stats_->thread_counter = 0;
   search_stats_->Number_of_nodes_added_by_AuxEngine = 0;
-  search_stats_->Total_number_of_nodes = root_node_->GetN();  
+  search_stats_->Total_number_of_nodes = root_node_->GetN();
+  search_stats_->winning_ = false;
   if (search_stats_->AuxEngineThreshold == 0 &&
       params_.GetAuxEngineInstances() > 1){
     search_stats_->AuxEngineThreshold = params_.GetAuxEngineThreshold();
@@ -583,12 +584,13 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
                               StoppersHints* hints) {
   hints->Reset();
 
-  nodes_mutex_.lock_shared();
+  // SharedMutex::Lock lock(search_->nodes_mutex_);
+  // nodes_mutex_.lock_shared();
   Mutex::Lock lock(counters_mutex_);
   // Return early if some other thread already has responded bestmove,
   // or if the root node is not yet expanded.
   if (bestmove_is_sent_ || total_playouts_ + initial_visits_ == 0) {
-    nodes_mutex_.unlock_shared();
+    // nodes_mutex_.unlock_shared();
     return;
   }
 
@@ -652,7 +654,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
   } else {
     if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Finished MaybeTriggerStop() finished, not stopping search yet.";
   }
-  nodes_mutex_.unlock_shared();
+  // nodes_mutex_.unlock_shared();
 }
 
 // Return the evaluation of the actual best child, regardless of temperature
@@ -763,9 +765,18 @@ std::vector<EdgeAndNode> Search::GetBestChildrenNoTemperature(Node* parent,
   const auto middle = (static_cast<int>(edges.size()) > count)
                           ? edges.begin() + count
                           : edges.end();
+
+  search_stats_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // read only would suffice
+  bool winning_ = search_stats_->winning_;
+  Move winning_move_;
+  if (winning_){
+    winning_move_ = search_stats_->winning_move_;
+  }
+  search_stats_->fast_track_extend_and_evaluate_queue_mutex_.unlock();
+  
   std::partial_sort(
       edges.begin(), middle, edges.end(),
-      [draw_score, beta_prior, select_move_by_q](const auto& a, const auto& b) {
+      [draw_score, beta_prior, select_move_by_q, winning_, winning_move_](const auto& a, const auto& b) {
         // The function returns "true" when a is preferred to b.
 
         // Lists edge types from less desirable to more desirable.
@@ -810,6 +821,16 @@ std::vector<EdgeAndNode> Search::GetBestChildrenNoTemperature(Node* parent,
 
         // Neither is terminal, use standard rule.
         if (a_rank == kNonTerminal) {
+
+	  // if the helper engine claims a win, trust it.
+	  if (winning_){
+	    if(winning_move_ == a.GetMove()){
+	      return(true);
+	    }
+	    if(winning_move_ == b.GetMove()){
+	      return(false);
+	    }
+	  }
 
 	  if(select_move_by_q){
 	    // the beta_prior is constant and equals:
@@ -1254,8 +1275,8 @@ void SearchWorker::ExecuteOneIteration() {
   DoBackupUpdate();
   if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << std::this_thread::get_id() << " DoBackupUpdate() finished in ExecuteOneIteration().";
 
-  MaybeAdjustPolicyForHelperAddedNodes(foo);
-  if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << std::this_thread::get_id() << " MaybeAdjustPolicyForHelperAddedNodes() finished in ExecuteOneIteration().";
+  // MaybeAdjustPolicyForHelperAddedNodes(foo);
+  // if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << std::this_thread::get_id() << " MaybeAdjustPolicyForHelperAddedNodes() finished in ExecuteOneIteration().";
 
   // 7. Update the Search's status and progress information.
   UpdateCounters();
@@ -1297,11 +1318,11 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
   bool black_to_move = ! search_->played_history_.IsBlackToMove() ^ (ply % 2 == 0);
   bool edge_found = false;
 
-  // Check if search is stopped.
-  if(search_->stop_.load(std::memory_order_acquire)){
-    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation_inner() returning early because search is stopped";
-    return;
-  }
+  // // Check if search is stopped.
+  // if(search_->stop_.load(std::memory_order_acquire)){
+  //   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation_inner() returning early because search is stopped";
+  //   return;
+  // }
   if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Trying to get a lock on nodes reading for node: " << my_node->DebugString();
   search_->nodes_mutex_.lock_shared();
   if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Got a lock on nodes reading for node: " << my_node->DebugString();
@@ -1400,6 +1421,13 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	std::copy_n(my_moves.begin(), ply+1, std::back_inserter(moves_to_this_node));
 	
 	// Get a unique lock since GetOrSpawnNode() writes to the parent.
+	// This can take a long time, don't do it if search is stopped.
+	// Check if search is stopped.
+	if(search_->stop_.load(std::memory_order_acquire)){
+	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation_inner() returning early because search is stopped";
+	  return;
+	}
+	
 	search_->nodes_mutex_.lock();
 	// GetOrSpawnNode() does work with the lock on since it does not modify the tree.
 	Node* child_node = edge.GetOrSpawnNode(my_node, nullptr);
@@ -1546,17 +1574,17 @@ const std::shared_ptr<Search::adjust_policy_stats> SearchWorker::PreExtendTreeAn
   // Check if search_stats_->initial_purge_run == true. If it is not, then return early, because than AuxWorker() thread 0 hasn't purged the PV:s yet.
   // to read search_stats_->initial_purge_run, take a lock on pure_stats_.
   
-  search_->search_stats_->pure_stats_mutex_.lock();
+  search_->search_stats_->pure_stats_mutex_.lock_shared();
   if(!search_->search_stats_->initial_purge_run){
-    search_->search_stats_->pure_stats_mutex_.unlock();
+    search_->search_stats_->pure_stats_mutex_.unlock_shared();
     return(bar);
   }
-  search_->search_stats_->pure_stats_mutex_.unlock();
+  search_->search_stats_->pure_stats_mutex_.unlock_shared();
       
   search_->search_stats_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before reading from it.
   if(search_->search_stats_->fast_track_extend_and_evaluate_queue_.size() > 0){
 
-    search_->search_stats_->pure_stats_mutex_.lock();
+    search_->search_stats_->pure_stats_mutex_.lock_shared();
     int number_of_added_nodes_at_start = search_->search_stats_->Number_of_nodes_added_by_AuxEngine;
     int number_of_PVs_added = 0;
     
@@ -1565,7 +1593,7 @@ const std::shared_ptr<Search::adjust_policy_stats> SearchWorker::PreExtendTreeAn
 	  number_of_PVs_added < 15 // don't drag the speed down.
 	  ){
       // relase the lock, we only needed it to test if to continue or not
-      search_->search_stats_->pure_stats_mutex_.unlock();
+      search_->search_stats_->pure_stats_mutex_.unlock_shared();
 
       if (params_.GetAuxEngineVerbosity() >= 9) {
 	LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: size of minibatch_ is " << minibatch_.size();
@@ -1624,10 +1652,9 @@ const std::shared_ptr<Search::adjust_policy_stats> SearchWorker::PreExtendTreeAn
 
       // While we extended nodes, someone could have added more PV:s, update our belief about the current size of the queue.
       search_->search_stats_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before reading from it again.
-      search_->search_stats_->pure_stats_mutex_.lock();
-
-    } // Always end the while loop with the lock on.
-    search_->search_stats_->pure_stats_mutex_.unlock();
+      search_->search_stats_->pure_stats_mutex_.lock_shared(); // Always end the while loop with the lock on.
+    } // end of while loop
+    search_->search_stats_->pure_stats_mutex_.unlock_shared();
   }
   search_->search_stats_->fast_track_extend_and_evaluate_queue_mutex_.unlock(); // unlock
   // LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: finished.";
@@ -1663,10 +1690,12 @@ void SearchWorker::GatherMinibatch2() {
   // Total number of nodes to process.
   int minibatch_size = 0;
   int cur_n = 0;
+  if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "GatherMinibatch2() trying to aquire a shared lock on nodes";  
   {
     SharedMutex::Lock lock(search_->nodes_mutex_);
     cur_n = search_->root_node_->GetN();
   }
+  if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "GatherMinibatch2() Aquired and released a shared lock on nodes";
   // TODO: GetEstimatedRemainingPlayouts has already had smart pruning factor
   // applied, which doesn't clearly make sense to include here...
   int64_t remaining_n =
@@ -1783,6 +1812,7 @@ void SearchWorker::GatherMinibatch2() {
           ++number_out_of_order_;
         }
       }
+      if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "GatherMinibatch2() Aquired and released a shared lock on nodes 2.";      
     }
     for (size_t i = new_start; i < minibatch_.size(); i++) {
       // If there was no OOO, there can stil be collisions.
@@ -1818,6 +1848,7 @@ void SearchWorker::GatherMinibatch2() {
                node = node->GetParent()) {
             node->IncrementNInFlight(extra);
           }
+	  if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "GatherMinibatch2() Aquired and released a shared lock on nodes 3.";	  
         }
         if ((collisions_left -= picked_node.multivisit) <= 0) return;
         if (search_->stop_.load(std::memory_order_acquire)) return;
@@ -2675,7 +2706,9 @@ void SearchWorker::FetchSingleNodeResult(NodeToProcess* node_to_process,
 // ~~~~~~~~~~~~~~
 void SearchWorker::DoBackupUpdate() {
   // Nodes mutex for doing node updates.
+  if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "DoBackupUpdate() trying to get a shared lock on nodes";  
   SharedMutex::Lock lock(search_->nodes_mutex_);
+  if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "DoBackupUpdate() Aquired shared lock on nodes";
 
   bool work_done = number_out_of_order_ > 0;
   for (const NodeToProcess& node_to_process : minibatch_) {
@@ -2862,17 +2895,18 @@ bool SearchWorker::MaybeSetBounds(Node* p, float m, int* n_to_fix,
   // 6.5
 void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Search::adjust_policy_stats> foo){
   std::thread::id this_id = std::this_thread::get_id();
+  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << this_id << ", In MaybeAdjustPolicyForHelperAddedNodes().";
   long unsigned int my_queue_size = foo->queue_of_vector_of_nodes_from_helper_added_by_this_thread.size();
   if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << this_id << ", In MaybeAdjustPolicyForHelperAddedNodes(), size of queue to process: " << my_queue_size;
   if(my_queue_size > 0){
-    if (!search_->stop_.load(std::memory_order_acquire)) {
-      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "MaybeAdjustPolicy.. trying to aquire a lock on nodes.";      
-      search_->nodes_mutex_.lock_shared();
-      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "MaybeAdjustPolicy.. aquired a lock on nodes.";
-    } else {
-      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "MaybeAdjustPolicyForHelperAddedNodes() exiting early since search has stopped";
-      return;
-    }
+    // if (!search_->stop_.load(std::memory_order_acquire)) {
+    //   if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "MaybeAdjustPolicy.. trying to aquire a lock on nodes.";      
+    //   search_->nodes_mutex_.lock_shared();
+    //   if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "MaybeAdjustPolicy.. aquired a lock on nodes.";
+    // } else {
+    //   if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "MaybeAdjustPolicyForHelperAddedNodes() exiting early since search has stopped";
+    //   return;
+    // }
     while(foo->queue_of_vector_of_nodes_from_helper_added_by_this_thread.size() > 0){    
       std::vector<Node*> vector_of_nodes_from_helper_added_by_this_thread = foo->queue_of_vector_of_nodes_from_helper_added_by_this_thread.front();
       foo->queue_of_vector_of_nodes_from_helper_added_by_this_thread.pop();
@@ -2987,11 +3021,9 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	// Actually adjust the policy to minimum_policy (if it is not already higher than that).
 	if(n->GetOwnEdge()->GetP() < minimum_policy){
 	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Increased policy from " << n->GetOwnEdge()->GetP() << " to " << minimum_policy;
-	  search_->nodes_mutex_.unlock_shared();
 	  search_->nodes_mutex_.lock();	    
 	  n->GetOwnEdge()->SetP(minimum_policy);
 	  search_->nodes_mutex_.unlock();
-	  search_->nodes_mutex_.lock_shared();	  
 	}
 	
       }

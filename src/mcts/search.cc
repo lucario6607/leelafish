@@ -2898,14 +2898,6 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
   long unsigned int my_queue_size = foo->queue_of_vector_of_nodes_from_helper_added_by_this_thread.size();
   if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << this_id << ", In MaybeAdjustPolicyForHelperAddedNodes(), size of queue to process: " << my_queue_size;
   if(my_queue_size > 0){
-    // if (!search_->stop_.load(std::memory_order_acquire)) {
-    //   if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "MaybeAdjustPolicy.. trying to aquire a lock on nodes.";      
-    //   search_->nodes_mutex_.lock_shared();
-    //   if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "MaybeAdjustPolicy.. aquired a lock on nodes.";
-    // } else {
-    //   if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "MaybeAdjustPolicyForHelperAddedNodes() exiting early since search has stopped";
-    //   return;
-    // }
     while(foo->queue_of_vector_of_nodes_from_helper_added_by_this_thread.size() > 0){    
       std::vector<Node*> vector_of_nodes_from_helper_added_by_this_thread = foo->queue_of_vector_of_nodes_from_helper_added_by_this_thread.front();
       foo->queue_of_vector_of_nodes_from_helper_added_by_this_thread.pop();
@@ -3024,7 +3016,16 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	  n->GetOwnEdge()->SetP(minimum_policy);
 	  search_->nodes_mutex_.unlock();
 	}
-	
+	// That's the new nodes, but what about the already existing nodes, shouldn't we boost policy for those too, or even all ancestor nodes back to root, if they are promising?
+	for (Node* n2 = vector_of_nodes_from_helper_added_by_this_thread[0]; n2 != search_->root_node_; n2 = n2->GetParent()) {
+	  // Let's do something simple, just ensure policy is at least 0.2
+	  float minimum_policy_for_existing_nodes = 0.2f;
+	  if(n->GetOwnEdge()->GetP() < minimum_policy_for_existing_nodes){	  
+	    search_->nodes_mutex_.lock();	    
+	    n->GetOwnEdge()->SetP(minimum_policy_for_existing_nodes);
+	    search_->nodes_mutex_.unlock();
+	  }
+	}
       }
     }
     // Reset the variable, if it was non-empty.

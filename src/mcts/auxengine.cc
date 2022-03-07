@@ -215,6 +215,10 @@ void Search::AuxEngineWorker() {
 
     bool needs_to_purge_nodes = true;
     bool needs_to_purge_PVs = true;
+    if(search_stats_->initial_purge_run){
+      needs_to_purge_nodes = false;
+      needs_to_purge_PVs = false;
+    }
 
     if(our_index == 0 && search_stats_->New_Game){
 
@@ -312,13 +316,12 @@ void Search::AuxEngineWorker() {
     }
 
     // AuxEngine(s) were already started. If we are thread zero then (1) Purge the queue(s) and (2) kickstart root if the queue is empty and root has edges.
+    // If another thread 0 purge and exit before we got started, we can be thread zer0 now.
     search_stats_->thread_counter++;
 
     if(our_index == 0){
 
       if(needs_to_purge_nodes || needs_to_purge_PVs){
-	// // no need for the pure_stats mutex anymore.
-	// search_stats_->pure_stats_mutex_.unlock();
 	search_stats_->auxengine_mutex_.lock();
 	if(search_stats_->persistent_queue_of_nodes.size() > 0){
 	  // The even elements are the actual nodes, the odd elements is root if the preceding even element is still a relevant node.
@@ -533,12 +536,12 @@ void Search::AuxEngineWorker() {
   void Search::AuxEncode_and_Enqueue(std::string pv_as_string, int depth, ChessBoard my_board, Position my_position, std::vector<lczero::Move> my_moves_from_the_white_side, bool require_some_depth, int thread) {
   // Take a string recieved from a helper engine, turn it into a vector with elements of type Move and queue that vector.
 
-  // Quit early if search has stopped
- if(stop_.load(std::memory_order_acquire)) {
-   // if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Would have quit early from AuxEncode_and_Enqueue() since search has stopped, but decided to take the risk and go on.";   
-   if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread " << thread << ": Quitting early from AuxEncode_and_Enqueue() since search has stopped.";
-   return;
- }
+ //  // Quit early if search has stopped
+ // if(stop_.load(std::memory_order_acquire)) {
+ //   // if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Would have quit early from AuxEncode_and_Enqueue() since search has stopped, but decided to take the risk and go on.";   
+ //   if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread " << thread << ": Quitting early from AuxEncode_and_Enqueue() since search has stopped.";
+ //   return;
+ // }
 
   std::istringstream iss(pv_as_string);  
   std::string pv;
@@ -658,6 +661,11 @@ void Search::AuxEngineWorker() {
       } else {
 	LOGFILE << "debug info: length of PV given to helper engine: " << depth << " position given to helper: " << s << " white to move at root, length of my_moves_from_the_white_side " << my_moves_from_the_white_side.size() << " my_moves_from_the_white_side: " << debug_string;
       }
+    }
+
+    if(stop_.load(std::memory_order_acquire) && depth == 0){
+      // final eval from the root-explorer
+      if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Final eval from the root explorer: " << eval << " with the move " << my_moves_from_the_white_side.front().as_string();      
     }
 
     long unsigned int size;
@@ -923,11 +931,11 @@ void Search::DoAuxEngine(Node* n, int index){
       }
     }
   }
-  if (stopping) {
-    // Don't use results of a search that was stopped.
-    // Not because the are unreliable, but simply because we want to shut down as fast as possible.
-    return;
-  }
+  // if (stopping) {
+  //   // Don't use results of a search that was stopped.
+  //   // Not because the are unreliable, but simply because we want to shut down as fast as possible.
+  //   return;
+  // }
   search_stats_->auxengine_stopped_mutex_.lock();
   search_stats_->auxengine_stopped_[index] = true; // stopped means "not running". It does not mean it was stopped prematurely.
   search_stats_->auxengine_stopped_mutex_.unlock();
@@ -938,9 +946,9 @@ void Search::DoAuxEngine(Node* n, int index){
   }
   if(prev_line == ""){
     if (params_.GetAuxEngineVerbosity() >= 1) LOGFILE << "Thread: " << index << " Empty PV, returning early from doAuxEngine().";
-    // TODO restart the helper engine?
-    using namespace std::chrono_literals;
-    std::this_thread::sleep_for(100ms);
+    // // TODO restart the helper engine?
+    // using namespace std::chrono_literals;
+    // std::this_thread::sleep_for(100ms);
     return;
   }
   if (! search_stats_->vector_of_children[index]->running()) {

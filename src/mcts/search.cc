@@ -183,6 +183,8 @@ Search::Search(const NodeTree& tree, Network* network,
   search_stats_->final_purge_run = false;
   search_stats_->thread_counter = 0;
   search_stats_->Number_of_nodes_added_by_AuxEngine = 0;
+  search_stats_->number_of_nodes_in_support_for_helper_eval_of_root = 0;
+  search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child_of_root = 0;
   search_stats_->Total_number_of_nodes = root_node_->GetN();
   if (search_stats_->AuxEngineThreshold == 0 &&
       params_.GetAuxEngineInstances() > 1){
@@ -306,6 +308,27 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
       uci_info.pv.push_back(iter.GetMove(flip));
       if (!iter.node()) break;  // Last edge was dangling, cannot continue.
       depth += 1;
+
+      // If search is not stopped, make sure a helper thread can explore Leelas prefered child of root.
+      if (!stop_.load(std::memory_order_acquire) && // search is not stopped
+	  multipv == 1 && // prefered PV
+	  depth == 1 && // first node in the PV
+	  params_.GetAuxEngineFile() != "" && // helper is activated
+	  ! iter.node()->IsTerminal() && // child is not terminal
+	  iter.node() != search_stats_->Leelas_preferred_child_node_){ // Not set already
+	search_stats_->Leelas_preferred_child_node_ = iter.node();
+	LOGFILE << "Updated search_stats_->Leelas_preferred_child_node_ to be the node reached via the move " << iter.GetMove(flip).as_string();
+	// stop helper instance 2 (index 1) if it is running. When restarted it will pick up the new favoured move.
+	search_stats_->auxengine_stopped_mutex_.lock();
+	int i = 1;
+	if(!search_stats_->auxengine_stopped_[i]){
+	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "SendUciInfo() Stopping the A/B helper Start for thread=" << i << " Start.";
+	  *search_stats_->vector_of_opstreams[i] << "stop" << std::endl; // stop the A/B helper
+	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "SendUciInfo() Stopping the A/B helper for thread=" << i << " Stop.";
+	  search_stats_->auxengine_stopped_[i] = true;
+	}
+	search_stats_->auxengine_stopped_mutex_.unlock();
+      }
 
       // I thought this would be bad because it violates the principle
       // that relevance is simply indicated by number of visits, but
@@ -630,6 +653,43 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     }
     search_stats_->auxengine_stopped_mutex_.unlock();
 
+    // veto if the move Leela prefers is a blunder
+    if(params_.GetAuxEngineVerbosity() >= 3){
+      LOGFILE << "Starting vetoing stuff";
+    }
+    search_stats_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // for reading search_stats_->winning_ and the others
+    nodes_mutex_.lock_shared();    
+    if(search_stats_->helper_eval_of_root - search_stats_->helper_eval_of_leelas_preferred_child_of_root > 30 && // large enough blunder
+       search_stats_->number_of_nodes_in_support_for_helper_eval_of_root > 100000 && // large enough support
+       search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child_of_root > 100000 && // large enough support
+       search_stats_->Leelas_preferred_child_node_ != nullptr &&
+       search_stats_->Leelas_preferred_child_node_->GetOwnEdge()->GetMove().as_string() != search_stats_->winning_move_.as_string() && // they agree on the move
+       ! search_stats_->winning_ // autopilot is not already on
+       ){
+      if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Stoping a blunder, helper eval of root: " << search_stats_->helper_eval_of_root << " helper recommended move " << search_stats_->winning_move_.as_string() << " Number of nodes in support for the root node eval: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_root << " helper eval of leelas preferred move: " << search_stats_->helper_eval_of_leelas_preferred_child_of_root << " Leela prefers the move: " << search_stats_->Leelas_preferred_child_node_->GetOwnEdge()->GetMove().as_string() << " nodes in support for the eval of leelas preferred move: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child_of_root;
+      search_stats_->stop_a_blunder_ = true;
+    }
+    if(params_.GetAuxEngineVerbosity() >= 3 &&
+       search_stats_->number_of_nodes_in_support_for_helper_eval_of_root > 0 && 
+       search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child_of_root > 0 && 
+search_stats_->Leelas_preferred_child_node_->GetOwnEdge()->GetMove().as_string() == search_stats_->winning_move_.as_string()){
+      LOGFILE << "Leela agrees with helper about the best move";
+    } else {
+      if(search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child_of_root <= 100000){
+	LOGFILE << "Leela disagrees with helper about the best move, but the helper has too few nodes to refute leelas move.";	
+      }
+      if(search_stats_->helper_eval_of_root - search_stats_->helper_eval_of_leelas_preferred_child_of_root <= 30){
+	LOGFILE << "Leela disagrees with helper about the best move, but it is not a blunder.";		
+      }
+    }
+    nodes_mutex_.unlock_shared();    
+    search_stats_->fast_track_extend_and_evaluate_queue_mutex_.unlock();
+
+    if(params_.GetAuxEngineVerbosity() >= 3){
+      LOGFILE << "Finished vetoing stuff";
+    }
+    
+
     SendUciInfo();
     EnsureBestMoveKnown();
     SendMovesStats();
@@ -766,7 +826,7 @@ std::vector<EdgeAndNode> Search::GetBestChildrenNoTemperature(Node* parent,
                           : edges.end();
 
   search_stats_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // read only would suffice
-  bool winning_ = search_stats_->winning_;
+  bool winning_ = search_stats_->winning_ || search_stats_->stop_a_blunder_;
   Move winning_move_;
   if (winning_){
     winning_move_ = search_stats_->winning_move_;
@@ -3019,7 +3079,7 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	// That's the new nodes, but what about the already existing nodes, shouldn't we boost policy for those too, or even all ancestor nodes back to root, if they are promising?
 	for (Node* n2 = vector_of_nodes_from_helper_added_by_this_thread[0]; n2 != search_->root_node_; n2 = n2->GetParent()) {
 	  // Let's do something simple, just ensure policy is at least 0.2
-	  float minimum_policy_for_existing_nodes = 0.2f;
+	  float minimum_policy_for_existing_nodes = 0.3f;
 	  if(n->GetOwnEdge()->GetP() < minimum_policy_for_existing_nodes){	  
 	    search_->nodes_mutex_.lock();	    
 	    n->GetOwnEdge()->SetP(minimum_policy_for_existing_nodes);

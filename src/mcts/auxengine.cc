@@ -137,9 +137,9 @@ void Search::AuxEngineWorker() {
     search_stats_->auxengine_stopped_mutex_.unlock();
 
     std::string bar;
-    // If AuxEngineOptionsOnRoot is set, Thread zero uses a different parameter and it continuosly explores root node only.
+    // If AuxEngineOptionsOnRoot is set, Thread zero (and one if it exists) uses a different parameter and it continuosly explores root node only.
     // If not set, thread zero becomes just another in-tree helper instance.
-    if(our_index == 0 &&
+    if(our_index < 2 &&
        !params_.GetAuxEngineOptionsOnRoot().empty()
        ){
       bar = params_.GetAuxEngineOptionsOnRoot();
@@ -246,6 +246,9 @@ void Search::AuxEngineWorker() {
 	search_stats_->auxengine_stopped_mutex_.unlock();
 	search_stats_->winning_threads_adjusted = false;
       }
+
+      search_stats_->number_of_nodes_in_support_for_helper_eval_of_root = 0;
+      search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child_of_root = 0;
       
       search_stats_->Total_number_of_nodes = 0;
       search_stats_->Number_of_nodes_added_by_AuxEngine = 0;
@@ -586,6 +589,12 @@ void Search::AuxEngineWorker() {
     }
     if (pv == "cp") {
       iss >> eval >> std::ws;
+      if(depth == 0){
+	search_stats_->helper_eval_of_root = eval;
+      }
+      if(thread == 1){ // assume thread 1 works with leelas preferred child of root.
+	search_stats_->helper_eval_of_leelas_preferred_child_of_root = -eval;
+      }
       if(depth == 0 && eval > 200) {
 	winning = true;
       }
@@ -671,6 +680,8 @@ void Search::AuxEngineWorker() {
     long unsigned int size;
     search_stats_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before starting to modify it
     size = search_stats_->fast_track_extend_and_evaluate_queue_.size();
+
+    // Prepare autopilot and blunder vetoing START
     // before search_stats_->winning_threads_adjusted is set, accept changes in all directions.
     // after search_stats_->winning_threads_adjusted is set, just inform, don't change the state of search_stats_->winning_
     if (winning && !search_stats_->winning_){
@@ -680,7 +691,7 @@ void Search::AuxEngineWorker() {
       search_stats_->winning_move_ = my_moves_from_the_white_side.front();
       if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "The helper engine thinks the root position is winning: cp = " << eval << " with the move " << search_stats_->winning_move_.as_string();
     }
-    if (!winning && search_stats_->winning_){
+    if (depth == 0 && !winning && search_stats_->winning_){
       if(!search_stats_->winning_threads_adjusted){
 	search_stats_->winning_ = false;
 	if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "The helper engine thinks the root position is no longer winning: cp = " << eval << " since the autopilot is not yet on, I will not turn it on.";
@@ -688,6 +699,15 @@ void Search::AuxEngineWorker() {
 	if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "The helper engine thinks the root position is no longer winning: cp = " << eval << " but since the autopilot is already on, I refuse to clean up your mess.";
       }
     }
+    // make sure the currently recommended move from the helper is available if it is needed when vetoing Leelas move. TODO change name from "winning" to "recommended".
+    if(depth == 0){
+      search_stats_->number_of_nodes_in_support_for_helper_eval_of_root = nodes_to_support;
+      search_stats_->winning_move_ = my_moves_from_the_white_side.front();
+    }
+    if(thread == 1){ // assume thread 1 works with leelas preferred child of root.
+      search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child_of_root = nodes_to_support;
+    }
+    // Prepare autopilot and blunder vetoing STOP
     
     if(size < 20000){ // safety net, silently drop PV:s if we cannot extend nodes fast enough. lc0 stalls when this number is too high.
       search_stats_->fast_track_extend_and_evaluate_queue_.push(my_moves_from_the_white_side);
@@ -712,6 +732,27 @@ void Search::DoAuxEngine(Node* n, int index){
     return;
   }
 
+  // If we are thread 1:
+  // 1. then put the node back into the queue,
+  // 2. grab Leelas preferred child of root.
+  // 3. explore that node infinitely
+  // 4. someone else will stop the helper if Leela changes her mind.
+  // 5. make sure the eval is reported so it can be used to veto leelas move.
+
+  // step 0 make sure there leela has a preferred move
+  if(index == 1 && search_stats_->Leelas_preferred_child_node_ != nullptr){
+
+    // step 1
+    search_stats_->auxengine_mutex_.unlock();  
+    search_stats_->persistent_queue_of_nodes.push(n);
+    auxengine_cv_.notify_one();
+    search_stats_->auxengine_mutex_.unlock();
+
+    // step 2
+    n = search_stats_->Leelas_preferred_child_node_;
+    
+  }
+  
   if (params_.GetAuxEngineVerbosity() >= 9){
     LOGFILE << "Thread: " << index << ". DoAuxEngine() trying to aquire a lock on nodes_ to calculate depth.";
   }
@@ -746,7 +787,7 @@ void Search::DoAuxEngine(Node* n, int index){
   }
 
   if (search_stats_->persistent_queue_of_nodes.size() > 0){ // if there is no node in the queue then accept unconditionally.
-    if(depth > 0 &&
+    if(depth > 1 &&
        depth > params_.GetAuxEngineMaxDepth()
        ){
       // Only generate a random sample if these parameters are true, save a few random samples
@@ -768,7 +809,7 @@ void Search::DoAuxEngine(Node* n, int index){
   
   search_stats_->auxengine_mutex_.unlock();  
   
-  if(depth > 0 &&
+  if(depth > 1 &&
      depth > params_.GetAuxEngineMaxDepth()){
     // if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "DoAuxEngine processing a node with high depth: " << " since sample " << sample << " is less than " << float(1.0f)/(depth);
   }
@@ -836,10 +877,19 @@ void Search::DoAuxEngine(Node* n, int index){
   *search_stats_->vector_of_opstreams[index] << s << std::endl;
   auto auxengine_start_time = std::chrono::steady_clock::now();
   bool infinite_exploration = false;
-  if(index == 0 &&
-     (!params_.GetAuxEngineOptionsOnRoot().empty() || search_stats_->winning_)){
+  if(
+     (index == 0 &&
+     (!params_.GetAuxEngineOptionsOnRoot().empty() || search_stats_->winning_)
+     ) ||
+     (index == 1 && search_stats_->Leelas_preferred_child_node_ != nullptr)
+     ){
     infinite_exploration = true;
-    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Starting infinite query from root node for thread 0 using the opstream at: " << &search_stats_->vector_of_opstreams[index];
+    if(index == 0){
+      if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Starting infinite query from root node for thread 0 using the opstream at: " << &search_stats_->vector_of_opstreams[index];
+    }
+    if(index == 1){
+      if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Starting infinite query from leelas preferred child of root for thread 1 using the opstream at: " << &search_stats_->vector_of_opstreams[index];      
+    }
     *search_stats_->vector_of_opstreams[index] << "go infinite " << std::endl;
     if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Started infinite query from root node for thread 0 using the opstream at: " << &search_stats_->vector_of_opstreams[index];    
   } else {
@@ -1054,6 +1104,8 @@ void Search::AuxWait() {
   search_stats_->Number_of_nodes_added_by_AuxEngine = 0;
   search_stats_->Total_number_of_nodes = 0;
   search_stats_->auxengine_mutex_.unlock();
+
+  search_stats_->Leelas_preferred_child_node_ = nullptr;
 
   // initial_purge_run needs another lock.
   search_stats_->pure_stats_mutex_.lock();

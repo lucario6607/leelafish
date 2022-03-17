@@ -69,9 +69,15 @@ class Search {
     std::queue<int> amount_of_support_for_PVs_; // Whenever an element from fast_track_extend_and_evaluate_queue_ is popped by PreExt...(), record the number of nodes to support for that PV in this vector. This way MaybeAdjustPolicyForHelperAddedNodes() can guesstimate the number of nodes there are to backup an added node.
     std::queue<int> starting_depth_of_PVs_; // needed to calculate the estimated number of nodes in support for a recommended move.
     bool winning_ = false;
+    bool stop_a_blunder_ = false;
     bool winning_threads_adjusted = false;
     int non_winning_root_threads_; // only parse once, store the result in this variable so that we can reset without parsing again.
     Move winning_move_;
+    float helper_eval_of_root;
+    float helper_eval_of_leelas_preferred_child_of_root;
+    int number_of_nodes_in_support_for_helper_eval_of_root;
+    int number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child_of_root;
+    Node* Leelas_preferred_child_node_; 
 
     std::vector<std::shared_ptr<boost::process::ipstream>> vector_of_ipstreams;
     std::vector<std::shared_ptr<boost::process::opstream>> vector_of_opstreams;

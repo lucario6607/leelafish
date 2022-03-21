@@ -368,6 +368,52 @@ void Node::FinalizeScoreUpdate(float v, float d, float m, int multivisit) {
   n_in_flight_ -= multivisit;
 }
 
+void Node::CustomScoreUpdate(int depth, float v, float d, float m, int multivisit){
+  if(GetN() < 30){
+    wl_ += multivisit * (v - wl_) / (n_ + multivisit);
+    d_ += multivisit * (d - d_) / (n_ + multivisit);
+    m_ += multivisit * (m - m_) / (n_ + multivisit);
+  } else {
+    // Minimax
+    float best_wl;
+    float best_d;
+    if(depth == 0 || depth % 2 == 0){
+      // maximizing the Q of the children
+      best_wl = -1.0f;
+      for (const auto& child : Edges()) {
+	if (child.HasNode()) {
+	  float this_wl = child.node()->GetWL();
+	  if(this_wl > best_wl){
+	    best_wl = -this_wl;
+	    best_d = child.node()->GetD();
+	  }
+	}
+      }
+    } else {
+      // minimizing
+      best_wl = 1.0f;
+      for (const auto& child : Edges()) {
+	if (child.HasNode()) {
+	  float this_wl = child.node()->GetWL();
+	  if(this_wl < best_wl){
+	    best_wl = -this_wl;
+	    best_d = child.node()->GetD();
+	  }
+	}
+      }
+    }
+    wl_ = best_wl;
+    d_ = best_d;
+  }
+  // Don't really care about MovesLeft, so just do ordinary backup on that.
+  m_ += multivisit * (m - m_) / (n_ + multivisit);
+
+  // Increment N.
+  n_ += multivisit;
+  // Decrement virtual loss.
+  n_in_flight_ -= multivisit;
+}
+
 void Node::AdjustForTerminal(float v, float d, float m, int multivisit) {
   // Recompute Q.
   wl_ += multivisit * v / n_;

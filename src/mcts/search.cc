@@ -659,8 +659,14 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     if(params_.GetAuxEngineVerbosity() >= 3){
       LOGFILE << "Starting vetoing stuff";
     }
-    search_stats_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // for reading search_stats_->winning_ and the others
     nodes_mutex_.lock_shared();    
+    if(params_.GetAuxEngineVerbosity() >= 3){
+      LOGFILE << "Got the shared lock on nodes";
+    }
+    search_stats_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // for reading search_stats_->winning_ and the others
+    if(params_.GetAuxEngineVerbosity() >= 3){
+      LOGFILE << "Got the fast_track_extend_and_evaluate_queue lock";
+    }
     if(params_.GetAuxEngineVerbosity() >= 3){
       LOGFILE << "Aquired the locks";
     }
@@ -2733,10 +2739,6 @@ void SearchWorker::FetchSingleNodeResult(NodeToProcess* node_to_process,
                                          const Computation& computation,
                                          int idx_in_computation) {
 
-  // This look did non exist before PreExtend...(), which can write (add visits_in_flight, add children) to these nodes, but those operation should not interfere with the processing done here. I think PickNodesToExtendTask() ignores nodes with 0 visits and positive visit_in_flight, so that should be good. PreExtend...() does read policy, but only for informational purposes.
-  // // Nodes mutex for doing node updates.
-  // SharedMutex::Lock lock(search_->nodes_mutex_);
-  
   if (node_to_process->IsCollision()) return;
   
   Node* node = node_to_process->node;
@@ -2834,6 +2836,14 @@ void SearchWorker::DoBackupUpdateSingleNode(
   float m_delta = 0.0f;
   uint32_t solid_threshold =
       static_cast<uint32_t>(params_.GetSolidTreeThreshold());
+
+  // calculate depth, so we know if we are minimizing or maximizing Q
+  int depth = 0;
+  for (Node *n = node, *p; n != search_->root_node_->GetParent(); n = p) {
+    p = n->GetParent();
+    depth++;
+  }
+  
   for (Node *n = node, *p; n != search_->root_node_->GetParent(); n = p) {
     p = n->GetParent();
 
@@ -2845,9 +2855,10 @@ void SearchWorker::DoBackupUpdateSingleNode(
       m = n->GetM();
     }
     n->FinalizeScoreUpdate(v, d, m, node_to_process.multivisit);
-    if (n_to_fix > 0 && !n->IsTerminal()) {
-      n->AdjustForTerminal(v_delta, d_delta, m_delta, n_to_fix);
-    }
+    // n->CustomScoreUpdate(depth, v, d, m, node_to_process.multivisit);    
+    // if (n_to_fix > 0 && !n->IsTerminal()) {
+    //   n->AdjustForTerminal(v_delta, d_delta, m_delta, n_to_fix);
+    // }
     if (n->GetN() >= solid_threshold) {
       if (n->MakeSolid() && n == search_->root_node_) {
         // If we make the root solid, the current_best_edge_ becomes invalid and
@@ -2905,6 +2916,8 @@ void SearchWorker::DoBackupUpdateSingleNode(
       // AuxMaybeEnqueueNode(n, 1);
       AuxMaybeEnqueueNode(n);      
     }
+
+    depth--;
     
   }
   search_->total_playouts_ += node_to_process.multivisit;
@@ -3108,9 +3121,10 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	  search_->nodes_mutex_.unlock();
 	}
 	// That's the new nodes, but what about the already existing nodes, shouldn't we boost policy for those too, or even all ancestor nodes back to root, if they are promising?
-	for (Node* n2 = vector_of_nodes_from_helper_added_by_this_thread[0]; n2 != search_->root_node_; n2 = n2->GetParent()) {
-	  // Let's do something simple, just ensure policy is at least 0.25
-	  float minimum_policy_for_existing_nodes = 0.25f;
+	for (Node* n2 = vector_of_nodes_from_helper_added_by_this_thread[0]; depth > starting_depth_of_PV; n2 = n2->GetParent()) {
+	  // Let's do something simple, just ensure policy is at least 0.20
+	  depth--;
+	  float minimum_policy_for_existing_nodes = 0.20f;
 	  if(n->GetOwnEdge()->GetP() < minimum_policy_for_existing_nodes){	  
 	    search_->nodes_mutex_.lock();	    
 	    n->GetOwnEdge()->SetP(minimum_policy_for_existing_nodes);

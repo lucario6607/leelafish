@@ -2856,9 +2856,9 @@ void SearchWorker::DoBackupUpdateSingleNode(
     }
     n->FinalizeScoreUpdate(v, d, m, node_to_process.multivisit);
     // n->CustomScoreUpdate(depth, v, d, m, node_to_process.multivisit);    
-    // if (n_to_fix > 0 && !n->IsTerminal()) {
-    //   n->AdjustForTerminal(v_delta, d_delta, m_delta, n_to_fix);
-    // }
+    if (n_to_fix > 0 && !n->IsTerminal()) {
+      n->AdjustForTerminal(v_delta, d_delta, m_delta, n_to_fix);
+    }
     if (n->GetN() >= solid_threshold) {
       if (n->MakeSolid() && n == search_->root_node_) {
         // If we make the root solid, the current_best_edge_ becomes invalid and

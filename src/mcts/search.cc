@@ -3122,9 +3122,16 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	}
 	// That's the new nodes, but what about the already existing nodes, shouldn't we boost policy for those too, or even all ancestor nodes back to root, if they are promising?
 	for (Node* n2 = vector_of_nodes_from_helper_added_by_this_thread[0]; depth > starting_depth_of_PV; n2 = n2->GetParent()) {
-	  // Let's do something simple, just ensure policy is at least 0.20
 	  depth--;
-	  float minimum_policy_for_existing_nodes = 0.20f;
+	  // make sure that policy is at least as good as the best sibling.
+	  float highest_p = 0.0f;
+	  float minimum_policy_for_existing_nodes;
+	  // loop through the policies of the siblings.
+	  for (auto& edge : n2->GetParent()->Edges()) {
+	    if(edge.GetP() > highest_p) highest_p = edge.GetP();
+	  }
+	  minimum_policy_for_existing_nodes = highest_p;
+	  // minimum_policy_for_existing_nodes = 0.20f;
 	  if(n->GetOwnEdge()->GetP() < minimum_policy_for_existing_nodes){	  
 	    search_->nodes_mutex_.lock();	    
 	    n->GetOwnEdge()->SetP(minimum_policy_for_existing_nodes);

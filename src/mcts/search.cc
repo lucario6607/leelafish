@@ -656,56 +656,38 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     search_stats_->auxengine_stopped_mutex_.unlock();
 
     // veto if the move Leela prefers is a blunder
-    if(params_.GetAuxEngineVerbosity() >= 3){
-      LOGFILE << "Starting vetoing stuff";
-    }
     nodes_mutex_.lock_shared();    
-    if(params_.GetAuxEngineVerbosity() >= 3){
-      LOGFILE << "Got the shared lock on nodes";
-    }
     search_stats_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // for reading search_stats_->winning_ and the others
-    if(params_.GetAuxEngineVerbosity() >= 3){
-      LOGFILE << "Got the fast_track_extend_and_evaluate_queue lock";
-    }
-    if(params_.GetAuxEngineVerbosity() >= 3){
-      LOGFILE << "Aquired the locks";
-    }
-    if(search_stats_->helper_eval_of_root - search_stats_->helper_eval_of_leelas_preferred_child_of_root > 10){
-      // large enough blunder
-      if(params_.GetAuxEngineVerbosity() >= 3){
-	LOGFILE << "Large enough blunder";
-      }
-      if(search_stats_->number_of_nodes_in_support_for_helper_eval_of_root > 100000){
-	// large enough support
-	if(params_.GetAuxEngineVerbosity() >= 3){
-	  LOGFILE << "Large enough support for root";
-	}
-	if(search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child_of_root > 100000){
-	  // large enough support
-	  if(params_.GetAuxEngineVerbosity() >= 3){
-	    LOGFILE << "Large enough support for leelas preferred child of root";
-	  }
-	  if(search_stats_->Leelas_preferred_child_node_ != nullptr){
-	    if(params_.GetAuxEngineVerbosity() >= 3){
-	      LOGFILE << "leelas preferred child not a nullptr";
-	    }
-	    if(search_stats_->Leelas_preferred_child_node_->GetOwnEdge()->GetMove().as_string() != search_stats_->winning_move_.as_string()){
-	      if(params_.GetAuxEngineVerbosity() >= 3){
-		LOGFILE << "leelas preferred child the move recommended by the helper.";
-	      }
-	      if(! search_stats_->winning_){
-		// autopilot is not already on
-		if(params_.GetAuxEngineVerbosity() >= 3){
-		  LOGFILE << "Autopilot is not already on.";
+    if(params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Helper evaluates Leelas preferred move to: " << search_stats_->helper_eval_of_leelas_preferred_child_of_root;
+    if(params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Helper evaluates root to: " << search_stats_->helper_eval_of_root;    
+    if(! search_stats_->winning_){
+      if(search_stats_->Leelas_preferred_child_node_ != nullptr){
+	if(search_stats_->Leelas_preferred_child_node_->GetOwnEdge()->GetMove().as_string() != search_stats_->winning_move_.as_string()){
+	  if(params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "leelas preferred child the move recommended by the helper.";
+	  // 10 works, but still makes her lose, perhaps she need some wiggeling room to play her lines?
+	  // if(search_stats_->helper_eval_of_root - search_stats_->helper_eval_of_leelas_preferred_child_of_root > 30){
+	  if((search_stats_->helper_eval_of_root < -160 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < -170) || // saving the draw
+	     (search_stats_->helper_eval_of_root > 170 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < 160) // saving the win
+	     ){	
+	    if(search_stats_->number_of_nodes_in_support_for_helper_eval_of_root > 100000){
+	      if(params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Large enough support for root";
+	      if(search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child_of_root > 100000){
+		if(search_stats_->helper_eval_of_root < -160 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < -170){
+		  if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Trying to save a draw, helper eval of root: " << search_stats_->helper_eval_of_root << " helper recommended move " << search_stats_->winning_move_.as_string() << " Number of nodes in support for the root node eval: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_root << " helper eval of leelas preferred move: " << search_stats_->helper_eval_of_leelas_preferred_child_of_root << " Leela prefers the move: " << search_stats_->Leelas_preferred_child_node_->GetOwnEdge()->GetMove().as_string() << " nodes in support for the eval of leelas preferred move: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child_of_root;
+		} else {
+		  if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Trying to save a win, helper eval of root: " << search_stats_->helper_eval_of_root << " helper recommended move " << search_stats_->winning_move_.as_string() << " Number of nodes in support for the root node eval: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_root << " helper eval of leelas preferred move: " << search_stats_->helper_eval_of_leelas_preferred_child_of_root << " Leela prefers the move: " << search_stats_->Leelas_preferred_child_node_->GetOwnEdge()->GetMove().as_string() << " nodes in support for the eval of leelas preferred move: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child_of_root;
 		}
-		if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Stoping a blunder, helper eval of root: " << search_stats_->helper_eval_of_root << " helper recommended move " << search_stats_->winning_move_.as_string() << " Number of nodes in support for the root node eval: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_root << " helper eval of leelas preferred move: " << search_stats_->helper_eval_of_leelas_preferred_child_of_root << " Leela prefers the move: " << search_stats_->Leelas_preferred_child_node_->GetOwnEdge()->GetMove().as_string() << " nodes in support for the eval of leelas preferred move: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child_of_root;
-		search_stats_->stop_a_blunder_ = true;
+	      search_stats_->stop_a_blunder_ = true;
 	      }
 	    }
 	  }
 	}
       }
     }
+    else {
+      LOGFILE << "Autopilot is on. Better win this one.";
+    }
+
     if(params_.GetAuxEngineVerbosity() >= 3 &&
        search_stats_->number_of_nodes_in_support_for_helper_eval_of_root > 0 && 
        search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child_of_root > 0 && 
@@ -714,9 +696,11 @@ search_stats_->Leelas_preferred_child_node_->GetOwnEdge()->GetMove().as_string()
     } else {
       if(search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child_of_root <= 100000){
 	LOGFILE << "Leela disagrees with helper about the best move, but the helper has too few nodes to refute leelas move.";	
-      }
-      if(search_stats_->helper_eval_of_root - search_stats_->helper_eval_of_leelas_preferred_child_of_root <= 30){
-	LOGFILE << "Leela disagrees with helper about the best move, but it is not a blunder.";		
+      } else {
+	if(!((search_stats_->helper_eval_of_root < -160 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < -170) ||
+	     (search_stats_->helper_eval_of_root > 170 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < 160))){
+	  LOGFILE << "Leela disagrees with helper about the best move, but there is no reason to veto Leelas preferred move.";	
+	}
       }
     }
     nodes_mutex_.unlock_shared();    
@@ -1371,8 +1355,8 @@ void SearchWorker::ExecuteOneIteration() {
   DoBackupUpdate();
   if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << std::this_thread::get_id() << " DoBackupUpdate() finished in ExecuteOneIteration().";
 
-  // MaybeAdjustPolicyForHelperAddedNodes(foo);
-  // if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << std::this_thread::get_id() << " MaybeAdjustPolicyForHelperAddedNodes() finished in ExecuteOneIteration().";
+  MaybeAdjustPolicyForHelperAddedNodes(foo);
+  if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << std::this_thread::get_id() << " MaybeAdjustPolicyForHelperAddedNodes() finished in ExecuteOneIteration().";
 
   // 7. Update the Search's status and progress information.
   UpdateCounters();
@@ -3116,33 +3100,33 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	// Actually adjust the policy to minimum_policy (if it is not already higher than that).
 	if(n->GetOwnEdge()->GetP() < minimum_policy){
 	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Increased policy from " << n->GetOwnEdge()->GetP() << " to " << minimum_policy;
-	  search_->nodes_mutex_.lock();	    
+	  search_->nodes_mutex_.lock();
 	  n->GetOwnEdge()->SetP(minimum_policy);
 	  search_->nodes_mutex_.unlock();
 	}
-	// That's the new nodes, but what about the already existing nodes, shouldn't we boost policy for those too, or even all ancestor nodes back to root, if they are promising?
-	for (Node* n2 = vector_of_nodes_from_helper_added_by_this_thread[0]; depth > starting_depth_of_PV; n2 = n2->GetParent()) {
-	  depth--;
-	  // make sure that policy is at least as good as the best sibling.
-	  float highest_p = 0.0f;
-	  float minimum_policy_for_existing_nodes;
-	  // loop through the policies of the siblings.
-	  for (auto& edge : n2->GetParent()->Edges()) {
-	    if(edge.GetP() > highest_p) highest_p = edge.GetP();
-	  }
-	  minimum_policy_for_existing_nodes = highest_p;
-	  // minimum_policy_for_existing_nodes = 0.20f;
-	  if(n->GetOwnEdge()->GetP() < minimum_policy_for_existing_nodes){	  
-	    search_->nodes_mutex_.lock();	    
-	    n->GetOwnEdge()->SetP(minimum_policy_for_existing_nodes);
-	    search_->nodes_mutex_.unlock();
-	  }
+      }
+      // That's the new nodes, but what about the already existing nodes, shouldn't we boost policy for those too, or even all ancestor nodes back to root, if they are promising?
+      for (Node* n2 = vector_of_nodes_from_helper_added_by_this_thread[0]; depth > starting_depth_of_PV; n2 = n2->GetParent()) {
+	depth--;
+	// make sure that policy is at least as good as the best sibling.
+	float highest_p = 0.0f;
+	float minimum_policy_for_existing_nodes;
+	// loop through the policies of the siblings.
+	for (auto& edge : n2->GetParent()->Edges()) {
+	  if(edge.GetP() > highest_p) highest_p = edge.GetP();
+	}
+	minimum_policy_for_existing_nodes = highest_p;
+	// minimum_policy_for_existing_nodes = 0.20f;
+	if(n2->GetOwnEdge()->GetP() < minimum_policy_for_existing_nodes){	  
+	  search_->nodes_mutex_.lock();	    
+	  n2->GetOwnEdge()->SetP(minimum_policy_for_existing_nodes);
+	  search_->nodes_mutex_.unlock();
 	}
       }
     }
     // Reset the variable, if it was non-empty.
     foo->queue_of_vector_of_nodes_from_helper_added_by_this_thread = {};
-    search_->nodes_mutex_.unlock_shared();
+    // search_->nodes_mutex_.unlock_shared();
     if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "MaybeAdjustPolicy.. released a lock on nodes.";    
   }
   if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "MaybeAdjustPolicyForHelperAddedNodes() finished";

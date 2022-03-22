@@ -579,7 +579,7 @@ void Search::AuxEngineWorker() {
     if (pv == "info"){
       continue;
     }
-    if (pv == "string"){
+    if (pv == "string" || pv == "currmove"){
       // not for us.
       return;
     }
@@ -638,8 +638,6 @@ void Search::AuxEngineWorker() {
   // Too short PV are probably not reliable (> 4 seems to suffice), too high bar can be bad with low values of AuxEngineTime
   if (pv_moves.size() > 4){
 
-    // todo: if the helper claims it has a win: then force leela to play that move, by increasing its policy, give it fake visits, and maybe even adjust its Q so that it above the current best.
-    
     // check if the PV is new
     std::ostringstream oss;
     // Convert all but the last element to avoid a trailing "," https://stackoverflow.com/questions/8581832/converting-a-vectorint-to-string

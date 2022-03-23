@@ -658,9 +658,9 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     // veto if the move Leela prefers is a blunder
     nodes_mutex_.lock_shared();    
     search_stats_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // for reading search_stats_->winning_ and the others
-    if(params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Helper evaluates Leelas preferred move to: " << search_stats_->helper_eval_of_leelas_preferred_child_of_root;
-    if(params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Helper evaluates root to: " << search_stats_->helper_eval_of_root;    
     if(! search_stats_->winning_){
+      if(params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Helper evaluates Leelas preferred move to: " << search_stats_->helper_eval_of_leelas_preferred_child_of_root;
+      if(params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Helper evaluates root to: " << search_stats_->helper_eval_of_root;    
       if(search_stats_->Leelas_preferred_child_node_ != nullptr){
 	if(search_stats_->Leelas_preferred_child_node_->GetOwnEdge() != nullptr &&
 	   search_stats_->Leelas_preferred_child_node_->GetOwnEdge()->GetMove().as_string() != search_stats_->winning_move_.as_string()){
@@ -686,24 +686,9 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
       }
     }
     else {
-      LOGFILE << "Autopilot is on. Better win this one.";
+      LOGFILE << "Autopilot is on.";
     }
 
-    if(params_.GetAuxEngineVerbosity() >= 3 &&
-       search_stats_->number_of_nodes_in_support_for_helper_eval_of_root > 0 && 
-       search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child_of_root > 0 && 
-search_stats_->Leelas_preferred_child_node_->GetOwnEdge()->GetMove().as_string() == search_stats_->winning_move_.as_string()){
-      LOGFILE << "Leela agrees with helper about the best move";
-    } else {
-      if(search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child_of_root <= 100000){
-	LOGFILE << "Leela disagrees with helper about the best move, but the helper has too few nodes to refute leelas move.";	
-      } else {
-	if(!((search_stats_->helper_eval_of_root < -160 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < -170) ||
-	     (search_stats_->helper_eval_of_root > 170 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < 160))){
-	  LOGFILE << "Leela disagrees with helper about the best move, but there is no reason to veto Leelas preferred move.";	
-	}
-      }
-    }
     nodes_mutex_.unlock_shared();    
     search_stats_->fast_track_extend_and_evaluate_queue_mutex_.unlock();
 
@@ -3088,24 +3073,43 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	  search_->nodes_mutex_.unlock();
 	}
       }
-      // That's the new nodes, but what about the already existing nodes, shouldn't we boost policy for those too, if they are promising?
-      for (Node* n2 = vector_of_nodes_from_helper_added_by_this_thread[0]; depth > starting_depth_of_PV; n2 = n2->GetParent()) {
+      // That's the new nodes, but what about the already existing nodes, shouldn't we boost policy for those too? (if they are promising)
+      for (Node* n2 = vector_of_nodes_from_helper_added_by_this_thread[0]; depth > 1; n2 = n2->GetParent()) {
+
+	// Boost the policy adjustment only if this child is better than its parent.
+	
+	signed int factor_for_us = (depth % 2 == 1) ? 1 : -1;
+	signed int factor_for_parent = ((depth - 1) % 2 == 1) ? 1 : -1;
+
+	// In this context promising means better than its parent
+	if(factor_for_us * n2->GetQ(0.0f) > factor_for_parent * n2->GetParent()->GetQ(0.0f)){
+	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "(Raw Q=" << n2->GetQ(0.0f) << ") " << factor_for_us * n2->GetQ(0.0f) << " is greater than Q for its parent " << factor_for_parent * n2->GetParent()->GetQ(0.0f) << " which means this is promising. P: " << n2->GetOwnEdge()->GetP() << " N: " << n2->GetN() << " depth: " << depth;
+	  // the move is promising
+
+	  // make sure that policy is at least as good as the best sibling.
+	  float highest_p = 0.0f;
+	  float minimum_policy_for_existing_nodes;
+	  // loop through the policies of the siblings.
+	  for (auto& edge : n2->GetParent()->Edges()) {
+	    if(edge.GetP() > highest_p) highest_p = edge.GetP();
+	  }
+	  // And a little boost
+	  minimum_policy_for_existing_nodes = highest_p;
+	  minimum_policy_for_existing_nodes = std::min(0.90, minimum_policy_for_existing_nodes * 1.1);
+
+	  // Modify the policy
+	  if(n2->GetOwnEdge()->GetP() < minimum_policy_for_existing_nodes){	  
+	    search_->nodes_mutex_.lock();	    
+	    n2->GetOwnEdge()->SetP(minimum_policy_for_existing_nodes);
+	    search_->nodes_mutex_.unlock();
+	  }
+	} else {
+	  // Not promising
+	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "(Raw Q=" << n2->GetQ(0.0f) << ") " << factor_for_us * n2->GetQ(0.0f) << " is smaller than Q for its parent " << factor_for_parent * n2->GetParent()->GetQ(0.0f) << " which means this is NOT promising. P: " << n2->GetOwnEdge()->GetP() << " N: " << n2->GetN() << " depth: " << depth;
+	}
 	depth--;
-	// make sure that policy is at least as good as the best sibling.
-	float highest_p = 0.0f;
-	float minimum_policy_for_existing_nodes;
-	// loop through the policies of the siblings.
-	for (auto& edge : n2->GetParent()->Edges()) {
-	  if(edge.GetP() > highest_p) highest_p = edge.GetP();
-	}
-	minimum_policy_for_existing_nodes = highest_p;
-	// minimum_policy_for_existing_nodes = 0.20f;
-	if(n2->GetOwnEdge()->GetP() < minimum_policy_for_existing_nodes){	  
-	  search_->nodes_mutex_.lock();	    
-	  n2->GetOwnEdge()->SetP(minimum_policy_for_existing_nodes);
-	  search_->nodes_mutex_.unlock();
-	}
-      }
+      } // End of policy boosting for existing nodes.
+      
     }
     // Reset the variable, if it was non-empty.
     foo->queue_of_vector_of_nodes_from_helper_added_by_this_thread = {};

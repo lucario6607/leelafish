@@ -831,8 +831,8 @@ void Search::DoAuxEngine(Node* n, int index){
       nodes_mutex_.unlock_shared();
       return;
     }
-    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << index << "DoAuxEngine() trying to aquire a lock on nodes_ in order to create the position for the helper.";    
-    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << index << "DoAuxEngine() aquired a lock on nodes_ in order to create the position for the helper.";
+    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << index << " DoAuxEngine() trying to aquire a lock on nodes_ in order to create the position for the helper.";    
+    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << index << " DoAuxEngine() aquired a lock on nodes_ in order to create the position for the helper.";
     for (Node* n2 = n; n2 != root_node_; n2 = n2->GetParent()) {
       my_moves.push_back(n2->GetOwnEdge()->GetMove(flip));
       my_moves_from_the_white_side.push_back(n2->GetOwnEdge()->GetMove());

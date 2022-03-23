@@ -662,11 +662,12 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     if(params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Helper evaluates root to: " << search_stats_->helper_eval_of_root;    
     if(! search_stats_->winning_){
       if(search_stats_->Leelas_preferred_child_node_ != nullptr){
-	if(search_stats_->Leelas_preferred_child_node_->GetOwnEdge()->GetMove().as_string() != search_stats_->winning_move_.as_string()){
+	if(search_stats_->Leelas_preferred_child_node_->GetOwnEdge() != nullptr &&
+	   search_stats_->Leelas_preferred_child_node_->GetOwnEdge()->GetMove().as_string() != search_stats_->winning_move_.as_string()){
 	  if(params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "leelas preferred child the move recommended by the helper.";
 	  // 10 works, but still makes her lose, perhaps she need some wiggeling room to play her lines?
 	  // if(search_stats_->helper_eval_of_root - search_stats_->helper_eval_of_leelas_preferred_child_of_root > 30){
-	  if((search_stats_->helper_eval_of_root < -160 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < -170) || // saving the draw
+	  if((search_stats_->helper_eval_of_root > -160 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < -170) || // saving the draw
 	     (search_stats_->helper_eval_of_root > 170 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < 160) // saving the win
 	     ){	
 	    if(search_stats_->number_of_nodes_in_support_for_helper_eval_of_root > 100000){
@@ -3062,29 +3063,11 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 
 	    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is greater than " << factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " which means this is promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j;
 	    // the move is promising
-	    if(strategy == "b" || strategy == "e") minimum_policy = d;
+	    if(strategy == "b") minimum_policy = d;
 	    if(strategy == "e") minimum_policy = std::min(0.90, minimum_policy * 1.1);
 	  } else {
 	    // Not promising
 	    if(strategy == "e") minimum_policy = std::min(0.90, minimum_policy * 0.9);	    
-	    // minimum_policy = 0.2f;
-	    // minimum_policy = c;
-	  //   // if a move (e.g. leelas favourite move) has the highest policy, reduce its policy to the policy of the highest sibling.
-	  //   float highest_p_siblings = 0;
-	  //   // loop through the policies of the siblings.
-	  //   for (auto& edge : n->GetParent()->Edges()) {
-	  //     if(edge.edge() != n->GetOwnEdge() && edge.GetP() > highest_p_siblings) highest_p_siblings = edge.GetP();
-	  //   }
-	  //   if(n->GetOwnEdge()->GetP() >= highest_p_siblings){
-	  //     if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is smaller than " << factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " which means this is NOT promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j << " This node has highest policy even though it is not promising, adjusting policy down to that of best sibling: " << highest_p_siblings;
-	  //     search_->nodes_mutex_.unlock_shared();
-	  //     search_->nodes_mutex_.lock();	    
-	  //     n->GetOwnEdge()->SetP(highest_p_siblings);
-	  //     search_->nodes_mutex_.unlock();
-	  //     search_->nodes_mutex_.lock_shared();	    
-	  //   } else {
-	  //     if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is smaller than " << factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " which means this is NOT promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j;
-	  //   }	    
 	  }
 	}
 
@@ -3105,7 +3088,7 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	  search_->nodes_mutex_.unlock();
 	}
       }
-      // That's the new nodes, but what about the already existing nodes, shouldn't we boost policy for those too, or even all ancestor nodes back to root, if they are promising?
+      // That's the new nodes, but what about the already existing nodes, shouldn't we boost policy for those too, if they are promising?
       for (Node* n2 = vector_of_nodes_from_helper_added_by_this_thread[0]; depth > starting_depth_of_PV; n2 = n2->GetParent()) {
 	depth--;
 	// make sure that policy is at least as good as the best sibling.

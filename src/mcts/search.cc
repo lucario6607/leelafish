@@ -3041,12 +3041,17 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	  // if starting node is minimizing and we are minimizing: are (-we) greater than (-start node)?
 	  // we are maximising if depth + j % 2 == 1
 	  // startnode is maximising if depth % 2 == 1
+	  // signed int factor_for_us = ((depth + j) % 2 == 1) ? 1 : -1;
+	  // signed int factor_for_parent = ((depth - 1) % 2 == 1) ? 1 : -1;
+	  // Change, compare current node only with its parent
 	  signed int factor_for_us = ((depth + j) % 2 == 1) ? 1 : -1;
-	  signed int factor_for_parent = ((depth - 1) % 2 == 1) ? 1 : -1;
-	
-	  if(factor_for_us * n->GetQ(0.0f) > factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f)){
+	  signed int factor_for_parent = factor_for_us * -1;
 
-	    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is greater than " << factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " which means this is promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j;
+	  // if(factor_for_us * n->GetQ(0.0f) > factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f)){	  
+	  if(factor_for_us * n->GetQ(0.0f) > factor_for_parent * n->GetParent()->GetQ(0.0f)){
+
+	    // if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is greater than " << factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " which means this is promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j;
+	    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is greater than " << factor_for_parent * n->GetParent()->GetQ(0.0f) << " which means this is promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j;	    
 	    // the move is promising
 	    if(strategy == "b") minimum_policy = d;
 	    if(strategy == "e") minimum_policy = std::min(0.90, minimum_policy * 1.1);
@@ -3074,12 +3079,12 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	}
       }
       // That's the new nodes, but what about the already existing nodes, shouldn't we boost policy for those too? (if they are promising)
-      for (Node* n2 = vector_of_nodes_from_helper_added_by_this_thread[0]; depth > 1; n2 = n2->GetParent()) {
+      for (Node* n2 = vector_of_nodes_from_helper_added_by_this_thread[0]; depth > 0; n2 = n2->GetParent()) {
 
 	// Boost the policy adjustment only if this child is better than its parent.
 	
 	signed int factor_for_us = (depth % 2 == 1) ? 1 : -1;
-	signed int factor_for_parent = ((depth - 1) % 2 == 1) ? 1 : -1;
+	signed int factor_for_parent = factor_for_us * -1;
 
 	// In this context promising means better than its parent
 	if(factor_for_us * n2->GetQ(0.0f) > factor_for_parent * n2->GetParent()->GetQ(0.0f)){

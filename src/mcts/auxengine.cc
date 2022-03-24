@@ -741,6 +741,7 @@ void Search::DoAuxEngine(Node* n, int index){
   if(index == 1 && search_stats_->Leelas_preferred_child_node_ != nullptr){
 
     // step 1
+    if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Thread 1 in DoAuxEngine() about to try to aquire a lock on auxengine_";
     search_stats_->auxengine_mutex_.unlock();  
     search_stats_->persistent_queue_of_nodes.push(n);
     auxengine_cv_.notify_one();

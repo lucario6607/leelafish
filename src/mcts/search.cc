@@ -3093,9 +3093,9 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	  for (auto& edge : n2->GetParent()->Edges()) {
 	    if(edge.GetP() > highest_p) highest_p = edge.GetP();
 	  }
-	  // And a little boost
+
 	  minimum_policy_for_existing_nodes = highest_p;
-	  minimum_policy_for_existing_nodes = std::min(0.90, minimum_policy_for_existing_nodes * 1.1);
+	  // minimum_policy_for_existing_nodes = std::min(0.90, minimum_policy_for_existing_nodes * 1.1); // This would inflate policy when done repeatedly
 
 	  // Modify the policy
 	  if(n2->GetOwnEdge()->GetP() < minimum_policy_for_existing_nodes){	  

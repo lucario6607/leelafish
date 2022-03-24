@@ -984,6 +984,7 @@ void Search::DoAuxEngine(Node* n, int index){
   //   // Not because the are unreliable, but simply because we want to shut down as fast as possible.
   //   return;
   // }
+  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "About to aquire the auxengine_stopped_mutex";
   search_stats_->auxengine_stopped_mutex_.lock();
   search_stats_->auxengine_stopped_[index] = true; // stopped means "not running". It does not mean it was stopped prematurely.
   search_stats_->auxengine_stopped_mutex_.unlock();
@@ -1009,7 +1010,8 @@ void Search::DoAuxEngine(Node* n, int index){
       .count();
   auxengine_total_dur += auxengine_dur;
   auxengine_num_evals++;
-  AuxEncode_and_Enqueue(prev_line, depth, my_board, my_position, my_moves_from_the_white_side, false, index);  
+  AuxEncode_and_Enqueue(prev_line, depth, my_board, my_position, my_moves_from_the_white_side, false, index);
+  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << index << " Finished at DoAuxEngine().";
 }
 
 void Search::AuxWait() {

@@ -1427,7 +1427,9 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	      Node * n = Leelas_favourite.node();
 	      // Check that it's not terminal
 	      if(!n->IsTerminal()){
+		search_->nodes_mutex_.unlock_shared();
 		AuxMaybeEnqueueNode(n);
+		search_->nodes_mutex_.lock_shared();
 	      } else {
 		if(params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Leelas favourite move leads to a terminal node: " << n->DebugString();
 	      }
@@ -1440,7 +1442,9 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	  // queue it anyway, if has a visited node, unless it was already queued.
 	  if(Leelas_favourite.HasNode() && Leelas_favourite.node()->GetN() > 0 && Leelas_favourite.node()->GetAuxEngineMove() == 0xffff && !Leelas_favourite.node()->IsTerminal()){	    
 	    Node * n = Leelas_favourite.node();
+	    search_->nodes_mutex_.unlock_shared();
 	    AuxMaybeEnqueueNode(n);
+	    search_->nodes_mutex_.lock_shared();
 	  }
 	}
       }
@@ -3047,16 +3051,13 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	  signed int factor_for_us = ((depth + j) % 2 == 1) ? 1 : -1;
 	  signed int factor_for_parent = factor_for_us * -1;
 
-	  // if(factor_for_us * n->GetQ(0.0f) > factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f)){	  
 	  if(factor_for_us * n->GetQ(0.0f) > factor_for_parent * n->GetParent()->GetQ(0.0f)){
-
-	    // if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is greater than " << factor_for_parent * vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " which means this is promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j;
 	    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is greater than " << factor_for_parent * n->GetParent()->GetQ(0.0f) << " which means this is promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j;	    
 	    // the move is promising
 	    if(strategy == "b") minimum_policy = d;
 	    if(strategy == "e") minimum_policy = std::min(0.90, minimum_policy * 1.1);
 	  } else {
-	    // Not promising
+	    // Not promising, but since the helper recommended it, it is probably better than its policy, so give it some policy boosting.
 	    if(strategy == "e") minimum_policy = std::min(0.90, minimum_policy * 0.9);	    
 	  }
 	}

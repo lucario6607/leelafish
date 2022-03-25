@@ -1414,42 +1414,34 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
   for (auto& edge : my_node->Edges()) {
     if(edge.GetMove() == my_moves[ply] ){
 
-      // // Queue Leelas favourite node START
-      // // If there are children, find leelas preferred move, and if that move hasn't
-      // // already been queried, enqueue it, unless it is the same move as the helper suggests
-      // if(my_node->GetN() > 0){
-      // 	const EdgeAndNode Leelas_favourite = search_->GetBestChildNoTemperature(my_node, ply); // is this safe, or does it change my_node?
-      // 	if(Leelas_favourite.edge() != edge.edge()){
-      // 	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Leelas favourite move: " << Leelas_favourite.GetMove(black_to_move).as_string() << " is not the same has the helper recommendation " << edge.GetMove(black_to_move).as_string();
-      // 	  if(Leelas_favourite.HasNode()){
-      // 	    if(Leelas_favourite.node()->GetAuxEngineMove() == 0xffff){
-      // 	      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Leelas favourite move has not been queried, it is " << Leelas_favourite.GetMove(black_to_move).as_string() << ", node: " << Leelas_favourite.DebugString() << ", queueing it now.";
-      // 	      Node * n = Leelas_favourite.node();
-      // 	      // Check that it's not terminal
-      // 	      if(!n->IsTerminal()){
-      // 		search_->nodes_mutex_.unlock_shared();
-      // 		AuxMaybeEnqueueNode(n);
-      // 		search_->nodes_mutex_.lock_shared();
-      // 	      } else {
-      // 		if(params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Leelas favourite move leads to a terminal node: " << n->DebugString();
-      // 	      }
-      // 	    } else {
-      // 	      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Leelas favourite move has already been queried. It is " << Leelas_favourite.GetMove(black_to_move).as_string() << ", node: " << Leelas_favourite.DebugString();
-      // 	    }
-      // 	  }
-      // 	} else {
-      // 	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Leelas favourite move is the same as the move recommmended by the helper. Nothing to do.";
-      // 	  // // queue it anyway, if has a visited node, unless it was already queued.
-      // 	  // if(Leelas_favourite.HasNode() && Leelas_favourite.node()->GetN() > 0 && Leelas_favourite.node()->GetAuxEngineMove() == 0xffff && !Leelas_favourite.node()->IsTerminal()){	    
-      // 	  //   Node * n = Leelas_favourite.node();
-      // 	  //   search_->nodes_mutex_.unlock_shared();
-      // 	  //   AuxMaybeEnqueueNode(n);
-      // 	  //   search_->nodes_mutex_.lock_shared();
-      // 	  // }
-      // 	}
-      // 	if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Leelas favourite move is the same as the move recommmended by the helper. Nothing to do.";	
-      // }
-      // // Queue Leelas favourite node STOP
+      // Queue Leelas favourite node START
+      // If there are children, find leelas preferred move, and if that move hasn't
+      // already been queried, enqueue it, unless it is the same move as the helper suggests
+      if(my_node->GetN() > 0){
+      	const EdgeAndNode Leelas_favourite = search_->GetBestChildNoTemperature(my_node, ply); // is this safe, or does it change my_node?
+      	if(Leelas_favourite.edge() != edge.edge()){
+      	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Leelas favourite move: " << Leelas_favourite.GetMove(black_to_move).as_string() << " is not the same has the helper recommendation " << edge.GetMove(black_to_move).as_string();
+      	  if(Leelas_favourite.HasNode()){
+      	    if(Leelas_favourite.node()->GetAuxEngineMove() == 0xffff){
+      	      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Leelas favourite move has not been queried, it is " << Leelas_favourite.GetMove(black_to_move).as_string() << ", node: " << Leelas_favourite.DebugString() << ", queueing it now.";
+      	      Node * n = Leelas_favourite.node();
+      	      // Check that it's not terminal
+      	      if(!n->IsTerminal()){
+      		search_->nodes_mutex_.unlock_shared();
+      		AuxMaybeEnqueueNode(n);
+      		search_->nodes_mutex_.lock_shared();
+      	      } else {
+      		if(params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Leelas favourite move leads to a terminal node: " << n->DebugString();
+      	      }
+      	    } else {
+      	      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Leelas favourite move has already been queried. It is " << Leelas_favourite.GetMove(black_to_move).as_string() << ", node: " << Leelas_favourite.DebugString();
+      	    }
+      	  }
+      	} else {
+      	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Leelas favourite move is the same as the move recommmended by the helper. Nothing to do.";
+	}
+      }
+      // Queue Leelas favourite node STOP
         
       edge_found = true;
       // If the edge is already extended, then just recursively call PreExtendTreeAndFastTrackForNNEvaluation_inner() with this node and ply increased by one.

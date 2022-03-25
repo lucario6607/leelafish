@@ -774,44 +774,48 @@ void Search::DoAuxEngine(Node* n, int index){
   }
   nodes_mutex_.unlock_shared();
 
-  search_stats_->auxengine_mutex_.lock();
-  // Never add nodes to the queue after search has stopped or final purge is run
-  if(stop_.load(std::memory_order_acquire) ||
-     search_stats_->final_purge_run){
-    // just pop the source node, and unset pending so that the node can get picked up during next search.
-    // search_stats_->source_of_queued_nodes.pop();
-    n->SetAuxEngineMove(0xffff);
-    search_stats_->auxengine_mutex_.unlock();
-    return;
-  }
+  int AuxEngineTime;
 
-  if (search_stats_->persistent_queue_of_nodes.size() > 0){ // if there is no node in the queue then accept unconditionally.
-    if(depth > 1 &&
-       depth > params_.GetAuxEngineMaxDepth()
-       ){
-      // Only generate a random sample if these parameters are true, save a few random samples
-      if(float(1.0f)/(depth) < distribution(generator)){
-	// This is exactly what SearchWorker::AuxMaybeEnqueueNode() does, but we are in class Search:: now, so that function is not available.
-	// int source = search_stats_->source_of_queued_nodes.front();
-	// search_stats_->source_of_queued_nodes.pop();
-	search_stats_->persistent_queue_of_nodes.push(n);
-	// search_stats_->source_of_queued_nodes.push(source);
-	auxengine_cv_.notify_one(); // unnecessary?
-	search_stats_->auxengine_mutex_.unlock();
-	return;
+  // if we are thread 0 or thread 1, we don't have to bother with testing for depth
+  if(index > 1){
+    search_stats_->auxengine_mutex_.lock();
+    // Never add nodes to the queue after search has stopped or final purge is run
+    if(stop_.load(std::memory_order_acquire) ||
+       search_stats_->final_purge_run){
+      // just unset pending so that the node can get picked up during next search.
+      n->SetAuxEngineMove(0xffff);
+      search_stats_->auxengine_mutex_.unlock();
+      return;
+    }
+    
+    if (search_stats_->persistent_queue_of_nodes.size() > 0){ // if there is no node in the queue then accept unconditionally.
+      if(depth > 1 &&
+	 depth > params_.GetAuxEngineMaxDepth()
+	 ){
+	// Only generate a random sample if these parameters are true, save a few random samples
+	if(float(1.0f)/(depth) < distribution(generator)){
+	  // This is exactly what SearchWorker::AuxMaybeEnqueueNode() does, but we are in class Search:: now, so that function is not available.
+	  // int source = search_stats_->source_of_queued_nodes.front();
+	  // search_stats_->source_of_queued_nodes.pop();
+	  search_stats_->persistent_queue_of_nodes.push(n);
+	  // search_stats_->source_of_queued_nodes.push(source);
+	  auxengine_cv_.notify_one(); // unnecessary?
+	  search_stats_->auxengine_mutex_.unlock();
+	  return;
+	}
       }
     }
-  }
-
-  // while we have this lock, also read the current value of search_stats_->AuxEngineTime, which is needed later
-  int AuxEngineTime = search_stats_->AuxEngineTime;
+    
+    // while we have this lock, also read the current value of search_stats_->AuxEngineTime, which is needed later
+    AuxEngineTime = search_stats_->AuxEngineTime;
   
-  search_stats_->auxengine_mutex_.unlock();  
-  
-  if(depth > 1 &&
-     depth > params_.GetAuxEngineMaxDepth()){
-    // if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "DoAuxEngine processing a node with high depth: " << " since sample " << sample << " is less than " << float(1.0f)/(depth);
+    search_stats_->auxengine_mutex_.unlock();
   }
+  
+  // if(depth > 1 &&
+  //    depth > params_.GetAuxEngineMaxDepth()){
+  //   // if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "DoAuxEngine processing a node with high depth: " << " since sample " << sample << " is less than " << float(1.0f)/(depth);
+  // }
     
   // if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "DoAuxEngine processing a node with depth: " << depth;
 

@@ -668,7 +668,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	  // 10 works, but still makes her lose, perhaps she need some wiggeling room to play her lines?
 	  // if(search_stats_->helper_eval_of_root - search_stats_->helper_eval_of_leelas_preferred_child_of_root > 30){
 	  if((search_stats_->helper_eval_of_root > -160 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < -170) || // saving the draw
-	     (search_stats_->helper_eval_of_root > 170 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < 160) // saving the win
+	     (search_stats_->helper_eval_of_root > 160 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < 120) // saving the win
 	     ){	
 	    if(search_stats_->number_of_nodes_in_support_for_helper_eval_of_root > 100000){
 	      if(params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Large enough support for root";
@@ -3043,10 +3043,10 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is greater than " << factor_for_parent * n->GetParent()->GetQ(0.0f) << " which means this is promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j;	    
 	    // the move is promising
 	    if(strategy == "b") minimum_policy = d;
-	    if(strategy == "e") minimum_policy = std::min(0.90, minimum_policy * 1.5);
+	    if(strategy == "e") minimum_policy = std::min(0.90, minimum_policy * 1.05);
 	  } else {
 	    // Not promising, but since the helper recommended it, it is probably better than its policy, so give it some policy boosting.
-	    if(strategy == "e") minimum_policy = std::min(0.90, minimum_policy * 0.75);	    
+	    if(strategy == "e") minimum_policy = std::min(0.90, minimum_policy * 0.95);	    
 	  }
 	}
 
@@ -3094,70 +3094,84 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	  // If the highest policy is less than 0.2, then allow this node to get a P lower than 0.2, so that the other sibling can get highest P eventually.
 	
 	  float highest_p = 0;
+	  Node * this_node_has_highest_p;	  
 	  // loop through the policies of the siblings.
 	  for (auto& edge : n2->GetParent()->Edges()) {
-	    if(edge.GetP() > highest_p) highest_p = edge.GetP();
+	    if(edge.GetP() > highest_p) {
+	      highest_p = edge.GetP();
+	      this_node_has_highest_p = edge.node();
+	    }
 	  }
 	  float minimum_policy = highest_p;
 
 	  float highest_q = -1;
+	  Node * this_node_has_best_q;
 	  
-	  for (const Node* child : n2->GetParent()->VisitedNodes()) {
+	  for (Node* child : n2->GetParent()->VisitedNodes()) {
 	    if(child->GetQ(0.5) > highest_q){
 	      // LOGFILE << "At depth: " << depth << " " << child->GetQ(0.5) << " is greater than or equal to " << highest_q << " so this child is promising" << child->DebugString();
 	      highest_q = child->GetQ(0.5);
+	      this_node_has_best_q = child;
 	    }
 	  }
-	  // LOGFILE << "Best child has Q." << highest_q;
-
-	  float current_p = n2->GetOwnEdge()->GetP();
-	  float scaling_factor;
-	  bool p_was_changed = false;
-	
-	  if(n2->GetQ(0.5) == highest_q){
-	    // LOGFILE << "our node has the best q: " << highest_q;
-	    // Unless it already has the highest policy, set it to the highest policy
-	    if(n2->GetOwnEdge()->GetP() < minimum_policy){
-	      search_->nodes_mutex_.lock();	    
-	      n2->GetOwnEdge()->SetP(minimum_policy);
-	      search_->nodes_mutex_.unlock();
-	      // increase p, scale down
-	      scaling_factor = 1/(1 + minimum_policy - current_p);
-	      // LOGFILE << "the current policy of our node is less than best sibling, will increase it to " << minimum_policy << " and then scale all policies by " << scaling_factor;
-	      p_was_changed = true;
-	    } else {
-	      // LOGFILE << "the current policy of our node (which has highest q) is already best, not changing it.";
-	    }
-	  } else {
-	    // If it already has the highest P, or P above some constant, decrease it by a scaling factor.
-	    if(n2->GetOwnEdge()->GetP() == minimum_policy || n2->GetOwnEdge()->GetP() > max_allowed_policy_for_non_best_child){
-	      minimum_policy = n2->GetOwnEdge()->GetP() * 0.95;	      
-	      search_->nodes_mutex_.lock();	    
-	      n2->GetOwnEdge()->SetP(minimum_policy);
-	      search_->nodes_mutex_.unlock();
-	      // decrease p, scale up. (minimum policy is smaller than current p, scaling factor becomes less than 1.
-	      scaling_factor = 1/(1 + minimum_policy - current_p);
-	      // LOGFILE << "node has not best Q but has best policy, or policy above 0.2, will decrease it to: " << minimum_policy << " and scale all policies by " << scaling_factor;
-	      p_was_changed = true;	    
-	    } else {
-	      // LOGFILE << "our node does not have best Q, but no reason to change its P which is already below the value of max_allowed_policy_for_non_best_child: " << max_allowed_policy_for_non_best_child << " policy of our node: " << n2->GetOwnEdge()->GetP();
-	    }
-	  }
-	  
-	  if(p_was_changed){
-	    float sum_of_P = 0;
-	    float sum_of_normalized_P = 0;
+	  // Regardless of our node, also adjust the nodes with highest p and highest q, if needed.
+	  if(this_node_has_best_q != nullptr && this_node_has_highest_p != nullptr && this_node_has_best_q != this_node_has_highest_p){
+	    // increase p on this_node_has_best_q and decrease it on highest_p.
 	    search_->nodes_mutex_.lock();
-	    // scale all policies down or up with the scaling factor.
-	    for (const auto& child : n2->GetParent()->Edges()) {
-	      auto* edge = child.edge();
-	      sum_of_P += edge->GetP();
-	      sum_of_normalized_P += edge->GetP() * scaling_factor;  
-	      edge->SetP(edge->GetP() * scaling_factor);
-	    }
+	    float diff_to_apply = this_node_has_highest_p->GetOwnEdge()->GetP() * 0.05;
+	    LOGFILE << "Changing policy on node: " << this_node_has_highest_p->DebugString() << " which has the highest policy, from " << this_node_has_highest_p->GetOwnEdge()->GetP() << " to " << this_node_has_highest_p->GetOwnEdge()->GetP()-diff_to_apply << " and policy on node: " << this_node_has_best_q->DebugString() << " which has policy " << this_node_has_best_q->GetOwnEdge()->GetP();
+	    this_node_has_highest_p->GetOwnEdge()->SetP(this_node_has_highest_p->GetOwnEdge()->GetP()-diff_to_apply);
+	    this_node_has_best_q->GetOwnEdge()->SetP(this_node_has_best_q->GetOwnEdge()->GetP()+diff_to_apply);
 	    search_->nodes_mutex_.unlock();
-	    // LOGFILE << " Sum of P before normalizing: " << sum_of_P << " and after normalising: " << sum_of_normalized_P << " scaling factor used: " << scaling_factor;
 	  }
+
+	  // float current_p = n2->GetOwnEdge()->GetP();
+	  // float scaling_factor;
+	  // bool p_was_changed = false;
+	
+	  // if(n2->GetQ(0.5) == highest_q){
+	  //   // LOGFILE << "our node has the best q: " << highest_q;
+	  //   // Unless it already has the highest policy, set it to the highest policy
+	  //   if(n2->GetOwnEdge()->GetP() < minimum_policy){
+	  //     search_->nodes_mutex_.lock();	    
+	  //     n2->GetOwnEdge()->SetP(minimum_policy);
+	  //     search_->nodes_mutex_.unlock();
+	  //     // increase p, scale down
+	  //     scaling_factor = 1/(1 + minimum_policy - current_p);
+	  //     // LOGFILE << "the current policy of our node is less than best sibling, will increase it to " << minimum_policy << " and then scale all policies by " << scaling_factor;
+	  //     p_was_changed = true;
+	  //   } else {
+	  //     // LOGFILE << "the current policy of our node (which has highest q) is already best, not changing it.";
+	  //   }
+	  // } else {
+	  //   // If it already has the highest P, or P above some constant, decrease it by a scaling factor.
+	  //   if(n2->GetOwnEdge()->GetP() == minimum_policy || n2->GetOwnEdge()->GetP() > max_allowed_policy_for_non_best_child){
+	  //     minimum_policy = n2->GetOwnEdge()->GetP() * 0.95;	      
+	  //     search_->nodes_mutex_.lock();	    
+	  //     n2->GetOwnEdge()->SetP(minimum_policy);
+	  //     search_->nodes_mutex_.unlock();
+	  //     // decrease p, scale up. (minimum policy is smaller than current p, scaling factor becomes less than 1.
+	  //     scaling_factor = 1/(1 + minimum_policy - current_p);
+	  //     // LOGFILE << "node has not best Q but has best policy, or policy above 0.2, will decrease it to: " << minimum_policy << " and scale all policies by " << scaling_factor;
+	  //     p_was_changed = true;	    
+	  //   } else {
+	  //     // LOGFILE << "our node does not have best Q, but no reason to change its P which is already below the value of max_allowed_policy_for_non_best_child: " << max_allowed_policy_for_non_best_child << " policy of our node: " << n2->GetOwnEdge()->GetP();
+	  //   }
+	  // }
+	  
+	  // if(p_was_changed){
+	  //   float sum_of_P = 0;
+	  //   float sum_of_normalized_P = 0;
+	  //   search_->nodes_mutex_.lock();
+	  //   // scale all policies down or up with the scaling factor.
+	  //   for (const auto& child : n2->GetParent()->Edges()) {
+	  //     auto* edge = child.edge();
+	  //     sum_of_P += edge->GetP();
+	  //     sum_of_normalized_P += edge->GetP() * scaling_factor;  
+	  //     edge->SetP(edge->GetP() * scaling_factor);
+	  //   }
+	  //   search_->nodes_mutex_.unlock();
+	  //   // LOGFILE << " Sum of P before normalizing: " << sum_of_P << " and after normalising: " << sum_of_normalized_P << " scaling factor used: " << scaling_factor;
 	} // End of children > 1
 	depth--;
       } // End of policy boosting for existing nodes.

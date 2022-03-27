@@ -664,7 +664,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
       if(search_stats_->Leelas_preferred_child_node_ != nullptr){
 	if(search_stats_->Leelas_preferred_child_node_->GetOwnEdge() != nullptr &&
 	   search_stats_->Leelas_preferred_child_node_->GetOwnEdge()->GetMove().as_string() != search_stats_->winning_move_.as_string()){
-	  if(params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "leelas preferred child the move recommended by the helper.";
+	  if(params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "leelas preferred child differs from the move recommended by the helper.";
 	  // 10 works, but still makes her lose, perhaps she need some wiggeling room to play her lines?
 	  // if(search_stats_->helper_eval_of_root - search_stats_->helper_eval_of_leelas_preferred_child_of_root > 30){
 	  if((search_stats_->helper_eval_of_root > -160 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < -170) || // saving the draw
@@ -673,7 +673,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	    if(search_stats_->number_of_nodes_in_support_for_helper_eval_of_root > 100000){
 	      if(params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Large enough support for root";
 	      if(search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child_of_root > 100000){
-		if(search_stats_->helper_eval_of_root < -160 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < -170){
+		if(search_stats_->helper_eval_of_root > -160 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < -170){
 		  if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Trying to save a draw, helper eval of root: " << search_stats_->helper_eval_of_root << " helper recommended move " << search_stats_->winning_move_.as_string() << " Number of nodes in support for the root node eval: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_root << " helper eval of leelas preferred move: " << search_stats_->helper_eval_of_leelas_preferred_child_of_root << " Leela prefers the move: " << search_stats_->Leelas_preferred_child_node_->GetOwnEdge()->GetMove().as_string() << " nodes in support for the eval of leelas preferred move: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child_of_root;
 		} else {
 		  if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Trying to save a win, helper eval of root: " << search_stats_->helper_eval_of_root << " helper recommended move " << search_stats_->winning_move_.as_string() << " Number of nodes in support for the root node eval: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_root << " helper eval of leelas preferred move: " << search_stats_->helper_eval_of_leelas_preferred_child_of_root << " Leela prefers the move: " << search_stats_->Leelas_preferred_child_node_->GetOwnEdge()->GetMove().as_string() << " nodes in support for the eval of leelas preferred move: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child_of_root;
@@ -2979,12 +2979,7 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
       int amount_of_support = foo->amount_of_support_for_PVs_.front();
       foo->amount_of_support_for_PVs_.pop();
 
-      // // Until we get the actual length of the PV, work with the number of added nodes instead.
-      // long unsigned int my_pv_size = vector_of_nodes_from_helper_added_by_this_thread.size();
-
-      // Do we want to maximize or minimize Q?
-      // At root, and thus at even depth, we want to _minimize_ Q (Q is from the perspective of the player who _made the move_ leading up the current position.
-      // Calculate depth.
+      // Do we want to maximize or minimize Q? At root, and thus at even depth, we want to _minimize_ Q (Q is from the perspective of the player who _made the move_ leading up the current position. Calculate depth at the first added node.
       int depth = 0;
       for (Node* n2 = vector_of_nodes_from_helper_added_by_this_thread[0]; n2 != search_->root_node_; n2 = n2->GetParent()) {
 	depth++;
@@ -3048,10 +3043,10 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is greater than " << factor_for_parent * n->GetParent()->GetQ(0.0f) << " which means this is promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j;	    
 	    // the move is promising
 	    if(strategy == "b") minimum_policy = d;
-	    if(strategy == "e") minimum_policy = std::min(0.90, minimum_policy * 1.1);
+	    if(strategy == "e") minimum_policy = std::min(0.90, minimum_policy * 1.5);
 	  } else {
 	    // Not promising, but since the helper recommended it, it is probably better than its policy, so give it some policy boosting.
-	    if(strategy == "e") minimum_policy = std::min(0.90, minimum_policy * 0.9);	    
+	    if(strategy == "e") minimum_policy = std::min(0.90, minimum_policy * 0.75);	    
 	  }
 	}
 
@@ -3065,47 +3060,105 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	// }
 
 	// Actually adjust the policy to minimum_policy (if it is not already higher than that).
-	if(n->GetOwnEdge()->GetP() < minimum_policy){
-	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Increased policy from " << n->GetOwnEdge()->GetP() << " to " << minimum_policy;
+	float current_p = n->GetOwnEdge()->GetP();
+	if(current_p < minimum_policy){
+	  float scaling_factor = 1/(1 + minimum_policy - current_p);
+	  // First increase the policy to the desired value, then scale down policy of all nodes
 	  search_->nodes_mutex_.lock();
 	  n->GetOwnEdge()->SetP(minimum_policy);
+	  // Now scale all policies down with the scaling factor.
+	  for (const auto& child : n->GetParent()->Edges()) {
+	    auto* edge = child.edge();
+	    edge->SetP(edge->GetP() * scaling_factor);
+	  }
 	  search_->nodes_mutex_.unlock();
+	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Increased policy from " << current_p << " to " << minimum_policy * scaling_factor << " and scaled all other policies down by " << scaling_factor << " since the node was promising";
 	}
       }
       // That's the new nodes, but what about the already existing nodes, shouldn't we boost policy for those too? (if they are promising)
       for (Node* n2 = vector_of_nodes_from_helper_added_by_this_thread[0]; depth > 0; n2 = n2->GetParent()) {
 
-	// Boost the policy adjustment only if this child is better than its parent.
+	// If n2 has no visited siblings, skip all of this
+	int children = 0;
+	for (Node* child : n2->GetParent()->VisitedNodes()) {
+	  if(child->GetN() > 0){ // unnecessary, but avoids a warning about unused variable child.
+	    children++;
+	  }
+	}
+	if(children > 1){
+
+	  // Make sure that policy is at least as good as the best sibling if no other node has a higher Q.
+	  float max_allowed_policy_for_non_best_child = 0.2f;
+
+	  // If there is another node with higher Q, then reduce P of this node unless P is already not highest and not above 0.2
+	  // If the highest policy is less than 0.2, then allow this node to get a P lower than 0.2, so that the other sibling can get highest P eventually.
 	
-	signed int factor_for_us = (depth % 2 == 1) ? 1 : -1;
-	signed int factor_for_parent = factor_for_us * -1;
-
-	// In this context promising means better than its parent
-	if(factor_for_us * n2->GetQ(0.0f) > factor_for_parent * n2->GetParent()->GetQ(0.0f)){
-	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "(Raw Q=" << n2->GetQ(0.0f) << ") " << factor_for_us * n2->GetQ(0.0f) << " is greater than Q for its parent " << factor_for_parent * n2->GetParent()->GetQ(0.0f) << " which means this is promising. P: " << n2->GetOwnEdge()->GetP() << " N: " << n2->GetN() << " depth: " << depth;
-	  // the move is promising
-
-	  // make sure that policy is at least as good as the best sibling.
-	  float highest_p = 0.0f;
-	  float minimum_policy_for_existing_nodes;
+	  float highest_p = 0;
 	  // loop through the policies of the siblings.
 	  for (auto& edge : n2->GetParent()->Edges()) {
 	    if(edge.GetP() > highest_p) highest_p = edge.GetP();
 	  }
+	  float minimum_policy = highest_p;
 
-	  minimum_policy_for_existing_nodes = highest_p;
-	  // minimum_policy_for_existing_nodes = std::min(0.90, minimum_policy_for_existing_nodes * 1.1); // This would inflate policy when done repeatedly
-
-	  // Modify the policy
-	  if(n2->GetOwnEdge()->GetP() < minimum_policy_for_existing_nodes){	  
-	    search_->nodes_mutex_.lock();	    
-	    n2->GetOwnEdge()->SetP(minimum_policy_for_existing_nodes);
-	    search_->nodes_mutex_.unlock();
+	  float highest_q = -1;
+	  
+	  for (const Node* child : n2->GetParent()->VisitedNodes()) {
+	    if(child->GetQ(0.5) > highest_q){
+	      // LOGFILE << "At depth: " << depth << " " << child->GetQ(0.5) << " is greater than or equal to " << highest_q << " so this child is promising" << child->DebugString();
+	      highest_q = child->GetQ(0.5);
+	    }
 	  }
-	} else {
-	  // Not promising
-	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "(Raw Q=" << n2->GetQ(0.0f) << ") " << factor_for_us * n2->GetQ(0.0f) << " is smaller than Q for its parent " << factor_for_parent * n2->GetParent()->GetQ(0.0f) << " which means this is NOT promising. P: " << n2->GetOwnEdge()->GetP() << " N: " << n2->GetN() << " depth: " << depth;
-	}
+	  // LOGFILE << "Best child has Q." << highest_q;
+
+	  float current_p = n2->GetOwnEdge()->GetP();
+	  float scaling_factor;
+	  bool p_was_changed = false;
+	
+	  if(n2->GetQ(0.5) == highest_q){
+	    // LOGFILE << "our node has the best q: " << highest_q;
+	    // Unless it already has the highest policy, set it to the highest policy
+	    if(n2->GetOwnEdge()->GetP() < minimum_policy){
+	      search_->nodes_mutex_.lock();	    
+	      n2->GetOwnEdge()->SetP(minimum_policy);
+	      search_->nodes_mutex_.unlock();
+	      // increase p, scale down
+	      scaling_factor = 1/(1 + minimum_policy - current_p);
+	      // LOGFILE << "the current policy of our node is less than best sibling, will increase it to " << minimum_policy << " and then scale all policies by " << scaling_factor;
+	      p_was_changed = true;
+	    } else {
+	      // LOGFILE << "the current policy of our node (which has highest q) is already best, not changing it.";
+	    }
+	  } else {
+	    // If it already has the highest P, or P above some constant, decrease it by a scaling factor.
+	    if(n2->GetOwnEdge()->GetP() == minimum_policy || n2->GetOwnEdge()->GetP() > max_allowed_policy_for_non_best_child){
+	      minimum_policy = n2->GetOwnEdge()->GetP() * 0.95;	      
+	      search_->nodes_mutex_.lock();	    
+	      n2->GetOwnEdge()->SetP(minimum_policy);
+	      search_->nodes_mutex_.unlock();
+	      // decrease p, scale up. (minimum policy is smaller than current p, scaling factor becomes less than 1.
+	      scaling_factor = 1/(1 + minimum_policy - current_p);
+	      // LOGFILE << "node has not best Q but has best policy, or policy above 0.2, will decrease it to: " << minimum_policy << " and scale all policies by " << scaling_factor;
+	      p_was_changed = true;	    
+	    } else {
+	      // LOGFILE << "our node does not have best Q, but no reason to change its P which is already below the value of max_allowed_policy_for_non_best_child: " << max_allowed_policy_for_non_best_child << " policy of our node: " << n2->GetOwnEdge()->GetP();
+	    }
+	  }
+	  
+	  if(p_was_changed){
+	    float sum_of_P = 0;
+	    float sum_of_normalized_P = 0;
+	    search_->nodes_mutex_.lock();
+	    // scale all policies down or up with the scaling factor.
+	    for (const auto& child : n2->GetParent()->Edges()) {
+	      auto* edge = child.edge();
+	      sum_of_P += edge->GetP();
+	      sum_of_normalized_P += edge->GetP() * scaling_factor;  
+	      edge->SetP(edge->GetP() * scaling_factor);
+	    }
+	    search_->nodes_mutex_.unlock();
+	    // LOGFILE << " Sum of P before normalizing: " << sum_of_P << " and after normalising: " << sum_of_normalized_P << " scaling factor used: " << scaling_factor;
+	  }
+	} // End of children > 1
 	depth--;
       } // End of policy boosting for existing nodes.
       

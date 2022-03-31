@@ -309,7 +309,7 @@ void Search::AuxEngineWorker() {
       } else {
 	if(!search_stats_->winning_threads_adjusted){
 	  // Thread zero, just reconfigure the root explorer to use all available threads
-	  LOGFILE << "AuxWorker() reconfigured the root-helper to use " << threads_when_winning << " number of threads.";
+	  LOGFILE << "AuxWorker() reconfigured the root-helper to use " << threads_when_winning << " threads.";
 	  search_stats_->auxengine_stopped_mutex_.lock();
 	  *search_stats_->vector_of_opstreams[our_index] << "setoption name Threads value " << threads_when_winning << std::endl;	    
 	  search_stats_->auxengine_stopped_mutex_.unlock();
@@ -692,9 +692,7 @@ void Search::AuxEngineWorker() {
     if (depth == 0 && !winning && search_stats_->winning_){
       if(!search_stats_->winning_threads_adjusted){
 	search_stats_->winning_ = false;
-	if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "The helper engine thinks the root position is no longer winning: cp = " << eval << " since the autopilot is not yet on, I will not turn it on.";
-      } else {
-	if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "The helper engine thinks the root position is no longer winning: cp = " << eval << " but since the autopilot is already on, I refuse to clean up your mess.";
+	if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "The helper engine thinks the root position is no longer winning: cp = " << eval << " and since the autopilot is not yet on, I will not turn it on.";
       }
     }
     // make sure the currently recommended move from the helper is available if it is needed when vetoing Leelas move. TODO change name from "winning" to "recommended".

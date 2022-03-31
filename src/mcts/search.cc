@@ -2981,9 +2981,11 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 
       // Do we want to maximize or minimize Q? At root, and thus at even depth, we want to _minimize_ Q (Q is from the perspective of the player who _made the move_ leading up the current position. Calculate depth at the first added node.
       int depth = 0;
+      search_->nodes_mutex_.lock_shared();
       for (Node* n2 = vector_of_nodes_from_helper_added_by_this_thread[0]; n2 != search_->root_node_; n2 = n2->GetParent()) {
 	depth++;
       }
+      search_->nodes_mutex_.unlock_shared();      
       if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "How good is this line I just added based on recommendations from the helper?";
       if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Q of parent to the first added node in the line: " << vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " depth: " << depth - 1;
       for(long unsigned int j = 0; j < vector_of_nodes_from_helper_added_by_this_thread.size(); j++){
@@ -3003,6 +3005,7 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	// e is the current strategy
 	
 	std::string strategy;
+	float current_p;
 	float c = 0.175f;
 	float d = 0.225f;
 	float min_c = 0.0f;
@@ -3015,9 +3018,13 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	  // make sure that policy is at least as good as the best sibling.
 	  float highest_p = 0;
 	  // loop through the policies of the siblings.
+	  search_->nodes_mutex_.lock_shared();
 	  for (auto& edge : n->GetParent()->Edges()) {
 	    if(edge.GetP() > highest_p) highest_p = edge.GetP();
 	  }
+	  // While we have a lock, also get policy of the current nodw.
+	  current_p = n->GetOwnEdge()->GetP();
+	  search_->nodes_mutex_.unlock_shared();	  
 	  minimum_policy = highest_p;
 	}
 
@@ -3039,15 +3046,17 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	  signed int factor_for_us = ((depth + j) % 2 == 1) ? 1 : -1;
 	  signed int factor_for_parent = factor_for_us * -1;
 
+	  search_->nodes_mutex_.lock_shared();	  
 	  if(factor_for_us * n->GetQ(0.0f) > factor_for_parent * n->GetParent()->GetQ(0.0f)){
 	    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is greater than " << factor_for_parent * n->GetParent()->GetQ(0.0f) << " which means this is promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j;	    
 	    // the move is promising
 	    if(strategy == "b") minimum_policy = d;
-	    if(strategy == "e") minimum_policy = std::min(0.90, minimum_policy * 1.05);
+	    if(strategy == "e") minimum_policy = std::min(0.90, minimum_policy * 1.2);
 	  } else {
 	    // Not promising, but since the helper recommended it, it is probably better than its policy, so give it some policy boosting.
-	    if(strategy == "e") minimum_policy = std::min(0.90, minimum_policy * 0.95);	    
+	    if(strategy == "e") minimum_policy = std::min(0.90, minimum_policy * 0.85);	    
 	  }
+	  search_->nodes_mutex_.unlock_shared();	  
 	}
 
 	// if(strategy == "c"){
@@ -3060,7 +3069,6 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	// }
 
 	// Actually adjust the policy to minimum_policy (if it is not already higher than that).
-	float current_p = n->GetOwnEdge()->GetP();
 	if(current_p < minimum_policy){
 	  float scaling_factor = 1/(1 + minimum_policy - current_p);
 	  // First increase the policy to the desired value, then scale down policy of all nodes
@@ -3076,6 +3084,7 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	}
       }
       // That's the new nodes, but what about the already existing nodes, shouldn't we boost policy for those too? (if they are promising)
+      search_->nodes_mutex_.lock_shared();      
       for (Node* n2 = vector_of_nodes_from_helper_added_by_this_thread[0]; depth > 0; n2 = n2->GetParent()) {
 
 	// If n2 has no visited siblings, skip all of this
@@ -3087,8 +3096,8 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	}
 	if(children > 1){
 
-	  // Make sure that policy is at least as good as the best sibling if no other node has a higher Q.
-	  float max_allowed_policy_for_non_best_child = 0.2f;
+	  // // Make sure that policy is at least as good as the best sibling if no other node has a higher Q.
+	  // float max_allowed_policy_for_non_best_child = 0.2f;
 
 	  // If there is another node with higher Q, then reduce P of this node unless P is already not highest and not above 0.2
 	  // If the highest policy is less than 0.2, then allow this node to get a P lower than 0.2, so that the other sibling can get highest P eventually.
@@ -3102,7 +3111,7 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	      this_node_has_highest_p = edge.node();
 	    }
 	  }
-	  float minimum_policy = highest_p;
+	  // float minimum_policy = highest_p;
 
 	  float highest_q = -1;
 	  Node * this_node_has_best_q;
@@ -3117,70 +3126,25 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	  // Regardless of our node, also adjust the nodes with highest p and highest q, if needed.
 	  if(this_node_has_best_q != nullptr && this_node_has_highest_p != nullptr && this_node_has_best_q != this_node_has_highest_p){
 	    // increase p on this_node_has_best_q and decrease it on highest_p.
-	    search_->nodes_mutex_.lock();
 	    float diff_to_apply = this_node_has_highest_p->GetOwnEdge()->GetP() * 0.05;
-	    LOGFILE << "Changing policy on node: " << this_node_has_highest_p->DebugString() << " which has the highest policy, from " << this_node_has_highest_p->GetOwnEdge()->GetP() << " to " << this_node_has_highest_p->GetOwnEdge()->GetP()-diff_to_apply << " and policy on node: " << this_node_has_best_q->DebugString() << " which has policy " << this_node_has_best_q->GetOwnEdge()->GetP();
+	    // LOGFILE << "Changing policy on node: " << this_node_has_highest_p->DebugString() << " which has the highest policy, from " << this_node_has_highest_p->GetOwnEdge()->GetP() << " to " << this_node_has_highest_p->GetOwnEdge()->GetP()-diff_to_apply << " and policy on node: " << this_node_has_best_q->DebugString() << " which has policy " << this_node_has_best_q->GetOwnEdge()->GetP();
+	    // upgrade the lock.
+	    search_->nodes_mutex_.unlock_shared();
+	    search_->nodes_mutex_.lock();
 	    this_node_has_highest_p->GetOwnEdge()->SetP(this_node_has_highest_p->GetOwnEdge()->GetP()-diff_to_apply);
 	    this_node_has_best_q->GetOwnEdge()->SetP(this_node_has_best_q->GetOwnEdge()->GetP()+diff_to_apply);
+	    // downgrade lock
 	    search_->nodes_mutex_.unlock();
+	    search_->nodes_mutex_.lock_shared();
 	  }
-
-	  // float current_p = n2->GetOwnEdge()->GetP();
-	  // float scaling_factor;
-	  // bool p_was_changed = false;
-	
-	  // if(n2->GetQ(0.5) == highest_q){
-	  //   // LOGFILE << "our node has the best q: " << highest_q;
-	  //   // Unless it already has the highest policy, set it to the highest policy
-	  //   if(n2->GetOwnEdge()->GetP() < minimum_policy){
-	  //     search_->nodes_mutex_.lock();	    
-	  //     n2->GetOwnEdge()->SetP(minimum_policy);
-	  //     search_->nodes_mutex_.unlock();
-	  //     // increase p, scale down
-	  //     scaling_factor = 1/(1 + minimum_policy - current_p);
-	  //     // LOGFILE << "the current policy of our node is less than best sibling, will increase it to " << minimum_policy << " and then scale all policies by " << scaling_factor;
-	  //     p_was_changed = true;
-	  //   } else {
-	  //     // LOGFILE << "the current policy of our node (which has highest q) is already best, not changing it.";
-	  //   }
-	  // } else {
-	  //   // If it already has the highest P, or P above some constant, decrease it by a scaling factor.
-	  //   if(n2->GetOwnEdge()->GetP() == minimum_policy || n2->GetOwnEdge()->GetP() > max_allowed_policy_for_non_best_child){
-	  //     minimum_policy = n2->GetOwnEdge()->GetP() * 0.95;	      
-	  //     search_->nodes_mutex_.lock();	    
-	  //     n2->GetOwnEdge()->SetP(minimum_policy);
-	  //     search_->nodes_mutex_.unlock();
-	  //     // decrease p, scale up. (minimum policy is smaller than current p, scaling factor becomes less than 1.
-	  //     scaling_factor = 1/(1 + minimum_policy - current_p);
-	  //     // LOGFILE << "node has not best Q but has best policy, or policy above 0.2, will decrease it to: " << minimum_policy << " and scale all policies by " << scaling_factor;
-	  //     p_was_changed = true;	    
-	  //   } else {
-	  //     // LOGFILE << "our node does not have best Q, but no reason to change its P which is already below the value of max_allowed_policy_for_non_best_child: " << max_allowed_policy_for_non_best_child << " policy of our node: " << n2->GetOwnEdge()->GetP();
-	  //   }
-	  // }
-	  
-	  // if(p_was_changed){
-	  //   float sum_of_P = 0;
-	  //   float sum_of_normalized_P = 0;
-	  //   search_->nodes_mutex_.lock();
-	  //   // scale all policies down or up with the scaling factor.
-	  //   for (const auto& child : n2->GetParent()->Edges()) {
-	  //     auto* edge = child.edge();
-	  //     sum_of_P += edge->GetP();
-	  //     sum_of_normalized_P += edge->GetP() * scaling_factor;  
-	  //     edge->SetP(edge->GetP() * scaling_factor);
-	  //   }
-	  //   search_->nodes_mutex_.unlock();
-	  //   // LOGFILE << " Sum of P before normalizing: " << sum_of_P << " and after normalising: " << sum_of_normalized_P << " scaling factor used: " << scaling_factor;
 	} // End of children > 1
 	depth--;
       } // End of policy boosting for existing nodes.
-      
+      search_->nodes_mutex_.unlock_shared();
+      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "MaybeAdjustPolicy.. released a lock on nodes.";    
     }
     // Reset the variable, if it was non-empty.
     foo->queue_of_vector_of_nodes_from_helper_added_by_this_thread = {};
-    // search_->nodes_mutex_.unlock_shared();
-    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "MaybeAdjustPolicy.. released a lock on nodes.";    
   }
   if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "MaybeAdjustPolicyForHelperAddedNodes() finished";
 }

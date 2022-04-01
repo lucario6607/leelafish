@@ -159,14 +159,11 @@ files += [
   'src/chess/board.cc',
   'src/chess/position.cc',
   'src/chess/uciloop.cc',
-<<<<<<< HEAD
   'src/mcts/auxengine.cc',
-=======
   'src/engine.cc',
   'src/lc0ctl/describenet.cc',
   'src/lc0ctl/leela2onnx.cc',
   'src/lc0ctl/onnx2leela.cc',  
->>>>>>> master
   'src/mcts/node.cc',
   'src/mcts/params.cc',
   'src/mcts/search.cc',

@@ -265,6 +265,7 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
     const auto wl = edge.GetWL(default_wl);
     const auto floatD = edge.GetD(default_d);
     const auto q = edge.GetQ(default_q, draw_score);
+    // LOGFILE << "multipv: " << multipv << " q: " << q << " n: " << edge.GetN();
     if (edge.IsTerminal() && wl != 0.0f) {
       uci_info.mate = std::copysign(
           std::round(edge.GetM(0.0f)) / 2 + (edge.IsTbTerminal() ? 101 : 1),
@@ -374,7 +375,10 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
   if (current_best_edge_ && !edges.empty()) {
     last_outputted_info_edge_ = current_best_edge_.edge();
   }
-
+  // Cutechess treats each UCI-info line atomically, and if we send multiple lines we have to send the best line last for it to stay on top. This only matters if multipv is set (above one).
+  if(max_pv > 1){
+    std::reverse(uci_infos.begin(), uci_infos.end());
+  }
   uci_responder_->OutputThinkingInfo(&uci_infos);
 }
 
@@ -663,9 +667,9 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	if(search_stats_->Leelas_preferred_child_node_->GetOwnEdge() != nullptr &&
 	   search_stats_->Leelas_preferred_child_node_->GetOwnEdge()->GetMove().as_string() != search_stats_->winning_move_.as_string()){
 	  if(params_.GetAuxEngineVerbosity() >= 3){
-	    LOGFILE << "leelas preferred child differs from the move recommended by the helper."
-		    << "Helper evaluates Leelas preferred move to: " << search_stats_->helper_eval_of_leelas_preferred_child_of_root
-		    << "Helper evaluates root to: " << search_stats_->helper_eval_of_root;
+	    LOGFILE << "leelas preferred child differs from the move recommended by the helper. \n"
+		    << "Helper evaluates Leelas preferred move to: " << search_stats_->helper_eval_of_leelas_preferred_child_of_root << " based on " << search_stats_->helper_eval_of_leelas_preferred_child_of_root << " nodes.\n"
+		    << "Helper evaluates root to: " << search_stats_->helper_eval_of_root << " based on " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_root << " nodes.\n";
 	  }
 	  // if(search_stats_->helper_eval_of_root - search_stats_->helper_eval_of_leelas_preferred_child_of_root > 30){
 	  if((search_stats_->helper_eval_of_root > -160 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < -170) || // saving the draw
@@ -687,7 +691,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	  }
 	} else {
 	  // They agree.
-	  if(params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Leela agree with the helper about the best move." << search_stats_->Leelas_preferred_child_node_->GetOwnEdge()->GetMove(!played_history_.IsBlackToMove()).as_string();
+	  if(params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Leela agree with the helper about the best move: " << search_stats_->Leelas_preferred_child_node_->GetOwnEdge()->GetMove(played_history_.IsBlackToMove()).as_string();
 	}
       }
     }

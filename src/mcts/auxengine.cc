@@ -297,7 +297,7 @@ void Search::AuxEngineWorker() {
 	  search_stats_->non_winning_root_threads_ = threads_when_winning;
 	}
       }
-      threads_when_winning = threads_when_winning + params_.GetAuxEngineInstances();
+      threads_when_winning = 2 * threads_when_winning + params_.GetAuxEngineInstances();
     }
 
     // if threads_when_winning > 0, then reconfigure the helper managed by thread 0, and all other threads should just return early (doing nothing)

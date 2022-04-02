@@ -406,7 +406,8 @@ void Search::AuxEngineWorker() {
   int thread_counter; // to store the number of remaining threads when we exit.
 
   // let only thread 0 check of root has edges, other threads wait for initial_purge_run before they start.
-  if(our_index == 0){
+  // Perhaps we are not the first thread 0 so check for search_stats_->initial_purge_run
+  if(our_index == 0 && ! search_stats_->initial_purge_run){
 
     // This acts like a signal for other threads that they can start
     // working. PreExt..() also needs at least a shared lock on
@@ -516,20 +517,21 @@ void Search::AuxEngineWorker() {
   } // end of while loop
 
   if(stop_.load(std::memory_order_acquire)){
-    // Decrement the thread counter. purge search.cc does not start before all threads are done.
-    // if we are thread 0 and root_is_queued is false, then we still have the lock on auxengine_listen_mutex, we didn't have the time to detect that root eventually got edges.
-    if(our_index == 0 && !root_is_queued){
-      LOGFILE << "Thread 0 stopped before root was queued, that's rare. Unlock auxengine_listen so that the other threads will exit.";
-      search_stats_->auxengine_listen_mutex_.unlock();            
-    }
-    // LOGFILE << "Thread " << our_index << " about to reduce the thread_counter, trying to aquire a lock on pure_stats.";
-    {
-     std::unique_lock lock(search_stats_->pure_stats_mutex_);
-      // LOGFILE << "Thread " << our_index << " aquired a lock on pure_stats.";      
+    // We are thread 0 and not_yet_notified is true, then someone else was thread 0 before us, and we still have the lock on pure_stats, which is a good thing.
+    // This construct should solve https://github.com/hans-ekbrand/lc0/issues/13
+    if(our_index == 0 && not_yet_notified){
       search_stats_->thread_counter--;
-      thread_counter = search_stats_->thread_counter;
-      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker thread " << our_index << " done. The thread counter is now " << thread_counter;
+      thread_counter = search_stats_->thread_counter;      
+      search_stats_->pure_stats_mutex_.unlock();
+    } else {
+      // The normal scenario, need to grab the lock
+      {
+	std::unique_lock lock(search_stats_->pure_stats_mutex_);
+	search_stats_->thread_counter--;
+	thread_counter = search_stats_->thread_counter;
+      }
     }
+    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxEngineWorker thread " << our_index << " done. The thread counter is now " << thread_counter;
     if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxWorker(), thread " << our_index << " released the lock on pure_stats.";
     // Almost always log the when the last thread exits.
     if(thread_counter == 0 && params_.GetAuxEngineVerbosity() >= 1) LOGFILE << "All AuxEngineWorker threads are now idle";

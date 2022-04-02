@@ -1416,8 +1416,9 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 
       // Queue Leelas favourite node START
       // If there are children, find leelas preferred move, and if that move hasn't
-      // already been queried, enqueue it, unless it is the same move as the helper suggests
-      if(my_node->GetN() > 0){
+      // already been queried, enqueue it, unless it is the same move as the helper suggests or depth is too high.
+      int max_depth = 40;
+      if(my_node->GetN() > 0 && ply < max_depth){
       	const EdgeAndNode Leelas_favourite = search_->GetBestChildNoTemperature(my_node, ply); // is this safe, or does it change my_node?
       	if(Leelas_favourite.edge() != edge.edge()){
       	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Leelas favourite move: " << Leelas_favourite.GetMove(black_to_move).as_string() << " is not the same has the helper recommendation " << edge.GetMove(black_to_move).as_string();

@@ -669,7 +669,9 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	  }
 	  // if(search_stats_->helper_eval_of_root - search_stats_->helper_eval_of_leelas_preferred_child_of_root > 30){
 	  if((search_stats_->helper_eval_of_root > -160 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < -170) || // saving the draw
-	     (search_stats_->helper_eval_of_root > 160 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < 120) // saving the win
+	     (search_stats_->helper_eval_of_root > -165 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < -180) || // saving the draw (from a game: -164 root vs -195 leelas move)
+	     (search_stats_->helper_eval_of_root > -170 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < -190) || // saving the draw 	     
+	     (search_stats_->helper_eval_of_root > 160 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < 130) // saving the win
 	     ){	
 	    if(search_stats_->number_of_nodes_in_support_for_helper_eval_of_root > 100000){
 	      if(params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Large enough support for root";

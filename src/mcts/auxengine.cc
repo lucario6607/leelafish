@@ -240,7 +240,7 @@ void Search::AuxEngineWorker() {
       if(search_stats_->winning_threads_adjusted){
 	// during the previous game, the root exploring helper was reconfigured to use more threads, reconfigure again back to the normal state.
 	// if winning_ was changed from false to true only during the very last move, winning_threads_adjusted is false and no reconfiguration has yet taken place, thus no reconfiguration is needed here.
-	LOGFILE << "AuxWorker() reconfigured the root-helper to use " << search_stats_->non_winning_root_threads_ << " number of threads again since a new game started.";
+	if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "AuxWorker() reconfigured the root-helper to use " << search_stats_->non_winning_root_threads_ << " number of threads again since a new game started.";
 	search_stats_->auxengine_stopped_mutex_.lock();
 	*search_stats_->vector_of_opstreams[our_index] << "setoption name Threads value " << search_stats_->non_winning_root_threads_ << std::endl;	    
 	search_stats_->auxengine_stopped_mutex_.unlock();
@@ -375,7 +375,7 @@ void Search::AuxEngineWorker() {
 		fast_track_extend_and_evaluate_queue_temp_.push(pv);
 	      }
 	    } else {
-	      LOGFILE << "AuxEngineWorker() found PV of size less than 2, discarding it." << pv.size();		  
+	      if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "AuxEngineWorker() found PV of size less than 2, discarding it." << pv.size();		  
 	    }
 	  }
 	  // Empty the queue and copy back the relevant ones.
@@ -638,7 +638,9 @@ void Search::AuxEngineWorker() {
   }
 
   // Too short PV are probably not reliable (> 4 seems to suffice), too high bar can be bad with low values of AuxEngineTime
-  const long unsigned int min_pv_size = 5;
+  // perhaps speed will be improved if we ignore the very short PVs?
+  // const long unsigned int min_pv_size = 5;
+  const long unsigned int min_pv_size = 10;
   if (pv_moves.size() >= min_pv_size){
 
     // check if the PV is new
@@ -718,7 +720,7 @@ void Search::AuxEngineWorker() {
       // just unlock
       search_stats_->fast_track_extend_and_evaluate_queue_mutex_.unlock();	
     }
-    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread " << thread << ": Added a PV starting at depth " << depth << " with " << nodes_to_support  << " nodes to support it. Queue has size: " << size;
+    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread " << thread << ": Added a PV starting at depth " << depth << " with " << nodes_to_support  << " nodes to support it. Queue has size: " << size;
   } else {
     if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Ignoring pv because it not of length " << min_pv_size << " or more.";
   }
@@ -1014,17 +1016,17 @@ void Search::DoAuxEngine(Node* n, int index){
   auxengine_total_dur += auxengine_dur;
   auxengine_num_evals++;
   AuxEncode_and_Enqueue(prev_line, depth, my_board, my_position, my_moves_from_the_white_side, false, index);
-  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << index << " Finished at DoAuxEngine().";
+  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread: " << index << " Finished at DoAuxEngine().";
 }
 
 void Search::AuxWait() {
-  if (params_.GetAuxEngineVerbosity() >= 7) LOGFILE << "In AuxWait()";
+  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "In AuxWait()";
   while (!auxengine_threads_.empty()) {
     Mutex::Lock lock(threads_mutex_);
     auxengine_threads_.back().join();
     auxengine_threads_.pop_back();
   }
-  if (params_.GetAuxEngineVerbosity() >= 7) LOGFILE << "AuxWait finished shutting down AuxEngineWorker() threads.";
+  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxWait finished shutting down AuxEngineWorker() threads.";
 
   // Clear the PV cache.
   search_stats_->my_pv_cache_mutex_.lock();

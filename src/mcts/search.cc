@@ -675,7 +675,9 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	  if((search_stats_->helper_eval_of_root > -160 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < -170) || // saving the draw
 	     (search_stats_->helper_eval_of_root > -165 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < -180) || // saving the draw (from a game: -164 root vs -195 leelas move)
 	     (search_stats_->helper_eval_of_root > -170 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < -190) || // saving the draw 	     
-	     (search_stats_->helper_eval_of_root > 160 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < 130) // saving the win
+	     (search_stats_->helper_eval_of_root > 160 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < 130) || // saving the win
+	     (search_stats_->helper_eval_of_root > 145 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < 105) // saving the win
+	     
 	     ){	
 	    if(search_stats_->number_of_nodes_in_support_for_helper_eval_of_root > 100000){
 	      if(params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Large enough support for root";
@@ -1669,7 +1671,7 @@ const std::shared_ptr<Search::adjust_policy_stats> SearchWorker::PreExtendTreeAn
       // relase the lock, we only needed it to test if to continue or not
       search_->search_stats_->pure_stats_mutex_.unlock_shared();
 
-      if (params_.GetAuxEngineVerbosity() >= 9) {
+      if (params_.GetAuxEngineVerbosity() >= 5) {
 	LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: size of minibatch_ is " << minibatch_.size();
 	LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: size of search_stats_->fast_track_extend_and_evaluate_queue_ is " << search_->search_stats_->fast_track_extend_and_evaluate_queue_.size();
       }
@@ -2976,9 +2978,8 @@ bool SearchWorker::MaybeSetBounds(Node* p, float m, int* n_to_fix,
   // 6.5
 void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Search::adjust_policy_stats> foo){
   std::thread::id this_id = std::this_thread::get_id();
-  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << this_id << ", In MaybeAdjustPolicyForHelperAddedNodes().";
   long unsigned int my_queue_size = foo->queue_of_vector_of_nodes_from_helper_added_by_this_thread.size();
-  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << this_id << ", In MaybeAdjustPolicyForHelperAddedNodes(), size of queue to process: " << my_queue_size;
+  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread: " << this_id << ", In MaybeAdjustPolicyForHelperAddedNodes(), size of queue to process: " << my_queue_size;
   if(my_queue_size > 0){
     while(foo->queue_of_vector_of_nodes_from_helper_added_by_this_thread.size() > 0){    
       std::vector<Node*> vector_of_nodes_from_helper_added_by_this_thread = foo->queue_of_vector_of_nodes_from_helper_added_by_this_thread.front();
@@ -3152,12 +3153,12 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	depth--;
       } // End of policy boosting for existing nodes.
       search_->nodes_mutex_.unlock_shared();
-      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "MaybeAdjustPolicy.. released a lock on nodes.";    
+      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "MaybeAdjustPolicy released a lock on nodes.";    
     }
     // Reset the variable, if it was non-empty.
     foo->queue_of_vector_of_nodes_from_helper_added_by_this_thread = {};
   }
-  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "MaybeAdjustPolicyForHelperAddedNodes() finished";
+  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "MaybeAdjustPolicyForHelperAddedNodes() finished";
 }
 
   

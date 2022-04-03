@@ -496,7 +496,7 @@ void Search::AuxEngineWorker() {
       // std::unique_lock<std::mutex> lock(search_stats_->auxengine_mutex_);
       std::unique_lock lock(search_stats_->auxengine_mutex_);
       // Wait until there's some work to compute.
-      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxWorker(), thread " << our_index << " has the unique lock on auxengine_mutex_ waiting for work.";	
+      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "AuxWorker(), thread " << our_index << " has the unique lock on auxengine_mutex_ waiting for work.";	
       auxengine_cv_.wait(lock, [&] { return stop_.load(std::memory_order_acquire) || !search_stats_->persistent_queue_of_nodes.empty(); });
       // auxengine_cv_.wait(lock, [&] { return stop_.load(std::memory_order_acquire); });	
       // at this point, the lock is released and aquired again, which is why we want the outer lock, without which another thread could intercept us here.
@@ -504,7 +504,7 @@ void Search::AuxEngineWorker() {
 	search_stats_->auxengine_listen_mutex_.unlock();
 	break;
       }
-      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxWorker(), thread " << our_index << " got work.";
+      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "AuxWorker(), thread " << our_index << " got work.";
       if (search_stats_->persistent_queue_of_nodes.size() > 0){
 	n = search_stats_->persistent_queue_of_nodes.front();
 	search_stats_->persistent_queue_of_nodes.pop();
@@ -513,7 +513,7 @@ void Search::AuxEngineWorker() {
       }
     } // implictly release the lock on search_stats_->auxengine_mutex_
     search_stats_->auxengine_listen_mutex_.unlock();
-    DoAuxEngine(n, our_index);    
+    DoAuxEngine(n, our_index);
   } // end of while loop
 
   if(stop_.load(std::memory_order_acquire)){
@@ -1016,7 +1016,7 @@ void Search::DoAuxEngine(Node* n, int index){
   auxengine_total_dur += auxengine_dur;
   auxengine_num_evals++;
   AuxEncode_and_Enqueue(prev_line, depth, my_board, my_position, my_moves_from_the_white_side, false, index);
-  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread: " << index << " Finished at DoAuxEngine().";
+  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << index << " Finished at DoAuxEngine().";
 }
 
 void Search::AuxWait() {

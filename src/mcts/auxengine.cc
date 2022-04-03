@@ -638,7 +638,8 @@ void Search::AuxEngineWorker() {
   }
 
   // Too short PV are probably not reliable (> 4 seems to suffice), too high bar can be bad with low values of AuxEngineTime
-  if (pv_moves.size() > 4){
+  const long unsigned int min_pv_size = 5;
+  if (pv_moves.size() >= min_pv_size){
 
     // check if the PV is new
     std::ostringstream oss;
@@ -719,7 +720,7 @@ void Search::AuxEngineWorker() {
     }
     if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread " << thread << ": Added a PV starting at depth " << depth << " with " << nodes_to_support  << " nodes to support it. Queue has size: " << size;
   } else {
-    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Ignoring pv because it not of length 10 or more.";
+    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Ignoring pv because it not of length " << min_pv_size << " or more.";
   }
 }
 
@@ -752,27 +753,23 @@ void Search::DoAuxEngine(Node* n, int index){
     
   }
   
-  if (params_.GetAuxEngineVerbosity() >= 9){
-    LOGFILE << "Thread: " << index << ". DoAuxEngine() trying to aquire a lock on nodes_ to calculate depth.";
-  }
+  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << index << " DoAuxEngine() trying to aquire a lock on nodes_ to calculate depth.";
   nodes_mutex_.lock_shared();  
+  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << index << " DoAuxEngine() aquired a lock on nodes_";
   // Calculate depth.
   int depth = 0;
   if(n != root_node_){
     if(stop_.load(std::memory_order_acquire)) {
-      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread: " << index << "DoAuxEngine caught a stop signal before starting to calculate depth.";
-      nodes_mutex_.unlock_shared();      
+      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread: " << index << " DoAuxEngine caught a stop signal before starting to calculate depth.";
+      nodes_mutex_.unlock_shared();
       return;
     }
-    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << index << "DoAuxEngine() trying to aquire a lock on nodes_";    
-    // nodes_mutex_.lock_shared();
-    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << index << "DoAuxEngine() aquired a lock on nodes_";
     for (Node* n2 = n; n2 != root_node_; n2 = n2->GetParent()) {
       depth++;
     }
-    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << index << "DoAuxEngine() released a lock on nodes_";    
   }
   nodes_mutex_.unlock_shared();
+  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << index << " DoAuxEngine() released a lock on nodes_";    
 
   int AuxEngineTime;
 
@@ -975,7 +972,8 @@ void Search::DoAuxEngine(Node* n, int index){
 	search_stats_->auxengine_stopped_mutex_.lock();
 	*search_stats_->vector_of_opstreams[index] << "stop" << std::endl; // stop the A/B helper
 	search_stats_->auxengine_stopped_mutex_.unlock();
-	if (third_stopping && params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "thread: " << index << " We found that search was stopped on the previous iteration, but the current line from the helper was not 'bestmove'. Probably the helper engine does not repond to stop until it has search for some minimum amount of time (like 10 ms). As a workaround send yet another stop. This is the output from the helper: " << line;
+	// log statment below turned out to always show perfectly normal output.
+	// if (third_stopping && params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "thread: " << index << " We found that search was stopped on the previous iteration, but the current line from the helper was not 'bestmove'. Probably the helper engine does not repond to stop until it has search for some minimum amount of time (like 10 ms). As a workaround send yet another stop. This is the output from the helper: " << line;
 	if(!third_stopping){
 	  third_stopping = true;
 	}

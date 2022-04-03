@@ -668,8 +668,8 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	   search_stats_->Leelas_preferred_child_node_->GetOwnEdge()->GetMove().as_string() != search_stats_->winning_move_.as_string()){
 	  if(params_.GetAuxEngineVerbosity() >= 3){
 	    LOGFILE << "leelas preferred child differs from the move recommended by the helper. \n"
-		    << "Helper evaluates Leelas preferred move to: " << search_stats_->helper_eval_of_leelas_preferred_child_of_root << " based on " << search_stats_->helper_eval_of_leelas_preferred_child_of_root << " nodes.\n"
-		    << "Helper evaluates root to: " << search_stats_->helper_eval_of_root << " based on " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_root << " nodes.\n";
+		    << "Helper evaluates Leelas preferred move to: " << search_stats_->helper_eval_of_leelas_preferred_child_of_root << " based on " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child_of_root << " nodes.\n"
+		    << "Helper evaluates root to: " << search_stats_->helper_eval_of_root << " based on " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_root << " nodes.";
 	  }
 	  // if(search_stats_->helper_eval_of_root - search_stats_->helper_eval_of_leelas_preferred_child_of_root > 30){
 	  if((search_stats_->helper_eval_of_root > -160 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < -170) || // saving the draw

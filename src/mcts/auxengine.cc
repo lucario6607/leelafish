@@ -597,7 +597,7 @@ void Search::AuxEngineWorker() {
       if(thread == 1){ // assume thread 1 works with leelas preferred child of root.
 	search_stats_->helper_eval_of_leelas_preferred_child_of_root = -eval;
       }
-      if(depth == 0 && eval > 200) {
+      if(depth == 0 && eval > 250) {
 	winning = true;
       }
     }

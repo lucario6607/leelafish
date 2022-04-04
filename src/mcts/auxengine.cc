@@ -675,6 +675,15 @@ void Search::AuxEngineWorker() {
       }
     }
 
+    if(depth == 0){
+      // show the PV from root from the helper
+      std::string debug_string_root;      
+      for(int i = 0; i < (int) my_moves_from_the_white_side.size(); i++){
+	debug_string_root = debug_string_root + my_moves_from_the_white_side[i].as_string() + " ";
+      }
+      if(params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "PV from the root explorer: " << debug_string_root;
+    }
+
     if(stop_.load(std::memory_order_acquire) && depth == 0){
       // final eval from the root-explorer
       if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Final eval from the root explorer: " << eval << " with the move " << my_moves_from_the_white_side.front().as_string();      

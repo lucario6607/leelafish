@@ -3028,6 +3028,10 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
       // Do we want to maximize or minimize Q? At root, and thus at even depth, we want to _minimize_ Q (Q is from the perspective of the player who _made the move_ leading up the current position. Calculate depth at the first added node.
       int depth = 0;
       search_->nodes_mutex_.lock_shared();
+      if(vector_of_nodes_from_helper_added_by_this_thread[0]->IsTerminal()){
+	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread: " << this_id << ", In MaybeAdjustPolicyForHelperAddedNodes(). Node is terminal, no need to modify its policy.";
+	continue;
+      }
       LOGFILE << "Starting to calculate depth for this node: " << vector_of_nodes_from_helper_added_by_this_thread[0]->DebugString();
       for (Node* n2 = vector_of_nodes_from_helper_added_by_this_thread[0]; n2 != search_->root_node_ && depth < 100; n2 = n2->GetParent()) {
 	depth++;

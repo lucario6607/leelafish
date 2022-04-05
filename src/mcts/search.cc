@@ -721,6 +721,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
       if(params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Resetting search_stats_->stop_a_blunder_ to false";
       search_stats_->stop_a_blunder_ = false;
     }
+    search_stats_->best_move_candidates_mutex.unlock();    
   }
   
   // Use a 0 visit cancel score update to clear out any cached best edge, as

@@ -3030,6 +3030,7 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
       search_->nodes_mutex_.lock_shared();
       if(vector_of_nodes_from_helper_added_by_this_thread[0]->IsTerminal()){
 	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread: " << this_id << ", In MaybeAdjustPolicyForHelperAddedNodes(). Node is terminal, no need to modify its policy.";
+	search_->nodes_mutex_.unlock_shared();	
 	continue;
       }
       LOGFILE << "Starting to calculate depth for this node: " << vector_of_nodes_from_helper_added_by_this_thread[0]->DebugString();

@@ -1079,6 +1079,7 @@ void Search::PopulateCommonIterationStats(IterationStats* stats) {
   stats->move_selection_visits_scaling_power = params_.GetMoveSelectionVisitsScalingPower();
   stats->override_PUCT_node_budget_threshold = params_.GetOverridePUCTNodeBudgetThreshold();
 
+  bool found_the_edge = false;
   search_stats_->best_move_candidates_mutex.lock();
   if(search_stats_->Leelas_preferred_child_node_ != nullptr){
     if(search_stats_->Leelas_preferred_child_node_->GetOwnEdge() != nullptr &&
@@ -1093,6 +1094,7 @@ void Search::PopulateCommonIterationStats(IterationStats* stats) {
 	if(edge.GetMove() == search_stats_->winning_move_){
 	  stats->helper_recommended_node_visits = edge.node()->GetN();
 	  stats->helper_recommended_index = index;
+	  found_the_edge = true;
 	  break;
 	}
 	index++;
@@ -1102,6 +1104,12 @@ void Search::PopulateCommonIterationStats(IterationStats* stats) {
     stats->agreement_between_Leela_and_helper = true;    
   }
   search_stats_->best_move_candidates_mutex.unlock();
+  if(! stats->agreement_between_Leela_and_helper &&
+     ! found_the_edge){
+    // Sanity check failed The edge was not found, we can't use it to stop pruning
+    LOGFILE << "Sanity check failed The edge was not found, we can't use it to stop pruning";
+    stats->agreement_between_Leela_and_helper = true;
+  }
 
   stats->time_usage_hint_ = IterationStats::TimeUsageHint::kNormal;
 

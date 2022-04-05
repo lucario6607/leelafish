@@ -318,8 +318,9 @@ bool SmartPruningStopper::ShouldStop(const IterationStats& stats,
       // When should we force Leela to spend some nodes on the helpers recommended move, and when just let her search freely?
       // For a starter, force Leela to spend nodes if the helper recommended node has few visits, say less than 90% of Leelas favourite.
       float ratio = stats.helper_recommended_node_visits / (float)stats.Leelas_preferred_child_node_visits;
-      if(ratio < 0.75){
-	LOGFILE << "Rejecting smart pruning since the helper recommended move have only " << ratio << " of the number of visits that Leelas preferred move has. Since that ratio is below 0.75, I will force Leela to visit that node (which has edge number: " << stats.helper_recommended_index << ") until next check.";
+      float min_ratio = 0.5;
+      if(ratio < min_ratio){
+	LOGFILE << "Rejecting smart pruning since the helper recommended move have only " << ratio << " of the number of visits that Leelas preferred move has. Since that ratio is below " << min_ratio << ", I will force Leela to visit that node (which has edge number: " << stats.helper_recommended_index << ") until next check.";
 	hints->UpdateIndexOfBestEdge(stats.helper_recommended_index);
 	return false;
       }

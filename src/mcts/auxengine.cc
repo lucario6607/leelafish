@@ -236,20 +236,22 @@ void Search::AuxEngineWorker() {
 	search_stats_->AuxEngineThreshold = params_.GetAuxEngineThreshold();
       }
 
+      search_stats_->best_move_candidates_mutex.lock();
       search_stats_->winning_ = false;
-      if(search_stats_->winning_threads_adjusted){
+      bool reconfiguration_needed = search_stats_->winning_threads_adjusted;
+      search_stats_->winning_threads_adjusted = false;
+      search_stats_->number_of_nodes_in_support_for_helper_eval_of_root = 0;
+      search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child_of_root = 0;
+      search_stats_->best_move_candidates_mutex.unlock();
+      if(reconfiguration_needed){
 	// during the previous game, the root exploring helper was reconfigured to use more threads, reconfigure again back to the normal state.
 	// if winning_ was changed from false to true only during the very last move, winning_threads_adjusted is false and no reconfiguration has yet taken place, thus no reconfiguration is needed here.
 	if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "AuxWorker() reconfigured the root-helper to use " << search_stats_->non_winning_root_threads_ << " number of threads again since a new game started.";
 	search_stats_->auxengine_stopped_mutex_.lock();
 	*search_stats_->vector_of_opstreams[our_index] << "setoption name Threads value " << search_stats_->non_winning_root_threads_ << std::endl;	    
 	search_stats_->auxengine_stopped_mutex_.unlock();
-	search_stats_->winning_threads_adjusted = false;
       }
 
-      search_stats_->number_of_nodes_in_support_for_helper_eval_of_root = 0;
-      search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child_of_root = 0;
-      
       search_stats_->Total_number_of_nodes = 0;
       search_stats_->Number_of_nodes_added_by_AuxEngine = 0;
       search_stats_->size_of_queue_at_start = 0;
@@ -271,6 +273,9 @@ void Search::AuxEngineWorker() {
 
     // If the helper now claims a win, reroute all resources to the root explorer.
     int threads_when_winning = 0;
+
+    search_stats_->best_move_candidates_mutex.lock();
+    bool winning_threads_adjusted = search_stats_->winning_threads_adjusted; // temporary variable need to avoid nested locks below.
     
     if(search_stats_->winning_){
       std::string bar;
@@ -300,23 +305,28 @@ void Search::AuxEngineWorker() {
       threads_when_winning = 2 * threads_when_winning + params_.GetAuxEngineInstances();
     }
 
+    search_stats_->best_move_candidates_mutex.unlock();
+
     // if threads_when_winning > 0, then reconfigure the helper managed by thread 0, and all other threads should just return early (doing nothing)
     if(threads_when_winning > 0){
       if(our_index > 0){
 	// LOGFILE << "AuxWorker() thread " << our_index << " shutting down since the helper claims a win";
-	search_stats_->pure_stats_mutex_.unlock();	
+	search_stats_->pure_stats_mutex_.unlock();
 	return;
       } else {
-	if(!search_stats_->winning_threads_adjusted){
+	if(!winning_threads_adjusted){
 	  // Thread zero, just reconfigure the root explorer to use all available threads
+	  search_stats_->best_move_candidates_mutex.lock();
+	  search_stats_->winning_threads_adjusted = true;
+	  search_stats_->best_move_candidates_mutex.unlock();	  
 	  LOGFILE << "AuxWorker() reconfigured the root-helper to use " << threads_when_winning << " threads.";
 	  search_stats_->auxengine_stopped_mutex_.lock();
 	  *search_stats_->vector_of_opstreams[our_index] << "setoption name Threads value " << threads_when_winning << std::endl;	    
 	  search_stats_->auxengine_stopped_mutex_.unlock();
-	  search_stats_->winning_threads_adjusted = true;
 	}
       }
     }
+    
 
     // AuxEngine(s) were already started. If we are thread zero then (1) Purge the queue(s) and (2) kickstart root if the queue is empty and root has edges.
     // If another thread 0 purge and exit before we got started, we can be thread zer0 now.
@@ -592,10 +602,14 @@ void Search::AuxEngineWorker() {
     if (pv == "cp") {
       iss >> eval >> std::ws;
       if(depth == 0){
+	search_stats_->best_move_candidates_mutex.lock();
 	search_stats_->helper_eval_of_root = eval;
+	search_stats_->best_move_candidates_mutex.unlock();	
       }
       if(thread == 1){ // assume thread 1 works with leelas preferred child of root.
+	search_stats_->best_move_candidates_mutex.lock();	
 	search_stats_->helper_eval_of_leelas_preferred_child_of_root = -eval;
+	search_stats_->best_move_candidates_mutex.unlock();	
       }
       if(depth == 0 && eval > 250) {
 	winning = true;
@@ -640,7 +654,7 @@ void Search::AuxEngineWorker() {
   // Too short PV are probably not reliable (> 4 seems to suffice), too high bar can be bad with low values of AuxEngineTime
   // perhaps speed will be improved if we ignore the very short PVs?
   // const long unsigned int min_pv_size = 5;
-  const long unsigned int min_pv_size = 10;
+  const long unsigned int min_pv_size = 6;
   if (pv_moves.size() >= min_pv_size){
 
     // check if the PV is new
@@ -689,13 +703,10 @@ void Search::AuxEngineWorker() {
       if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Final eval from the root explorer: " << eval << " with the move " << my_moves_from_the_white_side.front().as_string();      
     }
 
-    long unsigned int size;
-    search_stats_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before starting to modify it
-    size = search_stats_->fast_track_extend_and_evaluate_queue_.size();
-
     // Prepare autopilot and blunder vetoing START
     // before search_stats_->winning_threads_adjusted is set, accept changes in all directions.
     // after search_stats_->winning_threads_adjusted is set, just inform, don't change the state of search_stats_->winning_
+    search_stats_->best_move_candidates_mutex.lock();    
     if (winning && !search_stats_->winning_){
       if(!search_stats_->winning_threads_adjusted){
 	search_stats_->winning_ = true;
@@ -717,8 +728,12 @@ void Search::AuxEngineWorker() {
     if(thread == 1){ // assume thread 1 works with leelas preferred child of root.
       search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child_of_root = nodes_to_support;
     }
+    search_stats_->best_move_candidates_mutex.unlock();    
     // Prepare autopilot and blunder vetoing STOP
     
+    long unsigned int size;
+    search_stats_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before starting to modify it
+    size = search_stats_->fast_track_extend_and_evaluate_queue_.size();
     if(size < 20000){ // safety net, silently drop PV:s if we cannot extend nodes fast enough. lc0 stalls when this number is too high.
       search_stats_->fast_track_extend_and_evaluate_queue_.push(my_moves_from_the_white_side);
       search_stats_->starting_depth_of_PVs_.push(depth);
@@ -731,16 +746,16 @@ void Search::AuxEngineWorker() {
     }
     if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread " << thread << ": Added a PV starting at depth " << depth << " with " << nodes_to_support  << " nodes to support it. Queue has size: " << size;
   } else {
-    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Ignoring pv because it not of length " << min_pv_size << " or more.";
+    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Ignoring pv because it not of length " << min_pv_size << " or more. Actual size: " << pv_moves.size();
   }
 }
 
 void Search::DoAuxEngine(Node* n, int index){
   // before trying to take a lock on nodes_mutex_, always check if search has stopped, in which case we return early
-  if(stop_.load(std::memory_order_acquire)) {
-    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine, thread " << index << " caught a stop signal beforing doing anything.";
-    return;
-  }
+  // if(stop_.load(std::memory_order_acquire)) {
+  //   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine, thread " << index << " caught a stop signal beforing doing anything.";
+  //   return;
+  // }
 
   // If we are thread 1:
   // 1. then put the node back into the queue,
@@ -749,7 +764,7 @@ void Search::DoAuxEngine(Node* n, int index){
   // 4. someone else will stop the helper if Leela changes her mind.
   // 5. make sure the eval is reported so it can be used to veto leelas move.
 
-  // step 0 make sure there leela has a preferred move
+  // step 0 make sure that leela has a preferred move
   if(index == 1 && search_stats_->Leelas_preferred_child_node_ != nullptr){
 
     // step 1
@@ -764,23 +779,23 @@ void Search::DoAuxEngine(Node* n, int index){
     
   }
   
-  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << index << " DoAuxEngine() trying to aquire a lock on nodes_ to calculate depth.";
-  nodes_mutex_.lock_shared();  
-  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << index << " DoAuxEngine() aquired a lock on nodes_";
   // Calculate depth.
   int depth = 0;
   if(n != root_node_){
-    if(stop_.load(std::memory_order_acquire)) {
-      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread: " << index << " DoAuxEngine caught a stop signal before starting to calculate depth.";
-      nodes_mutex_.unlock_shared();
-      return;
-    }
+    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << index << " DoAuxEngine() trying to aquire a lock on nodes_ to calculate depth.";
+    nodes_mutex_.lock_shared();  
+    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << index << " DoAuxEngine() aquired a lock on nodes_";
+    // if(stop_.load(std::memory_order_acquire)) {
+    //   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread: " << index << " DoAuxEngine caught a stop signal before starting to calculate depth.";
+    //   nodes_mutex_.unlock_shared();
+    //   return;
+    // }
     for (Node* n2 = n; n2 != root_node_; n2 = n2->GetParent()) {
       depth++;
     }
+    nodes_mutex_.unlock_shared();
+    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << index << " DoAuxEngine() released a lock on nodes_";    
   }
-  nodes_mutex_.unlock_shared();
-  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << index << " DoAuxEngine() released a lock on nodes_";    
 
   int AuxEngineTime;
 
@@ -836,24 +851,23 @@ void Search::DoAuxEngine(Node* n, int index){
   // Apply the moves in reversed order to get the proper board state from which we can then make moves in legacy format.
   std::vector<lczero::Move> my_moves;
   std::vector<lczero::Move> my_moves_from_the_white_side;  
+  
+  // if(stop_.load(std::memory_order_acquire)) {
+  //   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread: " << index << " DoAuxEngine caught a stop signal while populating my_moves.";
+  //   return;
+  // }
 
-  nodes_mutex_.lock_shared();  
   if(n != root_node_){
-    if(stop_.load(std::memory_order_acquire)) {
-      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine caught a stop signal while populating my_moves.";
-      nodes_mutex_.unlock_shared();
-      return;
-    }
-    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << index << " DoAuxEngine() trying to aquire a lock on nodes_ in order to create the position for the helper.";    
-    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << index << " DoAuxEngine() aquired a lock on nodes_ in order to create the position for the helper.";
+    nodes_mutex_.lock_shared();
+    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << index << " DoAuxEngine() aquired a lock on nodes_ in order to create the position for the helper.";  
     for (Node* n2 = n; n2 != root_node_; n2 = n2->GetParent()) {
       my_moves.push_back(n2->GetOwnEdge()->GetMove(flip));
       my_moves_from_the_white_side.push_back(n2->GetOwnEdge()->GetMove());
       flip = !flip;
     }
-    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "DoAuxEngine() released a lock on nodes_.";
+    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << index << " DoAuxEngine() releasing a lock on nodes_.";
+    nodes_mutex_.unlock_shared();
   }
-  nodes_mutex_.unlock_shared();
   
   // Reverse the order
   std::reverse(my_moves.begin(), my_moves.end());
@@ -921,12 +935,12 @@ void Search::DoAuxEngine(Node* n, int index){
   bool stopping = false;
   bool second_stopping = false;
   bool third_stopping = false;
-  bool second_stopping_notification = false;
+  // bool second_stopping_notification = false;
   while(std::getline(*search_stats_->vector_of_ipstreams[index], line)) {
-    if (params_.GetAuxEngineVerbosity() >= 9 &&
-	!second_stopping_notification) {
-      LOGFILE << "thread: " << index << " auxe:" << line;
-    }
+    // if (params_.GetAuxEngineVerbosity() >= 9 &&
+    // 	!second_stopping_notification) {
+    //   LOGFILE << "thread: " << index << " auxe:" << line;
+    // }
 
     std::istringstream iss(line);
     iss >> token >> std::ws;

@@ -661,7 +661,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 
     // veto if the move Leela prefers is a blunder
     nodes_mutex_.lock_shared();    
-    search_stats_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // for reading search_stats_->winning_ and the others
+    search_stats_->best_move_candidates_mutex.lock(); // for reading search_stats_->winning_ and the other
     if(! search_stats_->winning_){
       if(search_stats_->Leelas_preferred_child_node_ != nullptr){
 	if(search_stats_->Leelas_preferred_child_node_->GetOwnEdge() != nullptr &&
@@ -701,8 +701,8 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
       LOGFILE << "Autopilot is on.";
     }
 
+    search_stats_->best_move_candidates_mutex.unlock();
     nodes_mutex_.unlock_shared();    
-    search_stats_->fast_track_extend_and_evaluate_queue_mutex_.unlock();
 
     if(params_.GetAuxEngineVerbosity() >= 3){
       LOGFILE << "Finished vetoing stuff";
@@ -1078,6 +1078,31 @@ void Search::PopulateCommonIterationStats(IterationStats* stats) {
   stats->num_losing_edges = 0;
   stats->move_selection_visits_scaling_power = params_.GetMoveSelectionVisitsScalingPower();
   stats->override_PUCT_node_budget_threshold = params_.GetOverridePUCTNodeBudgetThreshold();
+
+  search_stats_->best_move_candidates_mutex.lock();
+  if(search_stats_->Leelas_preferred_child_node_ != nullptr){
+    if(search_stats_->Leelas_preferred_child_node_->GetOwnEdge() != nullptr &&
+       search_stats_->winning_move_.as_string() != search_stats_->Leelas_preferred_child_node_->GetOwnEdge()->GetMove().as_string()){
+      stats->agreement_between_Leela_and_helper = false;
+      stats->Leelas_preferred_child_node_visits = search_stats_->Leelas_preferred_child_node_->GetN();
+      stats->helper_eval_of_root = search_stats_->helper_eval_of_root;
+      stats->helper_eval_of_leelas_preferred_child_of_root = search_stats_->helper_eval_of_leelas_preferred_child_of_root;
+      // Find the node corresponding to the helper recommended move
+      int index = 0;
+      for (auto& edge : root_node_->Edges()) {
+	if(edge.GetMove() == search_stats_->winning_move_){
+	  stats->helper_recommended_node_visits = edge.node()->GetN();
+	  stats->helper_recommended_index = index;
+	  break;
+	}
+	index++;
+      }
+    }
+  } else {
+    stats->agreement_between_Leela_and_helper = true;    
+  }
+  search_stats_->best_move_candidates_mutex.unlock();
+
   stats->time_usage_hint_ = IterationStats::TimeUsageHint::kNormal;
 
   // If root node hasn't finished first visit, none of this code is safe.
@@ -1328,7 +1353,7 @@ void SearchWorker::ExecuteOneIteration() {
   GatherMinibatch2();
   task_count_.store(-1, std::memory_order_release);
   search_->backend_waiting_counter_.fetch_add(1, std::memory_order_relaxed);
-  if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "GatherMinibatch2() finished in ExecuteOneIteration().";
+  if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "GatherMinibatch2() finished in ExecuteOneIteration().";
   
   // 2b. Collect collisions.
   CollectCollisions();
@@ -3085,14 +3110,16 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	  float scaling_factor = 1/(1 + minimum_policy - current_p);
 	  // First increase the policy to the desired value, then scale down policy of all nodes
 	  search_->nodes_mutex_.lock();
+	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Aquired a write lock on nodes to change policy";
 	  n->GetOwnEdge()->SetP(minimum_policy);
 	  // Now scale all policies down with the scaling factor.
 	  for (const auto& child : n->GetParent()->Edges()) {
 	    auto* edge = child.edge();
 	    edge->SetP(edge->GetP() * scaling_factor);
 	  }
+	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Increased policy from " << current_p << " to " << minimum_policy * scaling_factor << " and scaled all other policies down by " << scaling_factor << " since the node was promising, now releasing the lock.";
 	  search_->nodes_mutex_.unlock();
-	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Increased policy from " << current_p << " to " << minimum_policy * scaling_factor << " and scaled all other policies down by " << scaling_factor << " since the node was promising";
+	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Successfully released the lock.";
 	}
       }
       // That's the new nodes, but what about the already existing nodes, shouldn't we boost policy for those too? (if they are promising)

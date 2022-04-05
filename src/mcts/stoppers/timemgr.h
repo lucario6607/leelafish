@@ -48,7 +48,13 @@ struct IterationStats {
   int64_t batches_since_movestart = 0;
   int average_depth = 0;
   float move_selection_visits_scaling_power = 0.0f;
-  float override_PUCT_node_budget_threshold = 0.0f;  
+  float override_PUCT_node_budget_threshold = 0.0f;
+  bool agreement_between_Leela_and_helper = true;
+  int helper_recommended_node_visits;
+  int helper_recommended_index;
+  int Leelas_preferred_child_node_visits; 
+  float helper_eval_of_root;
+  float helper_eval_of_leelas_preferred_child_of_root;
   std::vector<uint32_t> edge_n;
   std::vector<float> q;
 

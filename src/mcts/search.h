@@ -112,7 +112,8 @@ class Search {
     std::mutex auxengine_mutex_;
     std::mutex auxengine_listen_mutex_;
     std::mutex auxengine_stopped_mutex_;
-    std::mutex my_pv_cache_mutex_;    
+    std::mutex my_pv_cache_mutex_;
+    std::mutex best_move_candidates_mutex;
 
   };
 

@@ -308,6 +308,23 @@ bool SmartPruningStopper::ShouldStop(const IterationStats& stats,
 
   if (remaining_playouts < (largest_n - second_largest_n)) {
 
+    // Reject early stop if Leela and the the helper disagrees about
+    // the move, in which case we force Leela to spend nodes on the
+    // recommended move
+
+    if(!stats.agreement_between_Leela_and_helper){
+      // Don't stop search yet.
+      
+      // When should we force Leela to spend some nodes on the helpers recommended move, and when just let her search freely?
+      // For a starter, force Leela to spend nodes if the helper recommended node has few visits, say less than 90% of Leelas favourite.
+      float ratio = stats.helper_recommended_node_visits / (float)stats.Leelas_preferred_child_node_visits;
+      if(ratio < 0.75){
+	LOGFILE << "Rejecting smart pruning since the helper recommended move have only " << ratio << " of the number of visits that Leelas preferred move has. Since that ratio is below 0.75, I will force Leela to visit that node (which has edge number: " << stats.helper_recommended_index << ") until next check.";
+	hints->UpdateIndexOfBestEdge(stats.helper_recommended_index);
+	return false;
+      }
+    }
+
     // Reject early stop if Expected Q and N disagrees.
     if(index_of_largest_n != index_of_highest_q){
       // LOGFILE << "ratio evaluated/budgeted=" << nodes/(nodes + remaining_playouts) << " Rejected smart pruning since child (" << index_of_largest_n << ") is the child with largest n=" << stats.edge_n[index_of_largest_n] << ", but has lower Expected Q=" << expected_q[index_of_largest_n] << "(raw Q=" << stats.q[index_of_largest_n] << ") than child (" << index_of_highest_q << ") which has Expected Q=" << expected_q[index_of_highest_q] << "(raw Q=" << stats.q[index_of_highest_q] << ") and n=" << stats.edge_n[index_of_highest_q] << " beta_prior=" << beta_prior << " beta_prior_base=" << beta_prior_base << " beta_prior_scaler=" << beta_prior_scaler << " nodes=" << nodes << " remaining playouts=" << remaining_playouts; 

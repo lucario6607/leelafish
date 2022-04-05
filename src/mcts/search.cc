@@ -3015,6 +3015,7 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
       foo->starting_depth_of_PVs_.pop();
       int amount_of_support = foo->amount_of_support_for_PVs_.front();
       foo->amount_of_support_for_PVs_.pop();
+      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread: " << this_id << ", In MaybeAdjustPolicyForHelperAddedNodes(), successfully read starting depth and amount of support.";
 
       // Do we want to maximize or minimize Q? At root, and thus at even depth, we want to _minimize_ Q (Q is from the perspective of the player who _made the move_ leading up the current position. Calculate depth at the first added node.
       int depth = 0;

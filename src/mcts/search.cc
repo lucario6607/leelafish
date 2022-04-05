@@ -612,13 +612,10 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
                               StoppersHints* hints) {
   hints->Reset();
 
-  // SharedMutex::Lock lock(search_->nodes_mutex_);
-  // nodes_mutex_.lock_shared();
   Mutex::Lock lock(counters_mutex_);
   // Return early if some other thread already has responded bestmove,
   // or if the root node is not yet expanded.
   if (bestmove_is_sent_ || total_playouts_ + initial_visits_ == 0) {
-    // nodes_mutex_.unlock_shared();
     return;
   }
 
@@ -646,7 +643,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     search_stats_->auxengine_stopped_mutex_.lock();
     // Check the status for each thread, and act accordingly
     // give the helper engines some slack, perhaps they were started just a millisecond ago.
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    // std::this_thread::sleep_for(std::chrono::milliseconds(10));
     for(long unsigned int i = 0; i < search_stats_->auxengine_stopped_.size() ; i++){
       if(!search_stats_->auxengine_stopped_[i]){
 	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "MaybeTriggerStop() Stopping the A/B helper Start for thread=" << i << " Start.";
@@ -687,7 +684,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 		} else {
 		  if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Trying to save a win, helper eval of root: " << search_stats_->helper_eval_of_root << " helper recommended move " << search_stats_->winning_move_.as_string() << "  (from whites perspective) Number of nodes in support for the root node eval: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_root << " helper eval of leelas preferred move: " << search_stats_->helper_eval_of_leelas_preferred_child_of_root << " Leela prefers the move: " << search_stats_->Leelas_preferred_child_node_->GetOwnEdge()->GetMove().as_string() << " nodes in support for the eval of leelas preferred move: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child_of_root;
 		}
-	      search_stats_->stop_a_blunder_ = true;
+		search_stats_->stop_a_blunder_ = true;
 	      }
 	    }
 	  }
@@ -718,7 +715,12 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     bestmove_is_sent_ = true;
     current_best_edge_ = EdgeAndNode();
     this_edge_has_higher_expected_q_than_the_most_visited_child = -1;
-
+    // if we set stop_a_blunder, then that has had its effect by now, reset it so it won't affect next move
+    search_stats_->best_move_candidates_mutex.lock();
+    if(search_stats_->stop_a_blunder_){
+      if(params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Resetting search_stats_->stop_a_blunder_ to false";
+      search_stats_->stop_a_blunder_ = false;
+    }
   }
   
   // Use a 0 visit cancel score update to clear out any cached best edge, as
@@ -844,13 +846,14 @@ std::vector<EdgeAndNode> Search::GetBestChildrenNoTemperature(Node* parent,
                           ? edges.begin() + count
                           : edges.end();
 
-  search_stats_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // read only would suffice
+  search_stats_->best_move_candidates_mutex.lock();
   bool winning_ = search_stats_->winning_ || search_stats_->stop_a_blunder_;
   Move winning_move_;
   if (winning_){
     winning_move_ = search_stats_->winning_move_;
+    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "The move: winning_move_ will override Q and N based comparisons, since the helper claims it is winning.";
   }
-  search_stats_->fast_track_extend_and_evaluate_queue_mutex_.unlock();
+  search_stats_->best_move_candidates_mutex.unlock();
   
   std::partial_sort(
       edges.begin(), middle, edges.end(),

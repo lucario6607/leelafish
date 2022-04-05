@@ -978,7 +978,7 @@ void Search::DoAuxEngine(Node* n, int index){
 	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine(), thread=" << index << " Stopping the A/B helper Stop";
 	  search_stats_->auxengine_stopped_[index] = true;
 	} else {
-	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "MaybeTriggerStop() must have already sent stop to the engine for instance." << index;
+	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "MaybeTriggerStop() must have already sent stop to the engine for instance: " << index;
 	}
 	search_stats_->auxengine_stopped_mutex_.unlock();
       } else {

@@ -693,7 +693,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	  }
 	} else {
 	  // They agree.
-	  if(params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Leela agree with the helper about the best move: " << search_stats_->Leelas_preferred_child_node_->GetOwnEdge()->GetMove(played_history_.IsBlackToMove()).as_string();
+	  if(params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Leela agree with the helper about the best move: " << search_stats_->Leelas_preferred_child_node_->GetOwnEdge()->GetMove(played_history_.IsBlackToMove()).as_string() << ". The root explorer evaluates root to: " << search_stats_->helper_eval_of_root << " based on " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_root << " nodes.";
 	}
       }
     }
@@ -3023,7 +3023,7 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
       foo->starting_depth_of_PVs_.pop();
       int amount_of_support = foo->amount_of_support_for_PVs_.front();
       foo->amount_of_support_for_PVs_.pop();
-      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread: " << this_id << ", In MaybeAdjustPolicyForHelperAddedNodes(), successfully read starting depth and amount of support.";
+      // if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread: " << this_id << ", In MaybeAdjustPolicyForHelperAddedNodes(), successfully read starting depth and amount of support.";
 
       // Do we want to maximize or minimize Q? At root, and thus at even depth, we want to _minimize_ Q (Q is from the perspective of the player who _made the move_ leading up the current position. Calculate depth at the first added node.
       int depth = 0;
@@ -3033,7 +3033,7 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	search_->nodes_mutex_.unlock_shared();	
 	continue;
       }
-      LOGFILE << "Starting to calculate depth for this node: " << vector_of_nodes_from_helper_added_by_this_thread[0]->DebugString();
+      // LOGFILE << "Starting to calculate depth for this node: " << vector_of_nodes_from_helper_added_by_this_thread[0]->DebugString();
       for (Node* n2 = vector_of_nodes_from_helper_added_by_this_thread[0]; n2 != search_->root_node_ && depth < 100; n2 = n2->GetParent()) {
 	depth++;
 	if(n2->GetParent() == nullptr) {

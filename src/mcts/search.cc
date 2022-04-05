@@ -3022,8 +3022,12 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
       search_->nodes_mutex_.lock_shared();
       for (Node* n2 = vector_of_nodes_from_helper_added_by_this_thread[0]; n2 != search_->root_node_; n2 = n2->GetParent()) {
 	depth++;
+	if(n2->GetParent() == nullptr) {
+	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread: " << this_id << ", In MaybeAdjustPolicyForHelperAddedNodes(), Problem in depth calculation.";
+	  break;
+	}
       }
-      search_->nodes_mutex_.unlock_shared();      
+      search_->nodes_mutex_.unlock_shared();
       if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "How good is this line I just added based on recommendations from the helper?";
       if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Q of parent to the first added node in the line: " << vector_of_nodes_from_helper_added_by_this_thread[0]->GetParent()->GetQ(0.0f) << " depth: " << depth - 1;
       for(long unsigned int j = 0; j < vector_of_nodes_from_helper_added_by_this_thread.size(); j++){

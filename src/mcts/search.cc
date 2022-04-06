@@ -321,10 +321,10 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
 	  params_.GetAuxEngineFile() != "" && // helper is activated
 	  search_stats_->Leelas_PV.size() > 0 && // There is already a PV	  
 	  ! iter.node()->IsTerminal()){ // child is not terminal
-	LOGFILE << "Comparing " << iter.GetMove().as_string() << " with " << search_stats_->Leelas_PV[depth].as_string();
 	if(iter.GetMove().as_string() != search_stats_->Leelas_PV[depth].as_string()){
 	  // Need to stop helper thread 1
 	  need_to_restart_thread_one = true;
+	  if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Found a relevant change in Leelas PV at depth " << depth << " Current move: " << iter.GetMove().as_string() << " is different from old move: " << search_stats_->Leelas_PV[depth].as_string() << " will restart thread 1.";
 	}
       }
       search_stats_->best_move_candidates_mutex.unlock();      
@@ -338,9 +338,9 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
     search_stats_->auxengine_stopped_mutex_.lock();
     int i = 1;
     if(!search_stats_->auxengine_stopped_[i]){
-      if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "SendUciInfo() Stopping the A/B helper Start for thread=" << i << " Start.";
+      // if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "SendUciInfo() Stopping the A/B helper Start for thread=" << i << " Start.";
       *search_stats_->vector_of_opstreams[i] << "stop" << std::endl; // stop the A/B helper
-      if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "SendUciInfo() Stopping the A/B helper for thread=" << i << " Stop.";
+      // if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "SendUciInfo() Stopping the A/B helper for thread=" << i << " Stop.";
       search_stats_->auxengine_stopped_[i] = true;
     }
     search_stats_->auxengine_stopped_mutex_.unlock();

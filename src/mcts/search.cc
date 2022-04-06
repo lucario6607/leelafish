@@ -258,6 +258,8 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
   const auto default_q = -root_node_->GetQ(-draw_score);
   const auto default_wl = -root_node_->GetWL();
   const auto default_d = root_node_->GetD();
+  bool need_to_restart_thread_one = false;
+
   for (const auto& edge : edges) {
     ++multipv;
     uci_infos.emplace_back(common_info);
@@ -310,65 +312,38 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
          iter = GetBestChildNoTemperature(iter.node(), depth), flip = !flip) {
       uci_info.pv.push_back(iter.GetMove(flip));
       if (!iter.node()) break;  // Last edge was dangling, cannot continue.
-      depth += 1;
 
-      // If search is not stopped, make sure a helper thread can explore Leelas prefered child of root.
+      // If search is not stopped, make sure helper thread one can explore the node where Leela and the helper diverges.
+      search_stats_->best_move_candidates_mutex.lock();
       if (!stop_.load(std::memory_order_acquire) && // search is not stopped
 	  multipv == 1 && // prefered PV
-	  depth == 1 && // first node in the PV
+	  depth <= search_stats_->PVs_diverge_at_depth && // not too deep
 	  params_.GetAuxEngineFile() != "" && // helper is activated
-	  ! iter.node()->IsTerminal() && // child is not terminal
-	  iter.node() != search_stats_->Leelas_preferred_child_node_){ // Not set already
-	search_stats_->Leelas_preferred_child_node_ = iter.node();
-	LOGFILE << "Updated search_stats_->Leelas_preferred_child_node_ to be the node reached via the move " << iter.GetMove(flip).as_string();
-	// stop helper instance 2 (index 1) if it is running. When restarted it will pick up the new favoured move.
-	search_stats_->auxengine_stopped_mutex_.lock();
-	int i = 1;
-	if(!search_stats_->auxengine_stopped_[i]){
-	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "SendUciInfo() Stopping the A/B helper Start for thread=" << i << " Start.";
-	  *search_stats_->vector_of_opstreams[i] << "stop" << std::endl; // stop the A/B helper
-	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "SendUciInfo() Stopping the A/B helper for thread=" << i << " Stop.";
-	  search_stats_->auxengine_stopped_[i] = true;
+	  search_stats_->Leelas_PV.size() > 0 && // There is already a PV	  
+	  ! iter.node()->IsTerminal()){ // child is not terminal
+	LOGFILE << "Comparing " << iter.GetMove().as_string() << " with " << search_stats_->Leelas_PV[depth].as_string();
+	if(iter.GetMove().as_string() != search_stats_->Leelas_PV[depth].as_string()){
+	  // Need to stop helper thread 1
+	  need_to_restart_thread_one = true;
 	}
-	search_stats_->auxengine_stopped_mutex_.unlock();
       }
+      search_stats_->best_move_candidates_mutex.unlock();      
 
-      // I thought this would be bad because it violates the principle
-      // that relevance is simply indicated by number of visits, but
-      // it turned out (SSS testing), that this is actually useful.
-
-      // the auxillary helper about the nodes in the PV possibly
-      // condition on the number of visits. possibly only consider the
-      // PV and the second best. possibly condition on depth.
-
-      // if(
-      // 	 multipv == 1 && // only use the best move from root.
-      // 	 params_.GetAuxEngineFile() != "" &&
-      // 	 iter.node()->GetAuxEngineMove() == 0xffff &&
-      // 	 ! iter.node()->IsTerminal()
-      // 	 &&
-      // 	   (depth <= 22 // prioritize 'lower' depth nodes.
-      // 	    ||
-      // 	    5 * iter.node()->GetN() >= (uint32_t) search_stats_->AuxEngineThreshold // don't disturb too much. Times 5 is the first PV bonus.
-      // 	   )
-      // 	){
-
-      // 	auxengine_stopped_mutex_.lock();
-      // 	if(! auxengine_stopped_){
-      // 	  iter.node()->SetAuxEngineMove(0xfffe); // magic for pending
-      // 	  search_stats_->auxengine_mutex_.lock();
-      // 	  search_stats_->persistent_queue_of_nodes.push(iter.node());
-      // 	  search_stats_->source_of_queued_nodes.push(2);
-      // 	  auxengine_cv_.notify_one();
-      // 	  search_stats_->auxengine_mutex_.unlock();
-	
-      // 	  number_of_times_called_AuxMaybeEnqueueNode_ += 1;
-      // 	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << " Adding this node from the PV (rank: " << multipv << ") at depth " << depth << " and visits: " << iter.node()->GetN() << " to the helper queue" << iter.node()->DebugString();
-      // 	}
-      // 	auxengine_stopped_mutex_.unlock();
-      // }
-      
+      depth += 1;
     }
+  }
+
+  if(need_to_restart_thread_one){
+    // stop helper instance 2 (index 1) if it is running. When restarted it will pick up the new favoured move.
+    search_stats_->auxengine_stopped_mutex_.lock();
+    int i = 1;
+    if(!search_stats_->auxengine_stopped_[i]){
+      if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "SendUciInfo() Stopping the A/B helper Start for thread=" << i << " Start.";
+      *search_stats_->vector_of_opstreams[i] << "stop" << std::endl; // stop the A/B helper
+      if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "SendUciInfo() Stopping the A/B helper for thread=" << i << " Stop.";
+      search_stats_->auxengine_stopped_[i] = true;
+    }
+    search_stats_->auxengine_stopped_mutex_.unlock();
   }
 
   if (!uci_infos.empty()) last_outputted_uci_info_ = uci_infos.front();

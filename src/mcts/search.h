@@ -73,6 +73,9 @@ class Search {
     bool winning_threads_adjusted = false;
     int non_winning_root_threads_; // only parse once, store the result in this variable so that we can reset without parsing again.
     Move winning_move_;
+    std::vector<Move> helper_PV; // Full PV from the helper, used to find where Leela and helper diverge.
+    std::vector<Move> Leelas_PV; // Full PV from PV.
+    int PVs_diverge_at_depth;
     float helper_eval_of_root;
     float helper_eval_of_leelas_preferred_child_of_root;
     int number_of_nodes_in_support_for_helper_eval_of_root;

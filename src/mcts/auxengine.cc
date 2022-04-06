@@ -706,7 +706,20 @@ void Search::AuxEngineWorker() {
     // Prepare autopilot and blunder vetoing START
     // before search_stats_->winning_threads_adjusted is set, accept changes in all directions.
     // after search_stats_->winning_threads_adjusted is set, just inform, don't change the state of search_stats_->winning_
-    search_stats_->best_move_candidates_mutex.lock();    
+    search_stats_->best_move_candidates_mutex.lock();
+    if(depth == 0){
+      // Make it easy for thread 1 to find the divergence
+      search_stats_->helper_PV = my_moves_from_the_white_side;
+      search_stats_->auxengine_stopped_mutex_.lock();
+      if(!search_stats_->auxengine_stopped_[1]){
+	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "SendUciInfo() Stopping the A/B helper Start for thread=" << 1 << " Start.";
+	*search_stats_->vector_of_opstreams[1] << "stop" << std::endl; // stop the A/B helper
+	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "SendUciInfo() Stopping the A/B helper for thread=" << 1 << " Stop.";
+	search_stats_->auxengine_stopped_[1] = true;
+      }
+      search_stats_->auxengine_stopped_mutex_.unlock();
+    }
+
     if (winning && !search_stats_->winning_){
       if(!search_stats_->winning_threads_adjusted){
 	search_stats_->winning_ = true;
@@ -758,25 +771,64 @@ void Search::DoAuxEngine(Node* n, int index){
   // }
 
   // If we are thread 1:
+  // If there is a helper PV
   // 1. then put the node back into the queue,
-  // 2. grab Leelas preferred child of root.
-  // 3. explore that node infinitely
-  // 4. someone else will stop the helper if Leela changes her mind.
+  // 2. find the divergence between Leela and helper. Record the depth of this divergence so that others can tell if a change in either PV requires me to change node to explore. If the change is deeper, no need to interrupt.
+  // 3. explore the node Leela prefers at the divergence infinitely
+  // 4. someone else will stop the helper if Leela or helper change their mind.
   // 5. make sure the eval is reported so it can be used to veto leelas move.
 
-  // step 0 make sure that leela has a preferred move
-  if(index == 1 && search_stats_->Leelas_preferred_child_node_ != nullptr){
+  // step 0 make sure that helper has a preferred move
+  if(index == 1){
+    using namespace std::chrono_literals;
+    std::this_thread::sleep_for(300ms); // Let Leela settle on a PV.
+    // TODO write code in MaybeTriggerStop that checks if Leelas PV has changed.
 
-    // step 1
-    if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Thread 1 in DoAuxEngine() about to try to aquire a lock on auxengine_";
-    search_stats_->auxengine_mutex_.unlock();  
-    search_stats_->persistent_queue_of_nodes.push(n);
-    auxengine_cv_.notify_one();
-    search_stats_->auxengine_mutex_.unlock();
+    search_stats_->best_move_candidates_mutex.lock();
+    std::vector<Move> helper_PV_local = search_stats_->helper_PV;
+    search_stats_->best_move_candidates_mutex.unlock();
+    if(helper_PV_local.size() > 0){
 
-    // step 2
-    n = search_stats_->Leelas_preferred_child_node_;
-    
+      // step 1
+      if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Thread 1 in DoAuxEngine() about to try to aquire a lock on auxengine_";
+      search_stats_->auxengine_mutex_.unlock();  
+      search_stats_->persistent_queue_of_nodes.push(n);
+      auxengine_cv_.notify_one();
+      search_stats_->auxengine_mutex_.unlock();
+
+      // step 2, find the divergence.
+      if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Thread 1 in DoAuxEngine() about to find the divergence.";
+      // First node which does not have an edge that can be found in helper_PV_local is the node to explore
+      bool divergence_found = false;
+      std::vector<Move> Leelas_PV;
+      int depth = 0;
+      Node * divergent_node = root_node_;
+
+      nodes_mutex_.lock_shared();
+      for(long unsigned int i = 0; i < helper_PV_local.size(); i++){
+	Leelas_PV.push_back(GetBestChildNoTemperature(divergent_node, 0).edge()->GetMove());
+	LOGFILE << "move " << i << " recommended by leela: " << Leelas_PV[i].as_string();
+	LOGFILE << "move " << i << " recommended by helper: " << helper_PV_local[i].as_string();
+	divergent_node = GetBestChildNoTemperature(divergent_node, 0).node();	
+	if(Leelas_PV[i].as_string() != helper_PV_local[depth].as_string()){
+	  LOGFILE << "Found the divergence between helper and Leela at depth: " << i << " node: " << divergent_node->DebugString() << " Leela prefers: " << divergent_node->GetOwnEdge()->GetMove().as_string() << " The helper prefers: " << helper_PV_local[i].as_string();
+	  divergence_found = true;
+	  depth = i;
+	  break;
+	}
+      }
+      nodes_mutex_.unlock_shared();
+      
+      if(divergence_found){
+	n = divergent_node;
+	search_stats_->best_move_candidates_mutex.lock();
+	search_stats_->Leelas_PV = Leelas_PV;
+	search_stats_->PVs_diverge_at_depth = depth;
+	search_stats_->best_move_candidates_mutex.unlock();
+      } else {
+	return;
+      }
+    }
   }
   
   // Calculate depth.

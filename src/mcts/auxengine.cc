@@ -137,9 +137,9 @@ void Search::AuxEngineWorker() {
     search_stats_->auxengine_stopped_mutex_.unlock();
 
     std::string bar;
-    // If AuxEngineOptionsOnRoot is set, Thread zero (and one if it exists) uses a different parameter and it continuosly explores root node only.
-    // If not set, thread zero becomes just another in-tree helper instance.
-    if(our_index < 2 &&
+    // If AuxEngineOptionsOnRoot is set, Thread zero (and one and two if they exists) uses a different parameter and it continuosly explores the root node and the nodes where Leela and the helper disagree.
+    // If AuxEngineOptionsOnRoot is not set, thread zero (and one and thread two) becomes just another in-tree helper instance.
+    if(our_index < 3 &&
        !params_.GetAuxEngineOptionsOnRoot().empty()
        ){
       bar = params_.GetAuxEngineOptionsOnRoot();
@@ -695,7 +695,7 @@ void Search::AuxEngineWorker() {
       for(int i = 0; i < (int) my_moves_from_the_white_side.size(); i++){
 	debug_string_root = debug_string_root + my_moves_from_the_white_side[i].as_string() + " ";
       }
-      if(params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "PV from the root explorer: " << debug_string_root;
+      if(params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "PV from the root explorer, score (cp) "  << eval << " " << debug_string_root;
     }
 
     if(stop_.load(std::memory_order_acquire) && depth == 0){
@@ -729,11 +729,13 @@ void Search::AuxEngineWorker() {
       // restart, if needed.
       if(need_to_restart_thread_one){
 	search_stats_->auxengine_stopped_mutex_.lock();
-	if(!search_stats_->auxengine_stopped_[1]){
-	  if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Helpers mainline updated, stopping the A/B helper for thread=" << 1 << " Start.";
-	  *search_stats_->vector_of_opstreams[1] << "stop" << std::endl; // stop the A/B helper
-	  if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Helpers mainline updated, stopping the A/B helper for thread=" << 1 << " Stop.";
-	  search_stats_->auxengine_stopped_[1] = true;
+	for(int i = 1; i < 3; i++){
+	  if(!search_stats_->auxengine_stopped_[i]){
+	    if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Helpers mainline updated, stopping the A/B helper for thread=" << i << " Start.";
+	    *search_stats_->vector_of_opstreams[i] << "stop" << std::endl; // stop the A/B helper
+	    if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Helpers mainline updated, stopping the A/B helper for thread=" << i << " Stop.";
+	    search_stats_->auxengine_stopped_[i] = true;
+	  }
 	}
 	search_stats_->auxengine_stopped_mutex_.unlock();
       }
@@ -789,7 +791,7 @@ void Search::DoAuxEngine(Node* n, int index){
   //   return;
   // }
 
-  // If we are thread 1:
+  // If we are thread 1 or 2:
   // If there is a helper PV
   // 1. then put the node back into the queue,
   // 2. find the divergence between Leela and helper. Record the depth of this divergence so that others can tell if a change in either PV requires me to change node to explore. If the change is deeper, no need to interrupt.
@@ -798,7 +800,7 @@ void Search::DoAuxEngine(Node* n, int index){
   // 5. make sure the eval is reported so it can be used to veto leelas move.
 
   // step 0 make sure that helper has a preferred move
-  if(index == 1){
+  if(index == 1 || index == 2){
     using namespace std::chrono_literals;
     std::this_thread::sleep_for(300ms); // Let Leela settle on a PV.
     // TODO write code in MaybeTriggerStop that checks if Leelas PV has changed.
@@ -826,12 +828,26 @@ void Search::DoAuxEngine(Node* n, int index){
       nodes_mutex_.lock_shared();
       for(long unsigned int i = 0; i < helper_PV_local.size(); i++){
 	Leelas_PV.push_back(GetBestChildNoTemperature(divergent_node, 0).edge()->GetMove());
-	LOGFILE << "move " << i << " recommended by leela: " << Leelas_PV[i].as_string();
-	LOGFILE << "move " << i << " recommended by helper: " << helper_PV_local[i].as_string();
+	if(index == 1){
+	  LOGFILE << "move " << i << " recommended by leela: " << Leelas_PV[i].as_string();
+	  LOGFILE << "move " << i << " recommended by helper: " << helper_PV_local[i].as_string();
+	}
 	divergent_node = GetBestChildNoTemperature(divergent_node, 0).node();
 	if(Leelas_PV[i].as_string() != helper_PV_local[i].as_string()){
-	  LOGFILE << "Found the divergence between helper and Leela at depth: " << i << " node: " << divergent_node->DebugString() << " Leela prefers: " << divergent_node->GetOwnEdge()->GetMove().as_string() << " The helper prefers: " << helper_PV_local[i].as_string() << " Leelas favourite will be explored, but consider devoting another thread to the helpers favourite too.";
-	  divergence_found = true;
+	  if(index == 1){
+	    LOGFILE << "Found the divergence between helper and Leela at depth: " << i << " node: " << divergent_node->DebugString() << " Thread 2 working with the line Leela prefers: " << divergent_node->GetOwnEdge()->GetMove().as_string();
+	    divergence_found = true;
+	  } else {
+	    // We are thread 2, find the node corresponding the helper recommended move
+	    for (auto& edge_and_node : divergent_node->GetParent()->Edges()){
+	      if(edge_and_node.GetMove().as_string() == helper_PV_local[i].as_string()){
+		divergent_node = edge_and_node.node();
+		LOGFILE << "Thread 2 found special work with node: " << divergent_node->DebugString() << " which corresponds to the helper recommendation: " << helper_PV_local[i].as_string();
+		divergence_found = true;
+		break;
+	      }
+	    }
+	  }
 	  depth = i;
 	  break;
 	}
@@ -840,12 +856,16 @@ void Search::DoAuxEngine(Node* n, int index){
       
       if(divergence_found){
 	n = divergent_node;
-	search_stats_->best_move_candidates_mutex.lock();
-	search_stats_->Leelas_PV = Leelas_PV;
-	search_stats_->PVs_diverge_at_depth = depth;
-	search_stats_->best_move_candidates_mutex.unlock();
+	if(index == 1){	
+	  search_stats_->best_move_candidates_mutex.lock();
+	  search_stats_->Leelas_PV = Leelas_PV;
+	  search_stats_->PVs_diverge_at_depth = depth;
+	  search_stats_->best_move_candidates_mutex.unlock();
+	}
       } else {
-	return;
+	// They agree completely, just fill the cache with useful nodes by exploring root until they disagree again.
+	LOGFILE << "Leela and helper is in perfect agreement. Thread 1 and 2 will explore root to have a up to date cache when Leela and Helper disagrees next time.";
+	n = root_node_;
       }
     }
   }
@@ -870,8 +890,8 @@ void Search::DoAuxEngine(Node* n, int index){
 
   int AuxEngineTime;
 
-  // if we are thread 0 or thread 1, we don't have to bother with testing for depth
-  if(index > 1){
+  // if we are thread 0 or thread 1 or thread 2, we don't have to bother with testing for depth
+  if(index > 2){
     search_stats_->auxengine_mutex_.lock();
     // Never add nodes to the queue after search has stopped or final purge is run
     if(stop_.load(std::memory_order_acquire) ||
@@ -977,14 +997,14 @@ void Search::DoAuxEngine(Node* n, int index){
      (index == 0 &&
      (!params_.GetAuxEngineOptionsOnRoot().empty() || search_stats_->winning_)
      ) ||
-     (index == 1) // thread 1 only comes this far if it found suitable work for infinite exploration
+     (index > 0 && index < 3) // thread 1 or 2, they only comes this far if it found suitable work for infinite exploration
      ){
     infinite_exploration = true;
     if(index == 0){
       if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Starting infinite query from root node for thread 0 using the opstream at: " << &search_stats_->vector_of_opstreams[index];
     }
-    if(index == 1){
-      if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Starting infinite query from Leelas preferred line where the Leela and the helper diverges. Thread 1 using the opstream at: " << &search_stats_->vector_of_opstreams[index];      
+    if(index == 1 || index == 2){
+      if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Starting infinite query from Leelas preferred line where the Leela and the helper diverges. Thread " << index << " using the opstream at: " << &search_stats_->vector_of_opstreams[index];      
     }
     *search_stats_->vector_of_opstreams[index] << "go infinite " << std::endl;
   } else {

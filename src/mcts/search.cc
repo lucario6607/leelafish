@@ -308,6 +308,7 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
     if (per_pv_counters) uci_info.nodes = edge.GetN();
     bool flip = played_history_.IsBlackToMove();
     int depth = 0;
+    bool notified_already = false;
     for (auto iter = edge; iter;
          iter = GetBestChildNoTemperature(iter.node(), depth), flip = !flip) {
       uci_info.pv.push_back(iter.GetMove(flip));
@@ -323,8 +324,11 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
 	  ! iter.node()->IsTerminal()){ // child is not terminal
 	if(iter.GetMove().as_string() != search_stats_->Leelas_PV[depth].as_string()){
 	  // Need to stop helper thread 1
-	  need_to_restart_thread_one = true;
-	  if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Found a relevant change in Leelas PV at depth " << depth << " Current move: " << iter.GetMove().as_string() << " is different from old move: " << search_stats_->Leelas_PV[depth].as_string() << " will restart thread 1.";
+	  if(!notified_already){
+	    need_to_restart_thread_one = true;
+	    if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Found a relevant change in Leelas PV at depth " << depth << " Current move: " << iter.GetMove().as_string() << " is different from old move: " << search_stats_->Leelas_PV[depth].as_string() << " will restart thread 1 and 2.";
+	    notified_already = true;
+	  }
 	}
       }
       search_stats_->best_move_candidates_mutex.unlock();      
@@ -336,12 +340,13 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
   if(need_to_restart_thread_one){
     // stop helper instance 2 (index 1) if it is running. When restarted it will pick up the new favoured move.
     search_stats_->auxengine_stopped_mutex_.lock();
-    int i = 1;
-    if(!search_stats_->auxengine_stopped_[i]){
-      // if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "SendUciInfo() Stopping the A/B helper Start for thread=" << i << " Start.";
-      *search_stats_->vector_of_opstreams[i] << "stop" << std::endl; // stop the A/B helper
-      // if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "SendUciInfo() Stopping the A/B helper for thread=" << i << " Stop.";
-      search_stats_->auxengine_stopped_[i] = true;
+    for(int i = 1; i < 3; i++){
+      if(!search_stats_->auxengine_stopped_[i]){
+	// if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "SendUciInfo() Stopping the A/B helper Start for thread=" << i << " Start.";
+	*search_stats_->vector_of_opstreams[i] << "stop" << std::endl; // stop the A/B helper
+	if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "SendUciInfo() Stopping the A/B helper for thread=" << i << " Stop.";
+	search_stats_->auxengine_stopped_[i] = true;
+      }
     }
     search_stats_->auxengine_stopped_mutex_.unlock();
   }
@@ -1340,7 +1345,7 @@ void SearchWorker::ExecuteOneIteration() {
   GatherMinibatch2();
   task_count_.store(-1, std::memory_order_release);
   search_->backend_waiting_counter_.fetch_add(1, std::memory_order_relaxed);
-  if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "GatherMinibatch2() finished in ExecuteOneIteration().";
+  // if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "GatherMinibatch2() finished in ExecuteOneIteration().";
   
   // 2b. Collect collisions.
   CollectCollisions();
@@ -1452,6 +1457,7 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
       	      Node * n = Leelas_favourite.node();
       	      // Check that it's not terminal
       	      if(!n->IsTerminal()){
+		// TODO: why is it needed to unlock here, I'd expected that the lock was necessary.		
       		search_->nodes_mutex_.unlock_shared();
       		AuxMaybeEnqueueNode(n);
       		search_->nodes_mutex_.lock_shared();
@@ -3080,13 +3086,25 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	  // Change, compare current node only with its parent
 	  signed int factor_for_us = ((depth + j) % 2 == 1) ? 1 : -1;
 	  signed int factor_for_parent = factor_for_us * -1;
+	  // signed int factor_for_root = -1;
 
-	  search_->nodes_mutex_.lock_shared();	  
+	  search_->nodes_mutex_.lock_shared();
+	  // float root_q = factor_for_root * search_->root_node_->GetQ(0.0f); 
+	  
 	  if(factor_for_us * n->GetQ(0.0f) > factor_for_parent * n->GetParent()->GetQ(0.0f)){
 	    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "(Raw Q=" << n->GetQ(0.0f) << ") " << factor_for_us * n->GetQ(0.0f) << " is greater than " << factor_for_parent * n->GetParent()->GetQ(0.0f) << " which means this is promising. P: " << n->GetOwnEdge()->GetP() << " N: " << n->GetN() << " depth: " << depth + j;	    
 	    // the move is promising
 	    if(strategy == "b") minimum_policy = d;
 	    if(strategy == "e") minimum_policy = std::min(0.90, minimum_policy * 1.2);
+
+	    // If the move is better than root, then enqueue it
+	    // if(factor_for_us * n->GetQ(0.0f) > root_q){
+	    // LOGFILE << "We are better than root. we: " << factor_for_us * n->GetQ(0.0f) << " root: " << root_q << " will enqueue it (unless the node is terminal).";
+	    // Check that it's not terminal and not already queued.
+	    if(!n->IsTerminal() && n->GetAuxEngineMove() == 0xffff){
+	      AuxMaybeEnqueueNode(n);
+	    }
+	    
 	  } else {
 	    // Not promising, but since the helper recommended it, it is probably better than its policy, so give it some policy boosting.
 	    if(strategy == "e") minimum_policy = std::min(0.90, minimum_policy * 0.85);	    
@@ -3173,6 +3191,12 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	    // downgrade lock
 	    search_->nodes_mutex_.unlock();
 	    search_->nodes_mutex_.lock_shared();
+
+	    // Enqueue it, if it has not already been checked
+	    if(!this_node_has_best_q->IsTerminal() && this_node_has_best_q->GetAuxEngineMove() == 0xffff){
+	      AuxMaybeEnqueueNode(this_node_has_best_q);
+	    }
+	    
 	  }
 	} // End of children > 1
 	depth--;

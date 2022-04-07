@@ -1450,7 +1450,7 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
       // Queue Leelas favourite node START
       // If there are children, find leelas preferred move, and if that move hasn't
       // already been queried, enqueue it, unless it is the same move as the helper suggests or depth is too high.
-      int max_depth = 40;
+      int max_depth = 30;
       if(my_node->GetN() > 0 && ply < max_depth){
       	const EdgeAndNode Leelas_favourite = search_->GetBestChildNoTemperature(my_node, ply); // is this safe, or does it change my_node?
       	if(Leelas_favourite.edge() != edge.edge()){
@@ -3104,8 +3104,8 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	    // If the move is better than root, then enqueue it
 	    // if(factor_for_us * n->GetQ(0.0f) > root_q){
 	    // LOGFILE << "We are better than root. we: " << factor_for_us * n->GetQ(0.0f) << " root: " << root_q << " will enqueue it (unless the node is terminal).";
-	    // Check that it's not terminal and not already queued.
-	    if(!n->IsTerminal() && n->GetAuxEngineMove() == 0xffff){
+	    // Check that it's not terminal and not already queued and not too deep.
+	    if(!n->IsTerminal() && n->GetAuxEngineMove() == 0xffff && depth < 30){
 	      AuxMaybeEnqueueNode(n);
 	    }
 	    
@@ -3196,8 +3196,8 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	    search_->nodes_mutex_.unlock();
 	    search_->nodes_mutex_.lock_shared();
 
-	    // Enqueue it, if it has not already been checked
-	    if(!this_node_has_best_q->IsTerminal() && this_node_has_best_q->GetAuxEngineMove() == 0xffff){
+	    // Enqueue it, if it has not already been checked or is too deep.
+	    if(!this_node_has_best_q->IsTerminal() && this_node_has_best_q->GetAuxEngineMove() == 0xffff && depth < 30){
 	      AuxMaybeEnqueueNode(this_node_has_best_q);
 	    }
 	    

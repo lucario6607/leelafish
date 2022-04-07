@@ -689,18 +689,15 @@ void Search::AuxEngineWorker() {
       }
     }
 
-    if(depth == 0){
-      // show the PV from root from the helper
+    if(thread < 3){
+      // show the PV from continous helpers
       std::string debug_string_root;      
       for(int i = 0; i < (int) my_moves_from_the_white_side.size(); i++){
 	debug_string_root = debug_string_root + my_moves_from_the_white_side[i].as_string() + " ";
       }
-      if(params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "PV from the root explorer, score (cp) "  << eval << " " << debug_string_root;
-    }
-
-    if(stop_.load(std::memory_order_acquire) && depth == 0){
-      // final eval from the root-explorer
-      if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Final eval from the root explorer: " << eval << " with the move " << my_moves_from_the_white_side.front().as_string();      
+      if(params_.GetAuxEngineVerbosity() >= 3 && thread == 0) LOGFILE << "Helper PV from root, score (cp) "  << eval << " " << debug_string_root;
+      if(params_.GetAuxEngineVerbosity() >= 3 && thread == 1) LOGFILE << "Helper PV from Leelas favourite node, score (cp) "  << eval << " " << debug_string_root;
+      if(params_.GetAuxEngineVerbosity() >= 3 && thread == 2) LOGFILE << "Helper PV from the favourite node of the helper, score (cp) "  << eval << " " << debug_string_root;            
     }
 
     // Prepare autopilot and blunder vetoing START
@@ -709,7 +706,7 @@ void Search::AuxEngineWorker() {
 
     search_stats_->best_move_candidates_mutex.lock();
     if(depth == 0){
-      // Only stop thread 1 if the change was relevant to the divergence.
+      // Only stop thread 1 and 2 if the change was relevant to the divergence.
       std::vector<Move> helper_PV_old = search_stats_->helper_PV;
       bool need_to_restart_thread_one = false;
       // If the new PV is shorter than the depth of the old divergence point, then we know we must restart thread 1
@@ -717,7 +714,7 @@ void Search::AuxEngineWorker() {
 	need_to_restart_thread_one = true;	
       } else {
 	if(helper_PV_old.size() > 0){
-	  for(int i = 0; i < search_stats_->PVs_diverge_at_depth; i++){
+	  for(int i = 0; i <= search_stats_->PVs_diverge_at_depth; i++){
 	    if(helper_PV_old[i].as_string() != my_moves_from_the_white_side[i].as_string()){
 	      need_to_restart_thread_one = true;
 	    }

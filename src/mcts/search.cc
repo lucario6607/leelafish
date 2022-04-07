@@ -178,6 +178,10 @@ Search::Search(const NodeTree& tree, Network* network,
     pending_searchers_.store(params_.GetMaxConcurrentSearchers(),
                              std::memory_order_release);
   }
+  search_stats_->best_move_candidates_mutex.lock();
+  search_stats_->Leelas_PV = {};
+  search_stats_->helper_PV = {};  
+  search_stats_->best_move_candidates_mutex.unlock();
   search_stats_->auxengine_mutex_.lock();
   search_stats_->size_of_queue_at_start = search_stats_->persistent_queue_of_nodes.size();
   search_stats_->final_purge_run = false;

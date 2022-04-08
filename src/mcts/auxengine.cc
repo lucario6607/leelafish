@@ -898,6 +898,7 @@ void Search::DoAuxEngine(Node* n, int index){
       // They agree completely, just fill the cache with useful nodes by exploring root until they disagree again.
       LOGFILE << "Leela and helper is in perfect agreement. Thread 1 and 2 will explore root to have a up to date cache when Leela and Helper disagrees next time.";
       n = root_node_;
+      depth = 0;
     }
   }
 

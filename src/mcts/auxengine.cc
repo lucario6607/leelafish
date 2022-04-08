@@ -624,7 +624,7 @@ void Search::AuxEngineWorker() {
 	}
 	search_stats_->best_move_candidates_mutex.unlock();	
       }
-      if(depth == 0 && eval > 250) {
+      if(thread == 0 && depth == 0 && eval > 250) {
 	winning = true;
       }
     }
@@ -709,8 +709,8 @@ void Search::AuxEngineWorker() {
 	debug_string_root = debug_string_root + my_moves_from_the_white_side[i].as_string() + " ";
       }
       if(params_.GetAuxEngineVerbosity() >= 3 && thread == 0) LOGFILE << "Helper PV from root, score (cp) "  << eval << " " << debug_string_root;
-      if(params_.GetAuxEngineVerbosity() >= 3 && thread == 1) LOGFILE << "Helper PV from Leelas favourite node, score (cp) "  << search_stats_->helper_eval_of_leelas_preferred_child << " " << debug_string_root;
-      if(params_.GetAuxEngineVerbosity() >= 3 && thread == 2) LOGFILE << "Helper PV from the favourite node of the helper, score (cp) "  << search_stats_->helper_eval_of_helpers_preferred_child << " " << debug_string_root;            
+      if(params_.GetAuxEngineVerbosity() >= 3 && thread == 1 && depth < 0) LOGFILE << "Helper PV from Leelas favourite node, score (cp) "  << search_stats_->helper_eval_of_leelas_preferred_child << " " << debug_string_root;
+      if(params_.GetAuxEngineVerbosity() >= 3 && thread == 2 && depth < 0) LOGFILE << "Helper PV from the favourite node of the helper, score (cp) "  << search_stats_->helper_eval_of_helpers_preferred_child << " " << debug_string_root;            
     }
 
     // Prepare autopilot and blunder vetoing START
@@ -718,7 +718,7 @@ void Search::AuxEngineWorker() {
     // after search_stats_->winning_threads_adjusted is set, just inform, don't change the state of search_stats_->winning_
 
     search_stats_->best_move_candidates_mutex.lock();
-    if(depth == 0){
+    if(depth == 0 && thread == 0){
       // Only stop thread 1 and 2 if the change was relevant to the divergence.
       std::vector<Move> helper_PV_old = search_stats_->helper_PV;
       bool need_to_restart_thread_one = false;
@@ -758,18 +758,18 @@ void Search::AuxEngineWorker() {
       search_stats_->winning_move_ = my_moves_from_the_white_side.front();
       if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "The helper engine thinks the root position is winning: cp = " << eval << " with the move " << search_stats_->winning_move_.as_string();
     }
-    if (depth == 0 && !winning && search_stats_->winning_){
+    if (thread == 0 && depth == 0 && !winning && search_stats_->winning_){
       if(!search_stats_->winning_threads_adjusted){
 	search_stats_->winning_ = false;
 	if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "The helper engine thinks the root position is no longer winning: cp = " << eval << " and since the autopilot is not yet on, I will not turn it on.";
       }
     }
     // make sure the currently recommended move from the helper is available if it is needed when vetoing Leelas move. TODO change name from "winning" to "recommended".
-    if(depth == 0){
+    if(thread == 0 && depth == 0){
       search_stats_->number_of_nodes_in_support_for_helper_eval_of_root = nodes_to_support;
       search_stats_->winning_move_ = my_moves_from_the_white_side.front();
     }
-    if(thread == 1){ // assume thread 1 works with leelas preferred child of root.
+    if(thread == 1 && depth > 0){ // assume thread 1 works with leelas preferred child of root.
       search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child = nodes_to_support;
     }
     search_stats_->best_move_candidates_mutex.unlock();    

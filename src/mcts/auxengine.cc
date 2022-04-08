@@ -573,6 +573,7 @@ void Search::AuxEngineWorker() {
   // std::vector<lczero::Move> my_moves_from_the_white_side;  
     
   bool flip = played_history_.IsBlackToMove() ^ (depth % 2 == 0);
+  bool eval_flip = depth % 2 == 0;
 
   // auto bestmove_packed_int = Move(token, !flip).as_packed_int();
   // depth is distance between root and the starting point for the
@@ -608,7 +609,7 @@ void Search::AuxEngineWorker() {
       }
       if(thread == 1){ // assume thread 1 works with leelas preferred child where the PVs of Leela and the helper diverge.
 	search_stats_->best_move_candidates_mutex.lock();
-	if(flip){
+	if(eval_flip){
 	  search_stats_->helper_eval_of_leelas_preferred_child = eval;
 	} else {
 	  search_stats_->helper_eval_of_leelas_preferred_child = -eval;	  
@@ -617,7 +618,7 @@ void Search::AuxEngineWorker() {
       }
       if(thread == 2){ // assume thread 1 works with leelas preferred child where the PVs of Leela and the helper diverge.
 	search_stats_->best_move_candidates_mutex.lock();
-	if(flip){
+	if(eval_flip){
 	  search_stats_->helper_eval_of_helpers_preferred_child = eval;
 	} else {
 	  search_stats_->helper_eval_of_helpers_preferred_child = -eval;	  
@@ -702,15 +703,15 @@ void Search::AuxEngineWorker() {
       }
     }
 
-    if(thread < 3 && nodes_to_support > 500){
+    if(thread < 3 && nodes_to_support > 500000){
       // show the PV from continous helpers
       std::string debug_string_root;      
       for(int i = 0; i < (int) my_moves_from_the_white_side.size(); i++){
 	debug_string_root = debug_string_root + my_moves_from_the_white_side[i].as_string() + " ";
       }
       if(params_.GetAuxEngineVerbosity() >= 3 && thread == 0) LOGFILE << "Helper PV from root, score (cp) "  << eval << " " << debug_string_root;
-      if(params_.GetAuxEngineVerbosity() >= 3 && thread == 1 && depth < 0) LOGFILE << "Helper PV from Leelas favourite node, score (cp) "  << search_stats_->helper_eval_of_leelas_preferred_child << " " << debug_string_root;
-      if(params_.GetAuxEngineVerbosity() >= 3 && thread == 2 && depth < 0) LOGFILE << "Helper PV from the favourite node of the helper, score (cp) "  << search_stats_->helper_eval_of_helpers_preferred_child << " " << debug_string_root;            
+      if(params_.GetAuxEngineVerbosity() >= 3 && thread == 1 && depth > 0) LOGFILE << "Helper PV from Leelas favourite node, score (cp) "  << search_stats_->helper_eval_of_leelas_preferred_child << " " << debug_string_root;
+      if(params_.GetAuxEngineVerbosity() >= 3 && thread == 2 && depth > 0) LOGFILE << "Helper PV from the favourite node of the helper, score (cp) "  << search_stats_->helper_eval_of_helpers_preferred_child << " " << debug_string_root;            
     }
 
     // Prepare autopilot and blunder vetoing START
@@ -847,41 +848,52 @@ void Search::DoAuxEngine(Node* n, int index){
 
     nodes_mutex_.lock_shared();
     for(long unsigned int i = 0; i < helper_PV_local.size(); i++){
-      Leelas_PV.push_back(GetBestChildNoTemperature(divergent_node, 0).edge()->GetMove());
-      auto maybe_a_node = GetBestChildNoTemperature(divergent_node, 0);
-      if(!maybe_a_node.HasNode()){
-	LOGFILE << "No node here yet. Nothing to do";
-	nodes_mutex_.unlock_shared();	
-	std::this_thread::sleep_for(std::chrono::milliseconds(30));
-	return;
-      }
-      divergent_node = maybe_a_node.node(); // What if the best edge is not yet extended?
-      if(Leelas_PV[i].as_string() != helper_PV_local[i].as_string()){
-	if(index == 1){
-	  LOGFILE << "Found the divergence between helper and Leela at depth: " << i << " node: " << divergent_node->DebugString() << " Thread 1 working with the line Leela prefers: " << divergent_node->GetOwnEdge()->GetMove().as_string();
-	  divergence_found = true;
-	} else {
-	  // We are thread 2, find the node corresponding the helper recommended move
-	  for (auto& edge_and_node : divergent_node->GetParent()->Edges()){
-	    if(edge_and_node.GetMove().as_string() == helper_PV_local[i].as_string()){
-	      // Maybe not existing yet?
-	      if(!edge_and_node.HasNode()){
-		LOGFILE << "The helper recommendation does not have a node yet. Nothing to do";
-		nodes_mutex_.unlock_shared();		
-		std::this_thread::sleep_for(std::chrono::milliseconds(30));
-		return;
+      if(divergent_node->GetN() > 0){
+	Leelas_PV.push_back(GetBestChildNoTemperature(divergent_node, 0).edge()->GetMove());
+	auto maybe_a_node = GetBestChildNoTemperature(divergent_node, 0);
+	if(!maybe_a_node.HasNode()){
+	  LOGFILE << "No node here yet. Nothing to do";
+	  nodes_mutex_.unlock_shared();	
+	  std::this_thread::sleep_for(std::chrono::milliseconds(30));
+	  return;
+	}
+	divergent_node = maybe_a_node.node(); // What if the best edge is not yet extended?
+	// if(!divergent_node){
+	//   LOGFILE << "No node here yet 2. Nothing to do";
+	//   nodes_mutex_.unlock_shared();	
+	//   std::this_thread::sleep_for(std::chrono::milliseconds(30));
+	//   return;
+	// }
+	// LOGFILE << "Leela: " << Leelas_PV[i].as_string() << " helper: " << helper_PV_local[i].as_string();
+	if(Leelas_PV[i].as_string() != helper_PV_local[i].as_string()){
+	  if(index == 1){
+	    LOGFILE << "Found the divergence between helper and Leela at depth: " << i << " node: " << divergent_node->DebugString() << " Thread 1 working with the line Leela prefers: " << divergent_node->GetOwnEdge()->GetMove().as_string();
+	    divergence_found = true;
+	  } else {
+	    // We are thread 2, find the node corresponding the helper recommended move
+	    for (auto& edge_and_node : divergent_node->GetParent()->Edges()){
+	      if(edge_and_node.GetMove().as_string() == helper_PV_local[i].as_string()){
+		// Maybe best edge is not extended yet?
+		if(!edge_and_node.HasNode()){
+		  LOGFILE << "The helper recommendation does not have a node yet. Nothing to do";
+		  nodes_mutex_.unlock_shared();		
+		  std::this_thread::sleep_for(std::chrono::milliseconds(30));
+		  return;
+		}
+		divergent_node = edge_and_node.node();
+		LOGFILE << "Thread 2 found special work with node: " << divergent_node->DebugString() << " which corresponds to the helper recommendation: " << helper_PV_local[i].as_string();
+		divergence_found = true;
+		break;
 	      }
-	      divergent_node = edge_and_node.node();
-	      LOGFILE << "Thread 2 found special work with node: " << divergent_node->DebugString() << " which corresponds to the helper recommendation: " << helper_PV_local[i].as_string();
-	      divergence_found = true;
-	      break;
 	    }
 	  }
+	  depth = i;
+	  break;
 	}
-	depth = i;
-	break;
       }
+      // Leela agrees until a leaf
     }
+      
     nodes_mutex_.unlock_shared();
       
     if(divergence_found){

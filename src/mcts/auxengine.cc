@@ -241,7 +241,7 @@ void Search::AuxEngineWorker() {
       bool reconfiguration_needed = search_stats_->winning_threads_adjusted;
       search_stats_->winning_threads_adjusted = false;
       search_stats_->number_of_nodes_in_support_for_helper_eval_of_root = 0;
-      search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child_of_root = 0;
+      search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child = 0;
       search_stats_->best_move_candidates_mutex.unlock();
       if(reconfiguration_needed){
 	// during the previous game, the root exploring helper was reconfigured to use more threads, reconfigure again back to the normal state.
@@ -606,9 +606,22 @@ void Search::AuxEngineWorker() {
 	search_stats_->helper_eval_of_root = eval;
 	search_stats_->best_move_candidates_mutex.unlock();	
       }
-      if(thread == 1){ // assume thread 1 works with leelas preferred child of root.
-	search_stats_->best_move_candidates_mutex.lock();	
-	search_stats_->helper_eval_of_leelas_preferred_child_of_root = -eval;
+      if(thread == 1){ // assume thread 1 works with leelas preferred child where the PVs of Leela and the helper diverge.
+	search_stats_->best_move_candidates_mutex.lock();
+	if(flip){
+	  search_stats_->helper_eval_of_leelas_preferred_child = eval;
+	} else {
+	  search_stats_->helper_eval_of_leelas_preferred_child = -eval;	  
+	}
+	search_stats_->best_move_candidates_mutex.unlock();	
+      }
+      if(thread == 2){ // assume thread 1 works with leelas preferred child where the PVs of Leela and the helper diverge.
+	search_stats_->best_move_candidates_mutex.lock();
+	if(flip){
+	  search_stats_->helper_eval_of_helpers_preferred_child = eval;
+	} else {
+	  search_stats_->helper_eval_of_helpers_preferred_child = -eval;	  
+	}
 	search_stats_->best_move_candidates_mutex.unlock();	
       }
       if(depth == 0 && eval > 250) {
@@ -689,15 +702,15 @@ void Search::AuxEngineWorker() {
       }
     }
 
-    if(thread < 3){
+    if(thread < 3 && nodes_to_support > 500){
       // show the PV from continous helpers
       std::string debug_string_root;      
       for(int i = 0; i < (int) my_moves_from_the_white_side.size(); i++){
 	debug_string_root = debug_string_root + my_moves_from_the_white_side[i].as_string() + " ";
       }
       if(params_.GetAuxEngineVerbosity() >= 3 && thread == 0) LOGFILE << "Helper PV from root, score (cp) "  << eval << " " << debug_string_root;
-      if(params_.GetAuxEngineVerbosity() >= 3 && thread == 1) LOGFILE << "Helper PV from Leelas favourite node, score (cp) "  << eval << " " << debug_string_root;
-      if(params_.GetAuxEngineVerbosity() >= 3 && thread == 2) LOGFILE << "Helper PV from the favourite node of the helper, score (cp) "  << eval << " " << debug_string_root;            
+      if(params_.GetAuxEngineVerbosity() >= 3 && thread == 1) LOGFILE << "Helper PV from Leelas favourite node, score (cp) "  << search_stats_->helper_eval_of_leelas_preferred_child << " " << debug_string_root;
+      if(params_.GetAuxEngineVerbosity() >= 3 && thread == 2) LOGFILE << "Helper PV from the favourite node of the helper, score (cp) "  << search_stats_->helper_eval_of_helpers_preferred_child << " " << debug_string_root;            
     }
 
     // Prepare autopilot and blunder vetoing START
@@ -757,7 +770,7 @@ void Search::AuxEngineWorker() {
       search_stats_->winning_move_ = my_moves_from_the_white_side.front();
     }
     if(thread == 1){ // assume thread 1 works with leelas preferred child of root.
-      search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child_of_root = nodes_to_support;
+      search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child = nodes_to_support;
     }
     search_stats_->best_move_candidates_mutex.unlock();    
     // Prepare autopilot and blunder vetoing STOP
@@ -777,7 +790,9 @@ void Search::AuxEngineWorker() {
     }
     if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread " << thread << ": Added a PV starting at depth " << depth << " with " << nodes_to_support  << " nodes to support it. Queue has size: " << size;
   } else {
-    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Ignoring pv because it not of length " << min_pv_size << " or more. Actual size: " << pv_moves.size();
+    if(pv_moves.size() > 0){
+      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Ignoring pv because it not of length " << min_pv_size << " or more. Actual size: " << pv_moves.size();
+    }
   }
 }
 
@@ -787,6 +802,10 @@ void Search::DoAuxEngine(Node* n, int index){
   //   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine, thread " << index << " caught a stop signal beforing doing anything.";
   //   return;
   // }
+
+  // Calculate depth.
+  int depth = 0;
+  bool divergence_found = false;
 
   // If we are thread 1 or 2:
   // If there is a helper PV
@@ -798,78 +817,92 @@ void Search::DoAuxEngine(Node* n, int index){
 
   // step 0 make sure that helper has a preferred move
   if(index == 1 || index == 2){
-    using namespace std::chrono_literals;
-    std::this_thread::sleep_for(300ms); // Let Leela settle on a PV.
-    // TODO write code in MaybeTriggerStop that checks if Leelas PV has changed.
-
     search_stats_->best_move_candidates_mutex.lock();
+    while(search_stats_->helper_PV.size() == 0){
+      search_stats_->best_move_candidates_mutex.unlock();      
+      LOGFILE << "Thread " << index << " waiting for thread 0 to provide a PV";
+      std::this_thread::sleep_for(std::chrono::milliseconds(30));
+      if(stop_.load(std::memory_order_acquire)) {
+	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine, thread " << index << " caught a stop signal beforing doing anything.";
+	return;
+      }
+      search_stats_->best_move_candidates_mutex.lock();
+    }
+    // Make a copy of it
     std::vector<Move> helper_PV_local = search_stats_->helper_PV;
-    search_stats_->best_move_candidates_mutex.unlock();
-    if(helper_PV_local.size() > 0){
+    search_stats_->best_move_candidates_mutex.unlock();    
 
-      // step 1
-      if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Thread 1 in DoAuxEngine() about to try to aquire a lock on auxengine_";
-      search_stats_->auxengine_mutex_.unlock();  
-      search_stats_->persistent_queue_of_nodes.push(n);
-      auxengine_cv_.notify_one();
-      search_stats_->auxengine_mutex_.unlock();
+    // step 1
+    if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Thread " << index << " in DoAuxEngine() about to try to aquire a lock on auxengine_";
+    search_stats_->auxengine_mutex_.lock();  
+    search_stats_->persistent_queue_of_nodes.push(n);
+    auxengine_cv_.notify_one();
+    search_stats_->auxengine_mutex_.unlock();
 
-      // step 2, find the divergence.
-      if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Thread 1 in DoAuxEngine() about to find the divergence.";
-      // First node which does not have an edge that can be found in helper_PV_local is the node to explore
-      bool divergence_found = false;
-      std::vector<Move> Leelas_PV;
-      int depth = 0;
-      Node * divergent_node = root_node_;
+    // step 2, find the divergence.
+    if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Thread " << index << " in DoAuxEngine() about to find the divergence.";
+    // First node which does not have an edge that can be found in helper_PV_local is the node to explore
+    std::vector<Move> Leelas_PV;
+    Node * divergent_node = root_node_;
 
-      nodes_mutex_.lock_shared();
-      for(long unsigned int i = 0; i < helper_PV_local.size(); i++){
-	Leelas_PV.push_back(GetBestChildNoTemperature(divergent_node, 0).edge()->GetMove());
+    nodes_mutex_.lock_shared();
+    for(long unsigned int i = 0; i < helper_PV_local.size(); i++){
+      Leelas_PV.push_back(GetBestChildNoTemperature(divergent_node, 0).edge()->GetMove());
+      auto maybe_a_node = GetBestChildNoTemperature(divergent_node, 0);
+      if(!maybe_a_node.HasNode()){
+	LOGFILE << "No node here yet. Nothing to do";
+	nodes_mutex_.unlock_shared();	
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+	return;
+      }
+      divergent_node = maybe_a_node.node(); // What if the best edge is not yet extended?
+      if(Leelas_PV[i].as_string() != helper_PV_local[i].as_string()){
 	if(index == 1){
-	  LOGFILE << "move " << i << " recommended by leela: " << Leelas_PV[i].as_string();
-	  LOGFILE << "move " << i << " recommended by helper: " << helper_PV_local[i].as_string();
-	}
-	divergent_node = GetBestChildNoTemperature(divergent_node, 0).node();
-	if(Leelas_PV[i].as_string() != helper_PV_local[i].as_string()){
-	  if(index == 1){
-	    LOGFILE << "Found the divergence between helper and Leela at depth: " << i << " node: " << divergent_node->DebugString() << " Thread 2 working with the line Leela prefers: " << divergent_node->GetOwnEdge()->GetMove().as_string();
-	    divergence_found = true;
-	  } else {
-	    // We are thread 2, find the node corresponding the helper recommended move
-	    for (auto& edge_and_node : divergent_node->GetParent()->Edges()){
-	      if(edge_and_node.GetMove().as_string() == helper_PV_local[i].as_string()){
-		divergent_node = edge_and_node.node();
-		LOGFILE << "Thread 2 found special work with node: " << divergent_node->DebugString() << " which corresponds to the helper recommendation: " << helper_PV_local[i].as_string();
-		divergence_found = true;
-		break;
+	  LOGFILE << "Found the divergence between helper and Leela at depth: " << i << " node: " << divergent_node->DebugString() << " Thread 1 working with the line Leela prefers: " << divergent_node->GetOwnEdge()->GetMove().as_string();
+	  divergence_found = true;
+	} else {
+	  // We are thread 2, find the node corresponding the helper recommended move
+	  for (auto& edge_and_node : divergent_node->GetParent()->Edges()){
+	    if(edge_and_node.GetMove().as_string() == helper_PV_local[i].as_string()){
+	      // Maybe not existing yet?
+	      if(!edge_and_node.HasNode()){
+		LOGFILE << "The helper recommendation does not have a node yet. Nothing to do";
+		nodes_mutex_.unlock_shared();		
+		std::this_thread::sleep_for(std::chrono::milliseconds(30));
+		return;
 	      }
+	      divergent_node = edge_and_node.node();
+	      LOGFILE << "Thread 2 found special work with node: " << divergent_node->DebugString() << " which corresponds to the helper recommendation: " << helper_PV_local[i].as_string();
+	      divergence_found = true;
+	      break;
 	    }
 	  }
-	  depth = i;
-	  break;
 	}
-      }
-      nodes_mutex_.unlock_shared();
-      
-      if(divergence_found){
-	n = divergent_node;
-	if(index == 1){	
-	  search_stats_->best_move_candidates_mutex.lock();
-	  search_stats_->Leelas_PV = Leelas_PV;
-	  search_stats_->PVs_diverge_at_depth = depth;
-	  search_stats_->best_move_candidates_mutex.unlock();
-	}
-      } else {
-	// They agree completely, just fill the cache with useful nodes by exploring root until they disagree again.
-	LOGFILE << "Leela and helper is in perfect agreement. Thread 1 and 2 will explore root to have a up to date cache when Leela and Helper disagrees next time.";
-	n = root_node_;
+	depth = i;
+	break;
       }
     }
+    nodes_mutex_.unlock_shared();
+      
+    if(divergence_found){
+      depth++;
+      n = divergent_node;
+      if(index == 1){	
+	search_stats_->best_move_candidates_mutex.lock();
+	search_stats_->Leelas_PV = Leelas_PV;
+	search_stats_->PVs_diverge_at_depth = depth;
+	search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child = 0;	  
+	search_stats_->best_move_candidates_mutex.unlock();
+      }
+    } else {
+      // They agree completely, just fill the cache with useful nodes by exploring root until they disagree again.
+      LOGFILE << "Leela and helper is in perfect agreement. Thread 1 and 2 will explore root to have a up to date cache when Leela and Helper disagrees next time.";
+      n = root_node_;
+    }
   }
-  
-  // Calculate depth.
-  int depth = 0;
-  if(n != root_node_){
+
+  if(n != root_node_ && !divergence_found){  
+  // if(n != root_node_){
     if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << index << " DoAuxEngine() trying to aquire a lock on nodes_ to calculate depth.";
     nodes_mutex_.lock_shared();  
     if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << index << " DoAuxEngine() aquired a lock on nodes_";

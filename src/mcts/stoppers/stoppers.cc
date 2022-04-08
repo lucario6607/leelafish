@@ -312,19 +312,19 @@ bool SmartPruningStopper::ShouldStop(const IterationStats& stats,
     // the move, in which case we force Leela to spend nodes on the
     // recommended move
 
-    if(!stats.agreement_between_Leela_and_helper){
-      // Don't stop search yet.
+    // if(!stats.agreement_between_Leela_and_helper){
+    //   // Don't stop search yet.
       
-      // When should we force Leela to spend some nodes on the helpers recommended move, and when just let her search freely?
-      // For a starter, force Leela to spend nodes if the helper recommended node has few visits, say less than 90% of Leelas favourite.
-      float ratio = stats.helper_recommended_node_visits / (float)stats.Leelas_preferred_child_node_visits;
-      float min_ratio = 0.5;
-      if(ratio < min_ratio){
-	LOGFILE << "Rejecting smart pruning since the helper recommended move have only " << ratio << " of the number of visits that Leelas preferred move has. Since that ratio is below " << min_ratio << ", I will force Leela to visit that node (which has edge number: " << stats.helper_recommended_index << ") until next check.";
-	hints->UpdateIndexOfBestEdge(stats.helper_recommended_index);
-	return false;
-      }
-    }
+    //   // When should we force Leela to spend some nodes on the helpers recommended move, and when just let her search freely?
+    //   // For a starter, force Leela to spend nodes if the helper recommended node has few visits, say less than 90% of Leelas favourite.
+    //   float ratio = stats.helper_recommended_node_visits / (float)stats.Leelas_preferred_child_node_visits;
+    //   float min_ratio = 0.5;
+    //   if(ratio < min_ratio){
+    // 	LOGFILE << "Rejecting smart pruning since the helper recommended move have only " << ratio << " of the number of visits that Leelas preferred move has. Since that ratio is below " << min_ratio << ", I will force Leela to visit that node (which has edge number: " << stats.helper_recommended_index << ") until next check.";
+    // 	hints->UpdateIndexOfBestEdge(stats.helper_recommended_index);
+    // 	return false;
+    //   }
+    // }
 
     // Reject early stop if Expected Q and N disagrees.
     if(index_of_largest_n != index_of_highest_q){

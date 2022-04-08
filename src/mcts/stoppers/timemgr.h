@@ -54,7 +54,7 @@ struct IterationStats {
   int helper_recommended_index;
   int Leelas_preferred_child_node_visits; 
   float helper_eval_of_root;
-  float helper_eval_of_leelas_preferred_child_of_root;
+  float helper_eval_of_leelas_preferred_child;
   std::vector<uint32_t> edge_n;
   std::vector<float> q;
 

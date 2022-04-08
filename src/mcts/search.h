@@ -77,9 +77,10 @@ class Search {
     std::vector<Move> Leelas_PV; // Full PV from PV.
     int PVs_diverge_at_depth;
     float helper_eval_of_root;
-    float helper_eval_of_leelas_preferred_child_of_root;
-    int number_of_nodes_in_support_for_helper_eval_of_root;
-    int number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child_of_root;
+    float helper_eval_of_leelas_preferred_child;
+    float helper_eval_of_helpers_preferred_child;    
+    int number_of_nodes_in_support_for_helper_eval_of_root = 0;
+    int number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child = 0;
     Node* Leelas_preferred_child_node_; 
 
     std::vector<std::shared_ptr<boost::process::ipstream>> vector_of_ipstreams;

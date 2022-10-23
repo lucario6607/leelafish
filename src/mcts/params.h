@@ -129,6 +129,7 @@ class SearchParams {
   }
   int GetIdlingMinimumWork() const { return kIdlingMinimumWork; }
   int GetThreadIdlingThreshold() const { return kThreadIdlingThreshold; }
+  float GetQuiscenceDeltaThreshold() const { return options_.Get<float>(kQuiscenceDeltaThresholdId); }
   float GetMoveSelectionVisitsScalingPower() const {
     return kMoveSelectionVisitsScalingPower;
   }
@@ -242,6 +243,7 @@ class SearchParams {
   static const OptionId kAuxEngineInstancesId;  
   static const OptionId kAuxEngineTimeId;
   static const OptionId kAuxEngineVerbosityId;
+  static const OptionId kQuiscenceDeltaThresholdId;  
   static const OptionId kMoveSelectionVisitsScalingPowerId;
   static const OptionId kOverridePUCTNodeBudgetThresholdId;
   static const OptionId kQBasedMoveSelectionId;
@@ -300,6 +302,7 @@ private:
   const int kThreadIdlingThreshold;
   const bool kQBasedMoveSelection;
   const float kOverridePUCTNodeBudgetThreshold;
+  const float kQuiscenceDeltaThreshold;
   const float kMoveSelectionVisitsScalingPower;
   const int kMaxCollisionVisitsScalingStart;
   const int kMaxCollisionVisitsScalingEnd;

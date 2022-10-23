@@ -2935,12 +2935,11 @@ void SearchWorker::DoBackupUpdateSingleNode(
     // lower than some threshold, otherwise put the node in the preextend-queue right away.
     // If parent node has two visits, then we must be its child with highest policy
 
-    float quiscence_threshold = 0.5;
     if(n->GetParent()->GetN() == 1){ // should it be 2 here? Or perhaps look for siblings, and succeed if none is found
       float q_of_parent = -n->GetParent()->GetQ(0.0f);
       float q_of_node = n->GetQ(0.0f);
       float delta = std::abs(q_of_node - q_of_parent); // since they have opposite signs, adding works fine here.
-      if(delta > quiscence_threshold){
+      if(delta > params_.GetQuiscenceDeltaThreshold()){
 	LOGFILE << "high delta detected between parent and best child: " << delta << " q_of_parent: " << q_of_parent << " q_of_node: " << q_of_node;
 	// Create a vector with elements of type Move from root to this node and queue that vector, and queue that vector
 	std::vector<lczero::Move> my_moves_from_the_white_side;
@@ -3071,6 +3070,12 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
       foo->starting_depth_of_PVs_.pop();
       int amount_of_support = foo->amount_of_support_for_PVs_.front();
       foo->amount_of_support_for_PVs_.pop();
+
+      // If amount_of_support is zero, then this is a quiscence search, and in that case do no policy adjustment
+      if(amount_of_support == 0){
+	continue;
+      }
+
       // if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread: " << this_id << ", In MaybeAdjustPolicyForHelperAddedNodes(), successfully read starting depth and amount of support.";
 
       // Do we want to maximize or minimize Q? At root, and thus at even depth, we want to _minimize_ Q (Q is from the perspective of the player who _made the move_ leading up the current position. Calculate depth at the first added node.

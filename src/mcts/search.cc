@@ -2931,6 +2931,36 @@ void SearchWorker::DoBackupUpdateSingleNode(
           search_->GetBestChildNoTemperature(search_->root_node_, 0);
     }
 
+    // Quiescence search: if node has the highest policy then check if Q-delta compared to the parent is
+    // lower than some threshold, otherwise put the node in the preextend-queue right away.
+    // If parent node has two visits, then we must be its child with highest policy
+
+    float quiscence_threshold = 0.5;
+    if(n->GetParent()->GetN() == 1){ // should it be 2 here? Or perhaps look for siblings, and succeed if none is found
+      float q_of_parent = -n->GetParent()->GetQ(0.0f);
+      float q_of_node = n->GetQ(0.0f);
+      float delta = std::abs(q_of_node - q_of_parent); // since they have opposite signs, adding works fine here.
+      if(delta > quiscence_threshold){
+	LOGFILE << "high delta detected between parent and best child: " << delta << " q_of_parent: " << q_of_parent << " q_of_node: " << q_of_node;
+	// Create a vector with elements of type Move from root to this node and queue that vector, and queue that vector
+	std::vector<lczero::Move> my_moves_from_the_white_side;
+	if(n != search_->root_node_){
+	  for (Node* n2 = n; n2 != search_->root_node_; n2 = n2->GetParent()) {
+	    my_moves_from_the_white_side.push_back(n2->GetOwnEdge()->GetMove());
+	  }
+	}
+	// Reverse the order
+	std::reverse(my_moves_from_the_white_side.begin(), my_moves_from_the_white_side.end());
+
+	// Queue the vector
+	search_->search_stats_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before starting to modify it
+	search_->search_stats_->fast_track_extend_and_evaluate_queue_.push(my_moves_from_the_white_side);
+	search_->search_stats_->starting_depth_of_PVs_.push(depth);
+	search_->search_stats_->amount_of_support_for_PVs_.push(0);
+	search_->search_stats_->fast_track_extend_and_evaluate_queue_mutex_.unlock();
+      }
+    }
+
     // Avoid a full function call unless it will likely actually queue the node.
     // Do nothing if search is interrupted, the node will get picked the next iteration anyway.
 

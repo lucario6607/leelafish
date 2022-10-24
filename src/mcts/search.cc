@@ -2868,15 +2868,14 @@ void SearchWorker::DoBackupUpdateSingleNode(
   uint32_t solid_threshold =
       static_cast<uint32_t>(params_.GetSolidTreeThreshold());
 
-  // calculate depth, so we know if we are minimizing or maximizing Q
-  int depth = 0;
-  for (Node *n = node, *p; n != search_->root_node_->GetParent(); n = p) {
-    p = n->GetParent();
-    depth++;
-  }
+  std::vector<Move> my_moves;
   
   for (Node *n = node, *p; n != search_->root_node_->GetParent(); n = p) {
     p = n->GetParent();
+
+    // In order to be able to construct the board store the moves from
+    // root to this node.
+    my_moves.push_back(n->GetOwnEdge()->GetMove());
 
     // Current node might have become terminal from some other descendant, so
     // backup the rest of the way with more accurate values.
@@ -2931,35 +2930,6 @@ void SearchWorker::DoBackupUpdateSingleNode(
           search_->GetBestChildNoTemperature(search_->root_node_, 0);
     }
 
-    // Quiescence search: if node has the highest policy then check if Q-delta compared to the parent is
-    // lower than some threshold, otherwise put the node in the preextend-queue right away.
-    // If parent node has two visits, then we must be its child with highest policy
-
-    if(n->GetParent()->GetN() == 1){ // should it be 2 here? Or perhaps look for siblings, and succeed if none is found
-      float q_of_parent = -n->GetParent()->GetQ(0.0f);
-      float q_of_node = n->GetQ(0.0f);
-      float delta = std::abs(q_of_node - q_of_parent); // since they have opposite signs, adding works fine here.
-      if(delta > params_.GetQuiscenceDeltaThreshold()){
-	if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "high delta detected between parent and best child: " << delta << " q_of_parent: " << q_of_parent << " q_of_node: " << q_of_node;
-	// Create a vector with elements of type Move from root to this node and queue that vector, and queue that vector
-	std::vector<lczero::Move> my_moves_from_the_white_side;
-	if(n != search_->root_node_){
-	  for (Node* n2 = n; n2 != search_->root_node_; n2 = n2->GetParent()) {
-	    my_moves_from_the_white_side.push_back(n2->GetOwnEdge()->GetMove());
-	  }
-	}
-	// Reverse the order
-	std::reverse(my_moves_from_the_white_side.begin(), my_moves_from_the_white_side.end());
-
-	// Queue the vector
-	search_->search_stats_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before starting to modify it
-	search_->search_stats_->fast_track_extend_and_evaluate_queue_.push(my_moves_from_the_white_side);
-	search_->search_stats_->starting_depth_of_PVs_.push(depth);
-	search_->search_stats_->amount_of_support_for_PVs_.push(0);
-	search_->search_stats_->fast_track_extend_and_evaluate_queue_mutex_.unlock();
-      }
-    }
-
     // Avoid a full function call unless it will likely actually queue the node.
     // Do nothing if search is interrupted, the node will get picked the next iteration anyway.
 
@@ -2977,9 +2947,79 @@ void SearchWorker::DoBackupUpdateSingleNode(
       AuxMaybeEnqueueNode(n);      
     }
 
-    depth--;
+    
+
+    // depth--;
     
   }
+
+  // Quiescence search:
+
+  // Case A: if node has the highest policy then check if Q-delta compared to the parent is
+  // lower than some threshold, otherwise put the highest policy node in the preextend-queue right away.
+  // If parent node has a single visit, then this node must be its child with highest policy.
+
+  // Case B: Current move was a capture, or check
+  // Initialize position sequence with pre-move position.
+  // history->Trim(search_->played_history_.GetLength());
+  // for (size_t i = 0; i < moves_to_node.size(); i++) {
+  //   history->Append(moves_to_node[i]);
+  // }
+  // // We don't need the mutex because other threads will see that N=0 and
+  // // N-in-flight=1 and will not touch this node.
+  // const auto& board = history->Last().GetBoard();
+  // auto legal_moves = board.GenerateLegalMoves();
+  // // Check whether it's a draw/lose by position. Importantly, we must check
+  // // these before doing the by-rule checks below.
+  // if (legal_moves.empty()) {
+  //   // Could be a checkmate or a stalemate
+  //   if (board.IsUnderCheck()) {
+  //     node->MakeTerminal(GameResult::WHITE_WON);
+  //   } else {
+  //     node->MakeTerminal(GameResult::DRAW);
+  //   }
+  //   return;
+  // }
+  // const auto& board = history.Last().GetBoard();
+  // board.ours() | board.theirs()).count()
+
+  // Case A
+
+  if(node != search_->root_node_ && node->GetParent()->GetN() == 1){ // should it be 2 here? Or perhaps look for siblings, and succeed if none is found
+    float q_of_parent = node->GetParent()->GetQ(0.0f);
+    float q_of_node = node->GetQ(0.0f);
+    float delta = std::abs(q_of_node - q_of_parent); // since they have opposite signs, adding works fine here.
+    if(delta > params_.GetQuiscenceDeltaThreshold()){
+      LOGFILE << "high delta detected between parent and best child: " << delta << " q_of_parent: " << q_of_parent << " q_of_node: " << q_of_node;
+      // Create a vector with elements of type Move from root to this node and queue that vector, and queue that vector
+      std::vector<lczero::Move> my_moves_from_the_white_side;
+      // Add best child
+      float highest_p = 0;
+      Edge * this_edge_has_highest_p;	  
+      // loop through the policies of the children.
+      for (auto& edge : node->Edges()) {
+	if(edge.GetP() > highest_p) {
+	  highest_p = edge.GetP();
+	  this_edge_has_highest_p = edge.edge();
+	}
+      }
+      my_moves_from_the_white_side.push_back(this_edge_has_highest_p->GetMove());
+      // Add the rest of the moves.
+      for (Node* n2 = node; n2 != search_->root_node_; n2 = n2->GetParent()) {
+	my_moves_from_the_white_side.push_back(n2->GetOwnEdge()->GetMove());
+      }
+      // Reverse the order
+      std::reverse(my_moves_from_the_white_side.begin(), my_moves_from_the_white_side.end());
+
+      // Queue the vector
+      search_->search_stats_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before starting to modify it
+      search_->search_stats_->fast_track_extend_and_evaluate_queue_.push(my_moves_from_the_white_side);
+      search_->search_stats_->starting_depth_of_PVs_.push(my_moves_from_the_white_side.size());
+      search_->search_stats_->amount_of_support_for_PVs_.push(0);
+      search_->search_stats_->fast_track_extend_and_evaluate_queue_mutex_.unlock();
+    }
+  }
+  
   search_->total_playouts_ += node_to_process.multivisit;
   search_->cum_depth_ += node_to_process.depth * node_to_process.multivisit;
   search_->max_depth_ = std::max(search_->max_depth_, node_to_process.depth);

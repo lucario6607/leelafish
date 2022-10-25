@@ -2874,8 +2874,10 @@ void SearchWorker::DoBackupUpdateSingleNode(
     p = n->GetParent();
 
     // In order to be able to construct the board store the moves from
-    // root to this node.
-    my_moves.push_back(n->GetOwnEdge()->GetMove());
+    // root to this node. Don't store the move leading to root.
+    if(n != search_->root_node_) {
+      my_moves.push_back(n->GetOwnEdge()->GetMove());
+    }
 
     // Current node might have become terminal from some other descendant, so
     // backup the rest of the way with more accurate values.
@@ -2946,11 +2948,6 @@ void SearchWorker::DoBackupUpdateSingleNode(
       // AuxMaybeEnqueueNode(n, 1);
       AuxMaybeEnqueueNode(n);      
     }
-
-    
-
-    // depth--;
-    
   }
 
   // Quiescence search:
@@ -2958,34 +2955,8 @@ void SearchWorker::DoBackupUpdateSingleNode(
   // Case A: if node has the highest policy then check if Q-delta compared to the parent is
   // lower than some threshold, otherwise put the highest policy node in the preextend-queue right away.
   // If parent node has a single visit, then this node must be its child with highest policy.
-
-  // Case B: Current move was a capture, or check
-  // Initialize position sequence with pre-move position.
-  // history->Trim(search_->played_history_.GetLength());
-  // for (size_t i = 0; i < moves_to_node.size(); i++) {
-  //   history->Append(moves_to_node[i]);
-  // }
-  // // We don't need the mutex because other threads will see that N=0 and
-  // // N-in-flight=1 and will not touch this node.
-  // const auto& board = history->Last().GetBoard();
-  // auto legal_moves = board.GenerateLegalMoves();
-  // // Check whether it's a draw/lose by position. Importantly, we must check
-  // // these before doing the by-rule checks below.
-  // if (legal_moves.empty()) {
-  //   // Could be a checkmate or a stalemate
-  //   if (board.IsUnderCheck()) {
-  //     node->MakeTerminal(GameResult::WHITE_WON);
-  //   } else {
-  //     node->MakeTerminal(GameResult::DRAW);
-  //   }
-  //   return;
-  // }
-  // const auto& board = history.Last().GetBoard();
-  // board.ours() | board.theirs()).count()
-
-  // Case A
-
   if(node != search_->root_node_ && node->GetParent()->GetN() == 1){ // should it be 2 here? Or perhaps look for siblings, and succeed if none is found
+
     float q_of_parent = node->GetParent()->GetQ(0.0f);
     float q_of_node = node->GetQ(0.0f);
     float delta = std::abs(q_of_node - q_of_parent); // since they have opposite signs, adding works fine here.
@@ -3017,6 +2988,76 @@ void SearchWorker::DoBackupUpdateSingleNode(
       search_->search_stats_->starting_depth_of_PVs_.push(my_moves_from_the_white_side.size());
       search_->search_stats_->amount_of_support_for_PVs_.push(0);
       search_->search_stats_->fast_track_extend_and_evaluate_queue_mutex_.unlock();
+    }
+  }
+
+  // Case B: Current move was a capture, or check
+  // my_moves has the moves from root to the non-extended child.
+  // 1. create the board of the node.
+  // 1b. count pieces
+  // 2. create the board of the non-extended child
+  // 2b. count pieces
+  // If the number of pieces in 2b is not the same as the number of pieces in 1b then there was a capture
+  // For check, only check the position of the child.
+
+  ChessBoard my_board = search_->played_history_.Last().GetBoard();
+  Position my_position = search_->played_history_.Last(); // Only for debugging
+
+  if(search_->played_history_.IsBlackToMove()){
+    if(my_board.flipped()){
+      if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Black to move at root, board is flipped: ";
+    } else {
+      if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Black to move at root, board is not flipped: ";      
+    }
+  } else {
+    if(my_board.flipped()){
+      if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "White to move at root, board is flipped: ";
+    } else {
+      if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "White to move at root, board is not flipped: ";      
+    }
+  }
+  int i=0;
+  for(auto& move: my_moves) {
+    if (my_board.flipped()) move.Mirror();
+    my_position = Position(my_position, move);
+    LOGFILE << i << " Fen in for loop: " << GetFen(my_position);
+    i++;
+    my_board.ApplyMove(move);
+    my_board.Mirror();
+  }
+  int number_of_pieces_in_newly_evaluated_node = my_board.ours().count() + my_board.theirs().count();
+
+  // loop through the edges
+  for (auto& edge : node->Edges()) {
+    // For now require at least a decent policy. TODO. Workout the distance between this node and the best path, do an exhaustive search when (close to) the best path.
+    if(edge.GetP() > 0.1f){
+      // construct the board for this edge
+      ChessBoard my_board_copy = my_board;
+      Move my_move = edge.GetMove();
+      my_position = Position(my_position, my_move);
+      // if (my_board_copy.flipped()) my_move.Mirror();   
+      my_board_copy.ApplyMove(my_move);
+      if(number_of_pieces_in_newly_evaluated_node != my_board_copy.ours().count() + my_board_copy.theirs().count()){
+	LOGFILE << "Fen at child: " << GetFen(my_position);
+	LOGFILE << "Number of pieces at current node: " << number_of_pieces_in_newly_evaluated_node << " ours: " << my_board.ours().count() << " theirs: " << my_board.theirs().count();
+	LOGFILE << "Number of pieces at child node: " << my_board_copy.ours().count() + my_board_copy.theirs().count() <<
+	  " ours: " << my_board_copy.ours().count() << " theirs: " << my_board_copy.theirs().count();
+	LOGFILE << "Move: ";
+	for(auto& move: my_moves) {
+	  LOGFILE << move.as_string() << " ";
+	}
+	LOGFILE << my_move.as_string();
+	// Add this move to the queue.
+	std::vector<lczero::Move> my_moves_copy = my_moves;
+	my_moves_copy.push_back(my_move);
+	if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Added a line with length: " << my_moves_copy.size();
+	// Queue the vector
+	search_->search_stats_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before starting to modify it
+	search_->search_stats_->fast_track_extend_and_evaluate_queue_.push(my_moves_copy);
+	search_->search_stats_->starting_depth_of_PVs_.push(my_moves_copy.size());
+	search_->search_stats_->amount_of_support_for_PVs_.push(0);
+	search_->search_stats_->fast_track_extend_and_evaluate_queue_mutex_.unlock();
+      }
     }
   }
   

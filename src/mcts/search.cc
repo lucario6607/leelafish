@@ -3020,12 +3020,12 @@ void SearchWorker::DoBackupUpdateSingleNode(
   // loop through the edges
   for (auto& edge : node->Edges()) {
     // For now require at least a decent policy. TODO. Workout the distance between this node and the best path, do an exhaustive search when (close to) the best path.
-    if(edge.GetP() > 0.1f || depth < 5){
+    if(edge.GetP() > 0.1f || (depth < 5 && edge.GetP() > 0.05f) || my_board.IsUnderCheck()){
       // construct the board for this edge
       ChessBoard my_board_copy = my_board;
       Move my_move = edge.GetMove();
       my_board_copy.ApplyMove(my_move);
-      if(number_of_pieces_in_newly_evaluated_node != my_board_copy.ours().count() + my_board_copy.theirs().count()){
+      if(number_of_pieces_in_newly_evaluated_node != my_board_copy.ours().count() + my_board_copy.theirs().count() || my_board.IsUnderCheck()){
 	// Add this move to the queue.
 	std::vector<lczero::Move> my_moves_copy = my_moves;
 	my_moves_copy.push_back(my_move);

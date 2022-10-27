@@ -3022,7 +3022,7 @@ void SearchWorker::DoBackupUpdateSingleNode(
     // loop through the edges
     for (auto& edge : node->Edges()) {
       // For now require at least a decent policy or low depth. TODO. Workout the distance between this node and the best path, do an exhaustive search when (close to) the best path.
-      if(edge.GetP() > 0.1f || (depth == 3 && edge.GetP() > 0.07f) || (depth < 3) || my_board.IsUnderCheck()){
+      if(edge.GetP() > 0.10f || my_board.IsUnderCheck()){
 	// construct the board for this edge
 	ChessBoard my_board_copy = my_board;
 	Move my_move = edge.GetMove();

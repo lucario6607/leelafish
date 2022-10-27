@@ -1704,8 +1704,8 @@ const std::shared_ptr<Search::adjust_policy_stats> SearchWorker::PreExtendTreeAn
     int number_of_PVs_added = 0;
     
     while(search_->search_stats_->fast_track_extend_and_evaluate_queue_.size() > 0 &&
-	  search_->search_stats_->Number_of_nodes_added_by_AuxEngine - number_of_added_nodes_at_start < 100 && 
-	  number_of_PVs_added < 100 // don't drag the speed down.
+	  search_->search_stats_->Number_of_nodes_added_by_AuxEngine - number_of_added_nodes_at_start < 60 && 
+	  number_of_PVs_added < 60 // don't drag the speed down.
 	  ){
       // relase the lock, we only needed it to test if to continue or not
       search_->search_stats_->pure_stats_mutex_.unlock_shared();
@@ -3022,7 +3022,7 @@ void SearchWorker::DoBackupUpdateSingleNode(
     // loop through the edges
     for (auto& edge : node->Edges()) {
       // For now require at least a decent policy or low depth. TODO. Workout the distance between this node and the best path, do an exhaustive search when (close to) the best path.
-      if(edge.GetP() > 0.1f || (depth <= 5 && edge.GetP() > 0.07f) || (depth < 5) || my_board.IsUnderCheck()){
+      if(edge.GetP() > 0.1f || (depth == 3 && edge.GetP() > 0.07f) || (depth < 3) || my_board.IsUnderCheck()){
 	// construct the board for this edge
 	ChessBoard my_board_copy = my_board;
 	Move my_move = edge.GetMove();

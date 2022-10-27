@@ -399,6 +399,10 @@ void Search::AuxEngineWorker() {
 	    LOGFILE << "Purged " << my_size - size_kept << " PVs due to the move selected by the opponent. " << size_kept
 		    << " PVs remain in the queue.";
 	}
+	else {
+	  // Why did we not need to purge the PV queue
+	  LOGFILE << "Not purging PVs since size of the queue is: " << search_stats_->fast_track_extend_and_evaluate_queue_.size();
+	}
 	
 	search_stats_->fast_track_extend_and_evaluate_queue_mutex_.unlock();
       } // end of needs_to_purge*
@@ -1317,7 +1321,7 @@ void Search::AuxWait() {
       search_stats_->fast_track_extend_and_evaluate_queue_.push(fast_track_extend_and_evaluate_queue_temp_.front());
       fast_track_extend_and_evaluate_queue_temp_.pop();
     }
-    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Number of PV:s in the queue after purging: " << search_stats_->fast_track_extend_and_evaluate_queue_.size();
+    if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE << "Number of PV:s in the queue after purging: " << search_stats_->fast_track_extend_and_evaluate_queue_.size();
   }
   search_stats_->fast_track_extend_and_evaluate_queue_mutex_.unlock();
   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxWait done search_stats_ at: " << &search_stats_;

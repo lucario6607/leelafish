@@ -977,55 +977,67 @@ void Search::DoAuxEngine(Node* n, int index){
   // if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "DoAuxEngine processing a node with depth: " << depth;
 
   std::string s = "";
-  bool flip = played_history_.IsBlackToMove() ^ (depth % 2 == 0);
+  // bool flip = played_history_.IsBlackToMove() ^ (depth % 2 == 0);
+  bool flip = ! played_history_.IsBlackToMove() ^ (depth % 2 == 0);  
+  // bool flip2 = ! played_history_.IsBlackToMove() ^ (depth % 2 == 0);  
 
-  // To get the moves in UCI format, we have to construct a board, starting from root and then apply the moves.
+  // To get the moves in UCI format, we have to construct a board, starting from startpos and then apply the moves.
   // Traverse up to root, and store the moves in a vector.
   // When we internally use the moves to extend nodes in the search tree, always use move as seen from the white side.
   // Apply the moves in reversed order to get the proper board state from which we can then make moves in legacy format.
-  std::vector<lczero::Move> my_moves;
-  std::vector<lczero::Move> my_moves_from_the_white_side;  
+  std::vector<lczero::Move> my_moves; // for the helper, UCI-format all the way back to startpos
+  std::vector<lczero::Move> my_moves_from_the_white_side; // for internal use to add nodes, modern encoding (internal format), only back to, and not including the current root.
   
-  // if(stop_.load(std::memory_order_acquire)) {
-  //   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread: " << index << " DoAuxEngine caught a stop signal while populating my_moves.";
-  //   return;
-  // }
+  // to avoid repetions we need the full history, not enough to go back to current root. We could cache a vector of moves up to current root to speed up this.
 
-  if(n != root_node_){
-    nodes_mutex_.lock_shared();
-    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << index << " DoAuxEngine() aquired a lock on nodes_ in order to create the position for the helper.";  
-    for (Node* n2 = n; n2 != root_node_; n2 = n2->GetParent()) {
-      my_moves.push_back(n2->GetOwnEdge()->GetMove(flip));
-      my_moves_from_the_white_side.push_back(n2->GetOwnEdge()->GetMove());
-      flip = !flip;
+  bool root_is_passed = false;
+  nodes_mutex_.lock_shared();
+  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << index << " DoAuxEngine() aquired a lock on nodes_ in order to create the position for the helper.";  
+  for (Node* n2 = n; n2->GetParent() != nullptr; n2 = n2->GetParent()) {
+    flip = !flip; // we want the move that lead _to_ the current position, and if the current position is unflipped, that move should be flipped.
+    if(n2 == root_node_){
+      root_is_passed = true;
     }
-    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << index << " DoAuxEngine() releasing a lock on nodes_.";
-    nodes_mutex_.unlock_shared();
+    if(! root_is_passed){
+      my_moves_from_the_white_side.push_back(n2->GetOwnEdge()->GetMove());
+    }
+    my_moves.push_back(n2->GetOwnEdge()->GetMove(flip));
   }
-  
+  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << index << " DoAuxEngine() releasing a lock on nodes_.";
+  nodes_mutex_.unlock_shared();
+
   // Reverse the order
   std::reverse(my_moves.begin(), my_moves.end());
   std::reverse(my_moves_from_the_white_side.begin(), my_moves_from_the_white_side.end());
     
-  ChessBoard my_board = played_history_.Last().GetBoard();
-  Position my_position = played_history_.Last();
+  ChessBoard my_board = played_history_.Starting().GetBoard();
+  Position my_position = played_history_.Starting();
 
-  // modern encoding
+  // my_moves is in modern encoding, never mirrored.
+  // the helper need a move history in UCI format, conditionally mirrored
+  // 1. if black to move, flip the move
+  // 2. convert from modern to legacy encoding
+  // 3. if black to move, flip the legacy move back
+  // 4. prepare next move by mirroring the board
+  // 5. repeat until my_moves is empty
   for(auto& move: my_moves) {
     if (my_board.flipped()) move.Mirror();
+    Move legacy_move = my_board.GetLegacyMove(move);
+    // if move is made by black, we must mirror it back after conversion to legacy encoding
+    if (my_board.flipped()) legacy_move.Mirror();
     my_board.ApplyMove(move);
     my_position = Position(my_position, move);
-    if (my_board.flipped()) move.Mirror();
-    s = s + move.as_string() + " ";  // only for debugging
+    s = s + legacy_move.as_string() + " ";
     my_board.Mirror();
   }
 
-  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "add pv=" << s << " from root position: " << GetFen(played_history_.Last());
-  s = "position fen " + GetFen(my_position);
+  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "add position=" << s << " for the helper to explore";
+  s = "position startpos moves " + s;
   
   // 1. Only start the engines if we can aquire the auxengine_stopped_mutex
   // 2. Only send anything to the engines if we have aquired that mutex
 
+  if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "locked auxengine_stopped_mutex_";  
   search_stats_->auxengine_stopped_mutex_.lock();  
   // Before starting, test if stop_ is set
   if (stop_.load(std::memory_order_acquire)) {
@@ -1059,6 +1071,7 @@ void Search::DoAuxEngine(Node* n, int index){
     search_stats_->auxengine_stopped_[index] = false;    
   }
   search_stats_->auxengine_stopped_mutex_.unlock();
+  if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "unlocked auxengine_stopped_mutex_";
 
   std::string prev_line;
   std::string my_line;
@@ -1088,7 +1101,7 @@ void Search::DoAuxEngine(Node* n, int index){
 	// TODO: If the next iteration also fails, stop and restart the engine.
 	search_stats_->auxengine_stopped_mutex_.lock();
 	*search_stats_->vector_of_opstreams[index] << "stop" << std::endl;
-	search_stats_->auxengine_stopped_mutex_.lock();	
+	search_stats_->auxengine_stopped_mutex_.unlock();	
       } else {
 	break;
       }

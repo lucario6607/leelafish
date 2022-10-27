@@ -779,7 +779,7 @@ void Search::AuxEngineWorker() {
     long unsigned int size;
     search_stats_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before starting to modify it
     size = search_stats_->fast_track_extend_and_evaluate_queue_.size();
-    if(size < 20000){ // safety net, silently drop PV:s if we cannot extend nodes fast enough. lc0 stalls when this number is too high.
+    if(size < 200000){ // safety net, silently drop PV:s if we cannot extend nodes fast enough. lc0 stalls when this number is too high.
       search_stats_->fast_track_extend_and_evaluate_queue_.push(my_moves_from_the_white_side);
       search_stats_->starting_depth_of_PVs_.push(depth);
       search_stats_->amount_of_support_for_PVs_.push(nodes_to_support);

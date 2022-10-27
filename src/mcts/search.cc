@@ -1429,7 +1429,7 @@ void SearchWorker::InitializeIteration(
   minibatch_.reserve(2 * params_.GetMiniBatchSize());
 }
 
-void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node, std::vector<lczero::Move> my_moves, int ply, int nodes_added, int source, std::vector<Node*>* nodes_from_helper_added_by_this_PV) {
+  void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node, std::vector<lczero::Move> my_moves, int ply, int nodes_added, int source, std::vector<Node*>* nodes_from_helper_added_by_this_PV, int amount_of_support) {
 
   bool black_to_move = ! search_->played_history_.IsBlackToMove() ^ (ply % 2 == 0);
   bool edge_found = false;
@@ -1468,7 +1468,7 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
       // If there are children, find leelas preferred move, and if that move hasn't
       // already been queried, enqueue it, unless it is the same move as the helper suggests or depth is too high.
       int max_depth = 30;
-      if(my_node->GetN() > 0 && ply < max_depth){
+      if(my_node->GetN() > 0 && ply < max_depth && amount_of_support > 0){
       	const EdgeAndNode Leelas_favourite = search_->GetBestChildNoTemperature(my_node, ply); // is this safe, or does it change my_node?
       	if(Leelas_favourite.edge() != edge.edge()){
       	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Leelas favourite move: " << Leelas_favourite.GetMove(black_to_move).as_string() << " is not the same has the helper recommendation " << edge.GetMove(black_to_move).as_string();
@@ -1509,7 +1509,7 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	  // unlock nodes so that the next level can write stuff.
 	  search_->nodes_mutex_.unlock_shared();
 	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Releasing lock before calling PreExtendTreeAndFastTrackForNNEvaluation_inner() recursively.";
-	  PreExtendTreeAndFastTrackForNNEvaluation_inner(edge.node(), my_moves, ply+1, nodes_added, source, nodes_from_helper_added_by_this_PV);
+	  PreExtendTreeAndFastTrackForNNEvaluation_inner(edge.node(), my_moves, ply+1, nodes_added, source, nodes_from_helper_added_by_this_PV, amount_of_support);
 
 	} else {
 	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "All moves in the PV already expanded, nothing to do.";
@@ -1600,7 +1600,7 @@ void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node
 	// if (!is_terminal && (int) my_moves.size() > ply+1){  
 	if (!child_node->IsTerminal() && (int) my_moves.size() > ply+1){
 	  // Go deeper.
-	  PreExtendTreeAndFastTrackForNNEvaluation_inner(child_node, my_moves, ply+1, nodes_added, source, nodes_from_helper_added_by_this_PV);
+	  PreExtendTreeAndFastTrackForNNEvaluation_inner(child_node, my_moves, ply+1, nodes_added, source, nodes_from_helper_added_by_this_PV, amount_of_support);
 	  return; // someone further down has already added visits_in_flight;
 	}
 	
@@ -1705,7 +1705,7 @@ const std::shared_ptr<Search::adjust_policy_stats> SearchWorker::PreExtendTreeAn
     
     while(search_->search_stats_->fast_track_extend_and_evaluate_queue_.size() > 0 &&
 	  search_->search_stats_->Number_of_nodes_added_by_AuxEngine - number_of_added_nodes_at_start < 100 && 
-	  number_of_PVs_added < 50 // don't drag the speed down.
+	  number_of_PVs_added < 100 // don't drag the speed down.
 	  ){
       // relase the lock, we only needed it to test if to continue or not
       search_->search_stats_->pure_stats_mutex_.unlock_shared();
@@ -1742,7 +1742,7 @@ const std::shared_ptr<Search::adjust_policy_stats> SearchWorker::PreExtendTreeAn
       int source = 0; // dummy while we don't track source for the moment.
       std::vector<Node*> nodes_from_helper_added_by_this_PV = {};
       // LOGFILE << "size: " << nodes_from_helper_added_by_this_PV.size();
-      PreExtendTreeAndFastTrackForNNEvaluation_inner(search_->root_node_, my_moves, 0, 0, source, &nodes_from_helper_added_by_this_PV);
+      PreExtendTreeAndFastTrackForNNEvaluation_inner(search_->root_node_, my_moves, 0, 0, source, &nodes_from_helper_added_by_this_PV, amount_of_support_for_PVs_);
       number_of_PVs_added++;
       if (nodes_from_helper_added_by_this_PV.size() > 0){
 	// add this vector to the queue, since it is not empty
@@ -2963,7 +2963,7 @@ void SearchWorker::DoBackupUpdateSingleNode(
     // float delta = std::abs(q_of_node - q_of_parent); // since they have opposite signs, adding works fine here.
     float delta = q_of_node + q_of_parent; // since they have opposite signs, adding works fine here.    
     if(delta > params_.GetQuiscenceDeltaThreshold()){
-      LOGFILE << "a quiscence node will be added due to fluctuating eval" << " policy: " << node->GetOwnEdge()->GetP() << "delta: " << delta << " q_of_parent: " << q_of_parent << " q_of_node: " << q_of_node;
+      if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "a quiscence node will be added due to fluctuating eval" << " policy: " << node->GetOwnEdge()->GetP() << "delta: " << delta << " q_of_parent: " << q_of_parent << " q_of_node: " << q_of_node;
       // Create a vector with elements of type Move from root to this node and queue that vector, and queue that vector
       std::vector<lczero::Move> my_moves_from_the_white_side;
       // Add best child
@@ -3029,10 +3029,10 @@ void SearchWorker::DoBackupUpdateSingleNode(
 	my_board_copy.ApplyMove(my_move);
 	if(number_of_pieces_in_newly_evaluated_node != my_board_copy.ours().count() + my_board_copy.theirs().count() || my_board.IsUnderCheck()){
 	  if(number_of_pieces_in_newly_evaluated_node == my_board_copy.ours().count() + my_board_copy.theirs().count()){
-	    LOGFILE << "adding node due to check" << " policy: " << edge.GetP();
+	    if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "adding node due to check" << " policy: " << edge.GetP();
 	  } 
 	  if(!my_board.IsUnderCheck()){
-	    LOGFILE << "adding node due to capture" << " policy: " << edge.GetP() << " n.pieces: " << number_of_pieces_in_newly_evaluated_node << " " << my_board_copy.ours().count() + my_board_copy.theirs().count();
+	    if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "adding node due to capture" << " policy: " << edge.GetP() << " n.pieces: " << number_of_pieces_in_newly_evaluated_node << " " << my_board_copy.ours().count() + my_board_copy.theirs().count();
 	  } 
 	  // Add this move to the queue.
 	  std::vector<lczero::Move> my_moves_copy = my_moves;

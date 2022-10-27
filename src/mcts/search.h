@@ -385,7 +385,7 @@ class SearchWorker {
   // nodes to the minibatch
   const std::shared_ptr<Search::adjust_policy_stats> PreExtendTreeAndFastTrackForNNEvaluation();
   // std::queue<std::vector<Node*>> PreExtendTreeAndFastTrackForNNEvaluation();
-  void PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node, std::vector<lczero::Move> my_moves, int ply, int nodes_added, int source, std::vector<Node*>* nodes_from_helper_added_by_this_PV);
+  void PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node, std::vector<lczero::Move> my_moves, int ply, int nodes_added, int source, std::vector<Node*>* nodes_from_helper_added_by_this_PV, int amount_of_support);
   // void PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node,
   //     std::vector<lczero::Move> my_moves, int ply, int nodes_added, int source);
   

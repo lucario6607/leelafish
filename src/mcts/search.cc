@@ -1704,8 +1704,8 @@ const std::shared_ptr<Search::adjust_policy_stats> SearchWorker::PreExtendTreeAn
     int number_of_PVs_added = 0;
     
     while(search_->search_stats_->fast_track_extend_and_evaluate_queue_.size() > 0 &&
-	  search_->search_stats_->Number_of_nodes_added_by_AuxEngine - number_of_added_nodes_at_start < 60 && 
-	  number_of_PVs_added < 60 // don't drag the speed down.
+	  search_->search_stats_->Number_of_nodes_added_by_AuxEngine - number_of_added_nodes_at_start < 75 && 
+	  number_of_PVs_added < 80 // don't drag the speed down.
 	  ){
       // relase the lock, we only needed it to test if to continue or not
       search_->search_stats_->pure_stats_mutex_.unlock_shared();
@@ -2962,7 +2962,7 @@ void SearchWorker::DoBackupUpdateSingleNode(
     float q_of_node = node->GetQ(0.0f);
     // float delta = std::abs(q_of_node - q_of_parent); // since they have opposite signs, adding works fine here.
     float delta = q_of_node + q_of_parent; // since they have opposite signs, adding works fine here.    
-    if(delta > params_.GetQuiscenceDeltaThreshold()){
+    if(delta > params_.GetQuiscenceDeltaThreshold() && node->GetOwnEdge()->GetP() > 0.05f){
       if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "a quiscence node will be added due to fluctuating eval" << " policy: " << node->GetOwnEdge()->GetP() << "delta: " << delta << " q_of_parent: " << q_of_parent << " q_of_node: " << q_of_node;
       // Create a vector with elements of type Move from root to this node and queue that vector, and queue that vector
       std::vector<lczero::Move> my_moves_from_the_white_side;
@@ -3022,7 +3022,7 @@ void SearchWorker::DoBackupUpdateSingleNode(
     // loop through the edges
     for (auto& edge : node->Edges()) {
       // For now require at least a decent policy or low depth. TODO. Workout the distance between this node and the best path, do an exhaustive search when (close to) the best path.
-      if(edge.GetP() > 0.10f || my_board.IsUnderCheck()){
+      if(edge.GetP() > 0.1f){
 	// construct the board for this edge
 	ChessBoard my_board_copy = my_board;
 	Move my_move = edge.GetMove();

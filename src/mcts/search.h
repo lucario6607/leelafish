@@ -62,15 +62,16 @@ class Search {
   };
 
   struct SearchStats {
+    Mutex vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_ ACQUIRED_AFTER(Search::nodes_mutex_);
     std::queue<Node*> persistent_queue_of_nodes; // the query queue for the auxillary helper engine.
     // std::queue<int> source_of_queued_nodes; // 0 = SearchWorker::PickNodesToExtendTask(); 1 = Search::DoBackupUpdateSingleNode(); 2 = Search::SendUciInfo(); 3 = Search::AuxEngineWorker() node is root
     std::queue<std::vector<Move>> fast_track_extend_and_evaluate_queue_ GUARDED_BY(fast_track_extend_and_evaluate_queue_mutex_); // PV:s to be extended in Leelas search tree.
     // std::queue<int> source_of_PVs; // 0 = SearchWorker::PickNodesToExtendTask(); 1 = Search::DoBackupUpdateSingleNode(); 2 = Search::SendUciInfo(); 3 = Search::AuxEngineWorker() node is root. Whenever k (=1 or more) PVs are created from a single node, add k elements with value source from source_of_queued_nodes into this queue.
     std::queue<int> amount_of_support_for_PVs_; // Whenever an element from fast_track_extend_and_evaluate_queue_ is popped by PreExt...(), record the number of nodes to support for that PV in this vector. This way MaybeAdjustPolicyForHelperAddedNodes() can guesstimate the number of nodes there are to backup an added node.
     std::queue<int> starting_depth_of_PVs_; // needed to calculate the estimated number of nodes in support for a recommended move.
-    bool winning_ = false;
+    bool winning_ GUARDED_BY(best_move_candidates_mutex) = false;
+    bool winning_threads_adjusted GUARDED_BY(best_move_candidates_mutex) = false;
     bool stop_a_blunder_ = false;
-    bool winning_threads_adjusted = false;
     int non_winning_root_threads_; // only parse once, store the result in this variable so that we can reset without parsing again.
     Move winning_move_;
     std::vector<Move> helper_PV; // Full PV from the helper, used to find where Leela and helper diverge.
@@ -81,7 +82,8 @@ class Search {
     float helper_eval_of_helpers_preferred_child;    
     int number_of_nodes_in_support_for_helper_eval_of_root = 0;
     int number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child = 0;
-    Node* Leelas_preferred_child_node_; 
+    Node* Leelas_preferred_child_node_;
+    SharedMutex best_move_candidates_mutex; // For some reason this leads to a deadlock very early on. // is that comment obsolete by now?
 
     std::vector<std::shared_ptr<boost::process::ipstream>> vector_of_ipstreams;
     std::vector<std::shared_ptr<boost::process::opstream>> vector_of_opstreams;
@@ -117,7 +119,13 @@ class Search {
     std::mutex auxengine_listen_mutex_;
     std::mutex auxengine_stopped_mutex_;
     std::mutex my_pv_cache_mutex_;
-    std::mutex best_move_candidates_mutex;
+    // std::mutex best_move_candidates_mutex;
+
+    // Node* Leelas_preferred_child_node_; // Not used currently, was used in stoppers.cc
+    Node* Helpers_preferred_child_node_ GUARDED_BY(vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_); // protected by search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_
+    Node* Helpers_preferred_child_node_in_Leelas_PV_ GUARDED_BY(vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_);
+    std::vector<Move> vector_of_moves_from_root_to_Helpers_preferred_child_node_ GUARDED_BY(vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_);
+    std::vector<Move> vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_ GUARDED_BY(vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_); // This is guaranteed to be of length zero unless there exists both a first and a second divergence.
 
   };
 

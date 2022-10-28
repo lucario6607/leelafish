@@ -717,25 +717,51 @@ void Search::AuxEngineWorker() {
     // before search_stats_->winning_threads_adjusted is set, accept changes in all directions.
     // after search_stats_->winning_threads_adjusted is set, just inform, don't change the state of search_stats_->winning_
 
-    search_stats_->best_move_candidates_mutex.lock();
+    // search_stats_->best_move_candidates_mutex.lock();
+    search_stats_->best_move_candidates_mutex.lock_shared();
+    int local_copy_PVs_diverge_at_depth = search_stats_->PVs_diverge_at_depth;
+    std::vector<Move> local_copy_helper_PV = search_stats_->helper_PV;
+    bool local_copy_winning_ = search_stats_->winning_;
+    bool local_copy_winning_threads_adjusted = search_stats_->winning_threads_adjusted;
+    search_stats_->best_move_candidates_mutex.unlock_shared();	    
     if(depth == 0 && thread == 0){
       // Only stop thread 1 and 2 if the change was relevant to the divergence.
-      std::vector<Move> helper_PV_old = search_stats_->helper_PV;
+      // thread 1 works with leelas prefered move, thread 2 with the helper's prefered move.
+      // if i is less than local_copy_PVs_diverge_at_depth, then restart both thread 1 and 2.
+      // if i is equal to local_copy_PVs_diverge_at_depth, then restart thread 2, but not thread 1.
+      // (= "helper changed to another node, but still diverges from leelas PV at the same node")
+      // if is greater than local_copy_PVs_diverge_at_depth then restart both.
+      std::vector<Move> helper_PV_old = local_copy_helper_PV;
       bool need_to_restart_thread_one = false;
-      // If the new PV is shorter than the depth of the old divergence point, then we know we must restart thread 1
-      if(my_moves_from_the_white_side.size() < (long unsigned int)search_stats_->PVs_diverge_at_depth){
-	need_to_restart_thread_one = true;	
+      bool need_to_restart_thread_two = false;      
+      // If the new PV is shorter than the depth of the old divergence point, then we know we must restart both thread 1 and thread 2
+      if(my_moves_from_the_white_side.size() < (long unsigned int)local_copy_PVs_diverge_at_depth){
+	if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Helpers mainline (thread 0) is now of length " << my_moves_from_the_white_side.size() << " which is shorter than the depth of the previous divergence (was at depth" << local_copy_PVs_diverge_at_depth << " need to restart both thread 1 and 2.";
+	need_to_restart_thread_one = true;
+	need_to_restart_thread_two = true;
       } else {
 	if(helper_PV_old.size() > 0){
-	  for(int i = 0; i <= search_stats_->PVs_diverge_at_depth; i++){
+	  for(int i = 0; i <= local_copy_PVs_diverge_at_depth; i++){
+	    // my_moves_from_the_white_side is guaranteed to be at least as long as local_copy_PVs_diverge_at_depth
+	    // can helper_PV_old be one ply shorter than local_copy_PVs_diverge_at_depth?
+	    if(helper_PV_old.size() < local_copy_PVs_diverge_at_depth){
+	      LOGFILE << "helper_PV_old TO SHORT!";
+	      exit(1);
+	    }
 	    if(helper_PV_old[i].as_string() != my_moves_from_the_white_side[i].as_string()){
 	      need_to_restart_thread_one = true;
+	      if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Helpers mainline (thread 0) changed at depth=" << i << ", which is shorter than the previous divergence at depth: " << local_copy_PVs_diverge_at_depth << ". Old preference was: " << helper_PV_old[i].as_string() << " new preference is: " << my_moves_from_the_white_side[i].as_string();
+	      if(i == local_copy_PVs_diverge_at_depth){
+		// helper changed its mind at the same node as the old divergence
+		// no need to restart thread two 
+	      }
 	    }
 	  }
 	}
       }
-
+      search_stats_->best_move_candidates_mutex.lock();
       search_stats_->helper_PV = my_moves_from_the_white_side;
+      search_stats_->best_move_candidates_mutex.unlock();
       // restart, if needed.
       if(need_to_restart_thread_one){
 	search_stats_->auxengine_stopped_mutex_.lock();
@@ -751,30 +777,40 @@ void Search::AuxEngineWorker() {
       }
     }
 
-    if (winning && !search_stats_->winning_){
-      if(!search_stats_->winning_threads_adjusted){
+    if (winning && !local_copy_winning_){
+      // aquire a write lock
+      search_stats_->best_move_candidates_mutex.lock();      
+      if(!local_copy_winning_threads_adjusted){
 	search_stats_->winning_ = true;
       }
       search_stats_->winning_move_ = my_moves_from_the_white_side.front();
       if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "The helper engine thinks the root position is winning: cp = " << eval << " with the move " << search_stats_->winning_move_.as_string();
+      // release the lock
+      search_stats_->best_move_candidates_mutex.unlock();
     }
-    if (thread == 0 && depth == 0 && !winning && search_stats_->winning_){
-      if(!search_stats_->winning_threads_adjusted){
+    if (thread == 0 && depth == 0 && !winning && local_copy_winning_){
+      if(!local_copy_winning_threads_adjusted){
+	// aquire write lock
+	search_stats_->best_move_candidates_mutex.lock();
 	search_stats_->winning_ = false;
+	// release the lock	
+	search_stats_->best_move_candidates_mutex.unlock();
 	if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "The helper engine thinks the root position is no longer winning: cp = " << eval << " and since the autopilot is not yet on, I will not turn it on.";
       }
     }
     // make sure the currently recommended move from the helper is available if it is needed when vetoing Leelas move. TODO change name from "winning" to "recommended".
     if(thread == 0 && depth == 0){
+      search_stats_->best_move_candidates_mutex.lock();      
       search_stats_->number_of_nodes_in_support_for_helper_eval_of_root = nodes_to_support;
       search_stats_->winning_move_ = my_moves_from_the_white_side.front();
+      search_stats_->best_move_candidates_mutex.unlock();      
     }
     if(thread == 1 && depth > 0){ // assume thread 1 works with leelas preferred child of root.
+      search_stats_->best_move_candidates_mutex.lock();
       search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child = nodes_to_support;
+      search_stats_->best_move_candidates_mutex.unlock();    
     }
-    search_stats_->best_move_candidates_mutex.unlock();    
     // Prepare autopilot and blunder vetoing STOP
-    
     long unsigned int size;
     search_stats_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before starting to modify it
     size = search_stats_->fast_track_extend_and_evaluate_queue_.size();
@@ -877,7 +913,7 @@ void Search::DoAuxEngine(Node* n, int index){
 	    } else {
 	      s = "They disagree at root";
 	    }
-	    if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Found the divergence between helper and Leela at depth " << i << " " << s << " Thread 1 will start working with the move Leela prefers at this position: " << divergent_node->GetOwnEdge()->GetMove().as_string();
+	    if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Found the divergence between helper and Leela at depth " << i << " " << s << ". Helper prefers: " << helper_PV_local[i].as_string() << ". Thread 1 will start working with the move Leela prefers at this position: " << divergent_node->GetOwnEdge()->GetMove().as_string();
 	    divergence_found = true;
 	  } else {
 	    // We are thread 2, find the node corresponding the helper recommended move

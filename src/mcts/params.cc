@@ -370,11 +370,15 @@ const OptionId SearchParams::kMoveSelectionVisitsScalingPowerId{
     "move-selection-visits-scaling-power", "MoveSelectionVisitsScalingPower",
     "Power to apply to the total number of visits to get the beta prior used "
     "in move selection."};
-const OptionId SearchParams::kQuiscenceDeltaThresholdId{
-    "quiscence-delta-threshold", "QuiscenceDeltaThreshold",
+const OptionId SearchParams::kQuiescenceDeltaThresholdId{
+    "quiscence-delta-threshold", "QuiescenceDeltaThreshold",
     "Threshold for absolute value of delta Q between parent and best child " 
     "which triggers immediate extension of the child if Delta Q is higher "
     "than this threshold."};
+const OptionId SearchParams::kQuiescencePolicyThresholdId{
+    "quiscence-delta-threshold", "QuiescencePolicyThreshold",
+    "Threshold for Policy of an unextended edge that will be automatically " 
+    "extended if the previous move was a capture or put the opponent into check."};
 
 void SearchParams::Populate(OptionsParser* options) {
   // Here the uci optimized defaults" are set.
@@ -419,7 +423,8 @@ void SearchParams::Populate(OptionsParser* options) {
   options->Add<IntOption>(kMaxCollisionVisitsScalingStartId, 1, 100000) = 28;
   options->Add<IntOption>(kMaxCollisionVisitsScalingEndId, 0, 100000000) =
       145000;
-  options->Add<FloatOption>(kQuiscenceDeltaThresholdId, 0.0f, 2.0f) = 2.0f;  
+  options->Add<FloatOption>(kQuiescenceDeltaThresholdId, 0.0f, 2.0f) = 2.0f;
+  options->Add<FloatOption>(kQuiescencePolicyThresholdId, 0.0f, 1.0f) = 1.0f;    
   options->Add<FloatOption>(kMaxCollisionVisitsScalingPowerId, 0.01, 100) =
       1.25;
   options->Add<BoolOption>(kOutOfOrderEvalId) = true;
@@ -558,8 +563,10 @@ SearchParams::SearchParams(const OptionsDict& options)
           options.Get<bool>(kQBasedMoveSelectionId)),
       kOverridePUCTNodeBudgetThreshold(
 	  options.Get<float>(kOverridePUCTNodeBudgetThresholdId)),
-      kQuiscenceDeltaThreshold(
-	  options.Get<float>(kQuiscenceDeltaThresholdId)),
+      kQuiescenceDeltaThreshold(
+	  options.Get<float>(kQuiescenceDeltaThresholdId)),
+      kQuiescencePolicyThreshold(
+	  options.Get<float>(kQuiescencePolicyThresholdId)),
       kMoveSelectionVisitsScalingPower(
           options.Get<float>(kMoveSelectionVisitsScalingPowerId)),
       kMaxCollisionVisitsScalingStart(

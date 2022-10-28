@@ -1704,8 +1704,8 @@ const std::shared_ptr<Search::adjust_policy_stats> SearchWorker::PreExtendTreeAn
     int number_of_PVs_added = 0;
     
     while(search_->search_stats_->fast_track_extend_and_evaluate_queue_.size() > 0 &&
-	  search_->search_stats_->Number_of_nodes_added_by_AuxEngine - number_of_added_nodes_at_start < 75 && 
-	  number_of_PVs_added < 80 // don't drag the speed down.
+	  search_->search_stats_->Number_of_nodes_added_by_AuxEngine - number_of_added_nodes_at_start < 50 && 
+	  number_of_PVs_added < 50 // don't drag the speed down.
 	  ){
       // relase the lock, we only needed it to test if to continue or not
       search_->search_stats_->pure_stats_mutex_.unlock_shared();
@@ -2952,17 +2952,17 @@ void SearchWorker::DoBackupUpdateSingleNode(
     }
   }
 
-  // // Quiescence search:
+  // Quiescence search:
 
-  // // Case A: if node has the highest policy then check if Q-delta compared to the parent is
-  // // lower than some threshold, otherwise put the highest policy node in the preextend-queue right away.
-  // // If parent node has a single visit, then this node must be its child with highest policy.
+  // Case A: if node has the highest policy then check if Q-delta compared to the parent is
+  // lower than some threshold, otherwise put the highest policy node in the preextend-queue right away.
+  // If parent node has a single visit, then this node must be its child with highest policy.
   if(node != search_->root_node_ && node->GetParent()->GetN() == 2 && !node->IsTerminal()){
     float q_of_parent = node->GetParent()->GetQ(0.0f);
     float q_of_node = node->GetQ(0.0f);
     // float delta = std::abs(q_of_node - q_of_parent); // since they have opposite signs, adding works fine here.
     float delta = q_of_node + q_of_parent; // since they have opposite signs, adding works fine here.    
-    if(delta > params_.GetQuiscenceDeltaThreshold() && node->GetOwnEdge()->GetP() > 0.05f){
+    if(delta > params_.GetQuiescenceDeltaThreshold()){
       if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "a quiscence node will be added due to fluctuating eval" << " policy: " << node->GetOwnEdge()->GetP() << "delta: " << delta << " q_of_parent: " << q_of_parent << " q_of_node: " << q_of_node;
       // Create a vector with elements of type Move from root to this node and queue that vector, and queue that vector
       std::vector<lczero::Move> my_moves_from_the_white_side;
@@ -2993,16 +2993,18 @@ void SearchWorker::DoBackupUpdateSingleNode(
     }
   }
 
-  // // Case B: Current move was a capture, or check
-  // // my_moves has the moves from root to the non-extended child.
-  // // 1. create the board of the node.
-  // // 1b. count pieces
-  // // 2. create the board of the non-extended child
-  // // 2b. count pieces
-  // // If the number of pieces in 2b is not the same as the number of pieces in 1b then there was a capture
-  // // For check, only check the position of the child.
+  // Case B: Current move was a capture, or check
+  // my_moves has the moves from root to the non-extended child.
+  // 1. create the board of the previous position.
+  // 1b. count pieces
+  // 2. create the board of the node.
+  // 2b. count pieces
+  // If the number of pieces in 2b is not the same as the number of pieces in 1b then there was a capture
+  // For check, only check the position of the child.
 
-  if(node != search_->root_node_ && node->GetParent()->GetN() == 2 && !node->IsTerminal()){ // should it be 2 here? Or perhaps look for siblings, and succeed if none is found  
+  if(node != search_->root_node_ && !node->IsTerminal() && node->GetOwnEdge()->GetP() > params_.GetQuiescencePolicyThreshold()){
+    // Todo, store the board in the minibatch_ so we don't have to traverse all the way from root for all new nodes.
+    // Even better, do this already at picknodestoextend(), there multiple nodes can efficiently share the same tree.
 
     ChessBoard my_board = search_->played_history_.Last().GetBoard();
     if(search_->played_history_.IsBlackToMove()){
@@ -3010,42 +3012,77 @@ void SearchWorker::DoBackupUpdateSingleNode(
     }
 
     // reverse the order of the moves
-    std::reverse(my_moves.begin(), my_moves.end());  
+    std::reverse(my_moves.begin(), my_moves.end());
+    int number_of_pieces_before;
+    int number_of_pieces_now;
+    long unsigned int counter=0;
     // apply the moves to construct the board
     for(auto& move: my_moves) {
+      counter++;
       my_board.ApplyMove(move);
-      my_board.Mirror();      
-    }
-    // count pieces on the board.
-    int number_of_pieces_in_newly_evaluated_node = my_board.ours().count() + my_board.theirs().count();
-
-    // loop through the edges
-    for (auto& edge : node->Edges()) {
-      // For now require at least a decent policy or low depth. TODO. Workout the distance between this node and the best path, do an exhaustive search when (close to) the best path.
-      if(edge.GetP() > 0.1f){
-	// construct the board for this edge
-	ChessBoard my_board_copy = my_board;
-	Move my_move = edge.GetMove();
-	my_board_copy.ApplyMove(my_move);
-	if(number_of_pieces_in_newly_evaluated_node != my_board_copy.ours().count() + my_board_copy.theirs().count() || my_board.IsUnderCheck()){
-	  if(number_of_pieces_in_newly_evaluated_node == my_board_copy.ours().count() + my_board_copy.theirs().count()){
-	    if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "adding node due to check" << " policy: " << edge.GetP();
-	  } 
-	  if(!my_board.IsUnderCheck()){
-	    if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "adding node due to capture" << " policy: " << edge.GetP() << " n.pieces: " << number_of_pieces_in_newly_evaluated_node << " " << my_board_copy.ours().count() + my_board_copy.theirs().count();
-	  } 
-	  // Add this move to the queue.
-	  std::vector<lczero::Move> my_moves_copy = my_moves;
-	  my_moves_copy.push_back(my_move);
-	  // Queue the vector
-	  search_->search_stats_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before starting to modify it
-	  search_->search_stats_->fast_track_extend_and_evaluate_queue_.push(my_moves_copy);
-	  search_->search_stats_->starting_depth_of_PVs_.push(my_moves_copy.size());
-	  search_->search_stats_->amount_of_support_for_PVs_.push(0);
-	  search_->search_stats_->fast_track_extend_and_evaluate_queue_mutex_.unlock();
-	}
+      my_board.Mirror();
+      if(counter == my_moves.size()-1){
+	number_of_pieces_before = my_board.ours().count() + my_board.theirs().count();
+      }
+      if(counter == my_moves.size()){
+	number_of_pieces_now = my_board.ours().count() + my_board.theirs().count();
       }
     }
+    if(number_of_pieces_before > number_of_pieces_now || my_board.IsUnderCheck()){
+      
+      // Add best child
+      float highest_p = 0;
+      Edge * this_edge_has_highest_p;	  
+      // loop through the policies of the children.
+      for (auto& edge : node->Edges()) {
+	if(edge.GetP() > highest_p) {
+	  highest_p = edge.GetP();
+	  this_edge_has_highest_p = edge.edge();
+	}
+      }
+      if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "adding node due to check or capture" << " policy: " << this_edge_has_highest_p->GetP();
+      
+      // Add this move to the queue.
+      std::vector<lczero::Move> my_moves_copy = my_moves;
+      my_moves_copy.push_back(this_edge_has_highest_p->GetMove());
+      // Queue the vector
+      search_->search_stats_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before starting to modify it
+      search_->search_stats_->fast_track_extend_and_evaluate_queue_.push(my_moves_copy);
+      search_->search_stats_->starting_depth_of_PVs_.push(my_moves_copy.size());
+      search_->search_stats_->amount_of_support_for_PVs_.push(0);
+      search_->search_stats_->fast_track_extend_and_evaluate_queue_mutex_.unlock();
+    }
+    
+    // // count pieces on the board.
+    // int number_of_pieces_in_newly_evaluated_node = my_board.ours().count() + my_board.theirs().count();
+
+    // // loop through the edges
+    // for (auto& edge : node->Edges()) {
+    //   // For now require at least a decent policy or low depth. TODO. Workout the distance between this node and the best path, do an exhaustive search when (close to) the best path.
+    //   if(edge.GetP() > 0.20f){
+    // 	// construct the board for this edge
+    // 	ChessBoard my_board_copy = my_board;
+    // 	Move my_move = edge.GetMove();
+    // 	my_board_copy.ApplyMove(my_move);
+    // 	if(number_of_pieces_in_newly_evaluated_node != my_board_copy.ours().count() + my_board_copy.theirs().count() || my_board.IsUnderCheck()){
+    // 	  if(number_of_pieces_in_newly_evaluated_node == my_board_copy.ours().count() + my_board_copy.theirs().count()){
+    // 	    if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "adding node due to check" << " policy: " << edge.GetP();
+    // 	  } 
+    // 	  if(!my_board.IsUnderCheck()){
+    // 	    if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "adding node due to capture" << " policy: " << edge.GetP() << " n.pieces: " << number_of_pieces_in_newly_evaluated_node << " " << my_board_copy.ours().count() + my_board_copy.theirs().count();
+    // 	  } 
+    // 	  // Add this move to the queue.
+    // 	  std::vector<lczero::Move> my_moves_copy = my_moves;
+    // 	  my_moves_copy.push_back(my_move);
+    // 	  // Queue the vector
+    // 	  search_->search_stats_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before starting to modify it
+    // 	  search_->search_stats_->fast_track_extend_and_evaluate_queue_.push(my_moves_copy);
+    // 	  search_->search_stats_->starting_depth_of_PVs_.push(my_moves_copy.size());
+    // 	  search_->search_stats_->amount_of_support_for_PVs_.push(0);
+    // 	  search_->search_stats_->fast_track_extend_and_evaluate_queue_mutex_.unlock();
+    // 	}
+    // }
+    // }
   }
   
   search_->total_playouts_ += node_to_process.multivisit;

@@ -198,7 +198,7 @@ Search::Search(const NodeTree& tree, Network* network,
       params_.GetAuxEngineInstances() > 1){
     search_stats_->AuxEngineThreshold = params_.GetAuxEngineThreshold();
   }
-  if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE
+  if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE
        << "Search called with search_stats at: " << &search_stats_
        << " size of persistent_queue: " << search_stats_->persistent_queue_of_nodes.size()
        << " size of search tree at start: " << search_stats_->Total_number_of_nodes
@@ -332,7 +332,7 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
 	  // Need to stop helper thread 1
 	  if(!notified_already){
 	    need_to_restart_thread_one = true;
-	    if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Found a relevant change in Leelas PV at depth " << depth << " Current move: " << iter.GetMove().as_string() << " is different from old move: " << search_stats_->Leelas_PV[depth].as_string() << " will restart thread 1 and 2.";
+	    if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Found a relevant change in Leelas PV at depth " << depth << " Current move: " << iter.GetMove().as_string() << " is different from old move: " << search_stats_->Leelas_PV[depth].as_string() << " will restart thread 1 and 2.";
 	    notified_already = true;
 	  }
 	}
@@ -649,7 +649,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
       // 	   search_stats_->Leelas_preferred_child_node_->GetOwnEdge()->GetMove().as_string() != search_stats_->winning_move_.as_string()){
       if(search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child > 0){
 	if(search_stats_->Leelas_PV[0].as_string() != search_stats_->winning_move_.as_string()){	   
-	  if(params_.GetAuxEngineVerbosity() >= 3){
+	  if(params_.GetAuxEngineVerbosity() >= 2){
 	    LOGFILE << "leelas preferred child differs from the move recommended by the helper. \n"
 		    << "Helper evaluates Leelas preferred move to: " << search_stats_->helper_eval_of_leelas_preferred_child << " based on " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child << " nodes.\n"
 	            << "Helper evaluates its own prefered move to: " << search_stats_->helper_eval_of_helpers_preferred_child << ".\n"
@@ -670,12 +670,12 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	     (search_stats_->helper_eval_of_root > 145 && search_stats_->helper_eval_of_leelas_preferred_child < 105) // saving the win
 	     ){	
 	    if(search_stats_->number_of_nodes_in_support_for_helper_eval_of_root > 100000){
-	      if(params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Large enough support for root";
+	      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Large enough support for root";
 	      if(search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child > 100000){
 		if(search_stats_->helper_eval_of_root > -160 && search_stats_->helper_eval_of_leelas_preferred_child < -170){
-		  if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Trying to save a draw, helper eval of root: " << search_stats_->helper_eval_of_root << " helper recommended move " << search_stats_->winning_move_.as_string() << " (from whites perspective) Number of nodes in support for the root node eval: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_root << " helper eval of leelas preferred move: " << search_stats_->helper_eval_of_leelas_preferred_child << " Leela prefers the move: " << search_stats_->Leelas_PV[0].as_string() << " nodes in support for the eval of leelas preferred move: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child;
+		  if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Trying to save a draw, helper eval of root: " << search_stats_->helper_eval_of_root << " helper recommended move " << search_stats_->winning_move_.as_string() << " (from whites perspective) Number of nodes in support for the root node eval: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_root << " helper eval of leelas preferred move: " << search_stats_->helper_eval_of_leelas_preferred_child << " Leela prefers the move: " << search_stats_->Leelas_PV[0].as_string() << " nodes in support for the eval of leelas preferred move: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child;
 		} else {
-		  if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Trying to save a win, helper eval of root: " << search_stats_->helper_eval_of_root << " helper recommended move " << search_stats_->winning_move_.as_string() << "  (from whites perspective) Number of nodes in support for the root node eval: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_root << " helper eval of leelas preferred move: " << search_stats_->helper_eval_of_leelas_preferred_child << " Leela prefers the move: " << search_stats_->Leelas_PV[0].as_string() << " nodes in support for the eval of leelas preferred move: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child;
+		  if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Trying to save a win, helper eval of root: " << search_stats_->helper_eval_of_root << " helper recommended move " << search_stats_->winning_move_.as_string() << "  (from whites perspective) Number of nodes in support for the root node eval: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_root << " helper eval of leelas preferred move: " << search_stats_->helper_eval_of_leelas_preferred_child << " Leela prefers the move: " << search_stats_->Leelas_PV[0].as_string() << " nodes in support for the eval of leelas preferred move: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child;
 		}
 		search_stats_->stop_a_blunder_ = true;
 	      }
@@ -683,7 +683,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	  }
 	} else {
 	  // They agree.
-	  if(params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Leela agree with the helper about the best move: " << search_stats_->Leelas_PV[0].as_string() << ". The root explorer evaluates root to: " << search_stats_->helper_eval_of_root << " based on " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_root << " nodes.";
+	  if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Leela agree with the helper about the best move: " << search_stats_->Leelas_PV[0].as_string() << ". The root explorer evaluates root to: " << search_stats_->helper_eval_of_root << " based on " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_root << " nodes.";
 	}
       }
     }
@@ -844,7 +844,7 @@ std::vector<EdgeAndNode> Search::GetBestChildrenNoTemperature(Node* parent,
   Move winning_move_;
   if (winning_){
     winning_move_ = search_stats_->winning_move_;
-    if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "The move: winning_move_ will override Q and N based comparisons, since the helper claims it is winning.";
+    if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "The move: " << winning_move_.as_string() << " will override Q and N based comparisons, since the helper claims it is winning.";
   }
   search_stats_->best_move_candidates_mutex.unlock();
   

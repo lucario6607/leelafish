@@ -246,7 +246,7 @@ void Search::AuxEngineWorker() {
       if(reconfiguration_needed){
 	// during the previous game, the root exploring helper was reconfigured to use more threads, reconfigure again back to the normal state.
 	// if winning_ was changed from false to true only during the very last move, winning_threads_adjusted is false and no reconfiguration has yet taken place, thus no reconfiguration is needed here.
-	if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "AuxWorker() reconfigured the root-helper to use " << search_stats_->non_winning_root_threads_ << " number of threads again since a new game started.";
+	if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "AuxWorker() reconfigured the root-helper to use " << search_stats_->non_winning_root_threads_ << " number of threads again since a new game started.";
 	search_stats_->auxengine_stopped_mutex_.lock();
 	*search_stats_->vector_of_opstreams[our_index] << "setoption name Threads value " << search_stats_->non_winning_root_threads_ << std::endl;	    
 	search_stats_->auxengine_stopped_mutex_.unlock();
@@ -319,7 +319,7 @@ void Search::AuxEngineWorker() {
 	  search_stats_->best_move_candidates_mutex.lock();
 	  search_stats_->winning_threads_adjusted = true;
 	  search_stats_->best_move_candidates_mutex.unlock();	  
-	  LOGFILE << "AuxWorker() reconfigured the root-helper to use " << threads_when_winning << " threads.";
+	  if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "AuxWorker() reconfigured the root-helper to use " << threads_when_winning << " threads, since autopilot is on.";
 	  search_stats_->auxengine_stopped_mutex_.lock();
 	  *search_stats_->vector_of_opstreams[our_index] << "setoption name Threads value " << threads_when_winning << std::endl;	    
 	  search_stats_->auxengine_stopped_mutex_.unlock();
@@ -356,7 +356,7 @@ void Search::AuxEngineWorker() {
 	    search_stats_->persistent_queue_of_nodes.push(persistent_queue_of_nodes_temp_.front());
 	    persistent_queue_of_nodes_temp_.pop();
 	  }
-	  if (params_.GetAuxEngineVerbosity() >= 3)
+	  if (params_.GetAuxEngineVerbosity() >= 2)
 	    LOGFILE << "Purged " << number_of_nodes_before_purging - search_stats_->persistent_queue_of_nodes.size()
 		    << " nodes from the query queue due to the move selected by the opponent. " << search_stats_->persistent_queue_of_nodes.size()
 		    << " nodes remain in the queue.";
@@ -395,15 +395,10 @@ void Search::AuxEngineWorker() {
 	    search_stats_->fast_track_extend_and_evaluate_queue_.push(fast_track_extend_and_evaluate_queue_temp_.front());
 	    fast_track_extend_and_evaluate_queue_temp_.pop();
 	  }
-	  if (params_.GetAuxEngineVerbosity() >= 4)	  
+	  if (params_.GetAuxEngineVerbosity() >= 2)
 	    LOGFILE << "Purged " << my_size - size_kept << " PVs due to the move selected by the opponent. " << size_kept
 		    << " PVs remain in the queue.";
 	}
-	else {
-	  // Why did we not need to purge the PV queue
-	  LOGFILE << "Not purging PVs since size of the queue is: " << search_stats_->fast_track_extend_and_evaluate_queue_.size();
-	}
-	
 	search_stats_->fast_track_extend_and_evaluate_queue_mutex_.unlock();
       } // end of needs_to_purge*
     } else {
@@ -713,9 +708,9 @@ void Search::AuxEngineWorker() {
       for(int i = 0; i < (int) my_moves_from_the_white_side.size(); i++){
 	debug_string_root = debug_string_root + my_moves_from_the_white_side[i].as_string() + " ";
       }
-      if(params_.GetAuxEngineVerbosity() >= 3 && thread == 0) LOGFILE << "Helper PV from root, score (cp) "  << eval << " " << debug_string_root;
-      if(params_.GetAuxEngineVerbosity() >= 3 && thread == 1 && depth > 0) LOGFILE << "Helper PV from Leelas favourite node, score (cp) "  << search_stats_->helper_eval_of_leelas_preferred_child << " " << debug_string_root;
-      if(params_.GetAuxEngineVerbosity() >= 3 && thread == 2 && depth > 0) LOGFILE << "Helper PV from the favourite node of the helper, score (cp) "  << search_stats_->helper_eval_of_helpers_preferred_child << " " << debug_string_root;            
+      if(params_.GetAuxEngineVerbosity() >= 2 && thread == 0) LOGFILE << "Helper PV from root, score (cp) "  << eval << " " << debug_string_root;
+      if(params_.GetAuxEngineVerbosity() >= 2 && thread == 1 && depth > 0) LOGFILE << "Helper PV from Leelas favourite node, score (cp) "  << search_stats_->helper_eval_of_leelas_preferred_child << " " << debug_string_root;
+      if(params_.GetAuxEngineVerbosity() >= 2 && thread == 2 && depth > 0) LOGFILE << "Helper PV from the favourite node of the helper, score (cp) "  << search_stats_->helper_eval_of_helpers_preferred_child << " " << debug_string_root;            
     }
 
     // Prepare autopilot and blunder vetoing START
@@ -761,12 +756,12 @@ void Search::AuxEngineWorker() {
 	search_stats_->winning_ = true;
       }
       search_stats_->winning_move_ = my_moves_from_the_white_side.front();
-      if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "The helper engine thinks the root position is winning: cp = " << eval << " with the move " << search_stats_->winning_move_.as_string();
+      if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "The helper engine thinks the root position is winning: cp = " << eval << " with the move " << search_stats_->winning_move_.as_string();
     }
     if (thread == 0 && depth == 0 && !winning && search_stats_->winning_){
       if(!search_stats_->winning_threads_adjusted){
 	search_stats_->winning_ = false;
-	if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "The helper engine thinks the root position is no longer winning: cp = " << eval << " and since the autopilot is not yet on, I will not turn it on.";
+	if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "The helper engine thinks the root position is no longer winning: cp = " << eval << " and since the autopilot is not yet on, I will not turn it on.";
       }
     }
     // make sure the currently recommended move from the helper is available if it is needed when vetoing Leelas move. TODO change name from "winning" to "recommended".
@@ -825,7 +820,7 @@ void Search::DoAuxEngine(Node* n, int index){
     search_stats_->best_move_candidates_mutex.lock();
     while(search_stats_->helper_PV.size() == 0){
       search_stats_->best_move_candidates_mutex.unlock();      
-      LOGFILE << "Thread " << index << " waiting for thread 0 to provide a PV";
+      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread " << index << " waiting for thread 0 to provide a PV";
       std::this_thread::sleep_for(std::chrono::milliseconds(30));
       if(stop_.load(std::memory_order_acquire)) {
 	if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine, thread " << index << " caught a stop signal beforing doing anything.";
@@ -871,7 +866,18 @@ void Search::DoAuxEngine(Node* n, int index){
 	// LOGFILE << "Leela: " << Leelas_PV[i].as_string() << " helper: " << helper_PV_local[i].as_string();
 	if(Leelas_PV[i].as_string() != helper_PV_local[i].as_string()){
 	  if(index == 1){
-	    LOGFILE << "Found the divergence between helper and Leela at depth: " << i << " node: " << divergent_node->DebugString() << " Thread 1 working with the line Leela prefers: " << divergent_node->GetOwnEdge()->GetMove().as_string();
+	    // if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Found the divergence between helper and Leela at depth: " << i << " node: " << divergent_node->DebugString() << " Thread 1 working with the line Leela prefers: " << divergent_node->GetOwnEdge()->GetMove().as_string();
+	    // Construct the line from root to here.
+	    std::string s = "";
+	    if(i > 0){
+	      s = s + "They agree about these moves: ";
+	      for(long unsigned int j = 0; j < i; j++){
+		s = s + Leelas_PV[j].as_string() + " ";
+	      }
+	    } else {
+	      s = "They disagree at root";
+	    }
+	    if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Found the divergence between helper and Leela at depth " << i << " " << s << " Thread 1 will start working with the move Leela prefers at this position: " << divergent_node->GetOwnEdge()->GetMove().as_string();
 	    divergence_found = true;
 	  } else {
 	    // We are thread 2, find the node corresponding the helper recommended move
@@ -885,7 +891,8 @@ void Search::DoAuxEngine(Node* n, int index){
 		  return;
 		}
 		divergent_node = edge_and_node.node();
-		LOGFILE << "Thread 2 found special work with node: " << divergent_node->DebugString() << " which corresponds to the helper recommendation: " << helper_PV_local[i].as_string();
+		// if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Thread 2 found special work with node: " << divergent_node->DebugString() << " which corresponds to the helper recommendation: " << helper_PV_local[i].as_string();
+		if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Thread 2 will start working with the move that the helper recommends: " << helper_PV_local[i].as_string();
 		divergence_found = true;
 		break;
 	      }
@@ -912,7 +919,7 @@ void Search::DoAuxEngine(Node* n, int index){
       }
     } else {
       // They agree completely, just fill the cache with useful nodes by exploring root until they disagree again.
-      LOGFILE << "Leela and helper is in perfect agreement. Thread 1 and 2 will explore root to have a up to date cache when Leela and Helper disagrees next time.";
+      if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Leela and helper is in perfect agreement. Thread 1 and 2 will explore root to have a up to date cache when Leela and Helper disagrees next time.";
       n = root_node_;
       depth = 0;
     }
@@ -1060,11 +1067,13 @@ void Search::DoAuxEngine(Node* n, int index){
      ){
     infinite_exploration = true;
     if(index == 0){
-      if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Starting infinite query from root node for thread 0 using the opstream at: " << &search_stats_->vector_of_opstreams[index];
+      // if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Starting infinite query from root node for thread 0 using the opstream at: " << &search_stats_->vector_of_opstreams[index];
+      if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Starting infinite query from root node for thread 0.";
     }
-    if(index == 1 || index == 2){
-      if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Starting infinite query from Leelas preferred line where the Leela and the helper diverges. Thread " << index << " using the opstream at: " << &search_stats_->vector_of_opstreams[index];      
-    }
+    // if(index == 1 || index == 2){
+    //   // if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Starting infinite query from Leelas preferred line where the Leela and the helper diverges. Thread " << index << " using the opstream at: " << &search_stats_->vector_of_opstreams[index];            
+    //   if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Starting infinite query from Leelas preferred line where the Leela and the helper diverges: TODO print the line here.";
+    // }
     *search_stats_->vector_of_opstreams[index] << "go infinite " << std::endl;
   } else {
     if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Starting time limited query for thread " << index << " using the opstream at: " << &search_stats_->vector_of_opstreams[index];    
@@ -1172,7 +1181,7 @@ void Search::DoAuxEngine(Node* n, int index){
     LOGFILE << "bestanswer:" << token;
   }
   if(prev_line == ""){
-    if (params_.GetAuxEngineVerbosity() >= 1) LOGFILE << "Thread: " << index << " Empty PV, returning early from doAuxEngine().";
+    if (params_.GetAuxEngineVerbosity() >= 1) LOGFILE << "Thread: " << index << " Empty PV, returning early from doAuxEngine(). Failing low or failing high? Restart the search with increased time?";
     // // TODO restart the helper engine?
     // using namespace std::chrono_literals;
     // std::this_thread::sleep_for(100ms);
@@ -1212,7 +1221,7 @@ void Search::AuxWait() {
   // Store the size of the queue, for possible adjustment of threshold and time
   search_stats_->AuxEngineQueueSizeAtMoveSelectionTime = search_stats_->persistent_queue_of_nodes.size();
   search_stats_->Total_number_of_nodes = root_node_->GetN() - search_stats_->Total_number_of_nodes;
-  if(params_.GetAuxEngineVerbosity() >= 4) LOGFILE << search_stats_->AuxEngineQueueSizeAtMoveSelectionTime << " nodes left in the query queue at move selection time. Threshold used: " << search_stats_->AuxEngineThreshold;
+  if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << search_stats_->AuxEngineQueueSizeAtMoveSelectionTime << " nodes left in the query queue at move selection time. Threshold used: " << search_stats_->AuxEngineThreshold;
 
   // purge obsolete nodes in the helper queues. Note that depending on the move of the opponent more nodes can become obsolete.
   if(search_stats_->persistent_queue_of_nodes.size() > 0){
@@ -1246,13 +1255,13 @@ void Search::AuxWait() {
       persistent_queue_of_nodes_temp.pop();
     }
       
-    if(params_.GetAuxEngineVerbosity() >= 4)
+    if(params_.GetAuxEngineVerbosity() >= 2)
       LOGFILE << "Purged " << my_size - size_kept
 	      << " nodes in the query queue based the selected move: " << final_bestmove_.as_string()
 	      << ". " << size_kept << " nodes remain. Sanity check size is " << search_stats_->persistent_queue_of_nodes.size();
     search_stats_->AuxEngineQueueSizeAfterPurging = size_kept;
   } else {
-    if(params_.GetAuxEngineVerbosity() >= 4)      
+    if(params_.GetAuxEngineVerbosity() >= 2)      
       LOGFILE << "No nodes in the query queue at move selection";
   }
 
@@ -1268,7 +1277,7 @@ void Search::AuxWait() {
   // }
 
   // Time based queries    
-  if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Summaries per move: (Time based queries) persistent_queue_of_nodes size at the end of search: " << search_stats_->AuxEngineQueueSizeAtMoveSelectionTime
+  if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Summaries per move: (Time based queries) persistent_queue_of_nodes size at the end of search: " << search_stats_->AuxEngineQueueSizeAtMoveSelectionTime
 	  << " Ratio added/total nodes: " << observed_ratio << " (added=" << search_stats_->Number_of_nodes_added_by_AuxEngine << "; total=" << search_stats_->Total_number_of_nodes << ")."
       << " Average duration " << (auxengine_num_evals ? (auxengine_total_dur / auxengine_num_evals) : -1.0f) << "ms"
       << " AuxEngineTime for next iteration " << search_stats_->AuxEngineTime
@@ -1292,9 +1301,9 @@ void Search::AuxWait() {
   // Empty the other queue.
   search_stats_->fast_track_extend_and_evaluate_queue_mutex_.lock();
   if(search_stats_->fast_track_extend_and_evaluate_queue_.empty()){
-    if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE << "No PVs in the fast_track_extend_and_evaluate_queue";
+    if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "No PVs in the fast_track_extend_and_evaluate_queue";
   } else {
-    if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE << search_stats_->fast_track_extend_and_evaluate_queue_.size() << " possibly obsolete PV:s in the queue, checking which of them are still relevant based on our move " << final_bestmove_.as_string();
+    if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << search_stats_->fast_track_extend_and_evaluate_queue_.size() << " possibly obsolete PV:s in the queue, checking which of them are still relevant based on our move " << final_bestmove_.as_string();
 
     // Check if the first move in each PV is the move we played
     // Store the PVs that are still relevant in a temporary queue
@@ -1321,7 +1330,7 @@ void Search::AuxWait() {
       search_stats_->fast_track_extend_and_evaluate_queue_.push(fast_track_extend_and_evaluate_queue_temp_.front());
       fast_track_extend_and_evaluate_queue_temp_.pop();
     }
-    if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE << "Number of PV:s in the queue after purging: " << search_stats_->fast_track_extend_and_evaluate_queue_.size();
+    if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Number of PV:s in the queue after purging: " << search_stats_->fast_track_extend_and_evaluate_queue_.size();
   }
   search_stats_->fast_track_extend_and_evaluate_queue_mutex_.unlock();
   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxWait done search_stats_ at: " << &search_stats_;

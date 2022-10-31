@@ -71,18 +71,20 @@ class Search {
     std::queue<int> starting_depth_of_PVs_; // needed to calculate the estimated number of nodes in support for a recommended move.
     bool winning_ GUARDED_BY(best_move_candidates_mutex) = false;
     bool winning_threads_adjusted GUARDED_BY(best_move_candidates_mutex) = false;
-    bool stop_a_blunder_ = false;
-    int non_winning_root_threads_; // only parse once, store the result in this variable so that we can reset without parsing again.
-    Move winning_move_;
-    std::vector<Move> helper_PV; // Full PV from the helper, used to find where Leela and helper diverge.
-    std::vector<Move> Leelas_PV; // Full PV from PV.
-    int PVs_diverge_at_depth;
-    float helper_eval_of_root;
-    float helper_eval_of_leelas_preferred_child;
-    float helper_eval_of_helpers_preferred_child;    
-    int number_of_nodes_in_support_for_helper_eval_of_root = 0;
-    int number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child = 0;
-    Node* Leelas_preferred_child_node_;
+    bool stop_a_blunder_ GUARDED_BY(best_move_candidates_mutex) = false;
+    int non_winning_root_threads_ GUARDED_BY(best_move_candidates_mutex) ; // only parse once, store the result in this variable so that we can reset without parsing again.
+    Move winning_move_ GUARDED_BY(best_move_candidates_mutex);
+    std::vector<Move> helper_PV GUARDED_BY(best_move_candidates_mutex); // Full PV from the helper, used to find where Leela and helper diverge.
+    std::vector<Move> Leelas_PV GUARDED_BY(best_move_candidates_mutex); // Full PV from PV.
+    int PVs_diverge_at_depth GUARDED_BY(best_move_candidates_mutex) = 0;
+    bool thread_one_and_two_have_started GUARDED_BY(best_move_candidates_mutex) = false;
+    float helper_eval_of_root GUARDED_BY(best_move_candidates_mutex);
+    float helper_eval_of_leelas_preferred_child GUARDED_BY(best_move_candidates_mutex);
+    float helper_eval_of_helpers_preferred_child GUARDED_BY(best_move_candidates_mutex);
+    int number_of_nodes_in_support_for_helper_eval_of_root GUARDED_BY(best_move_candidates_mutex) = 0;
+    int number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child GUARDED_BY(best_move_candidates_mutex) = 0;
+    int number_of_nodes_in_support_for_helper_eval_of_helpers_preferred_child GUARDED_BY(best_move_candidates_mutex) = 0;    
+    Node* Leelas_preferred_child_node_ GUARDED_BY(best_move_candidates_mutex);
     SharedMutex best_move_candidates_mutex; // For some reason this leads to a deadlock very early on. // is that comment obsolete by now?
 
     std::vector<std::shared_ptr<boost::process::ipstream>> vector_of_ipstreams;

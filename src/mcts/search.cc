@@ -181,12 +181,14 @@ Search::Search(const NodeTree& tree, Network* network,
   }
   search_stats_->best_move_candidates_mutex.lock();
   search_stats_->Leelas_PV = {};
-  search_stats_->helper_PV = {};  
+  search_stats_->helper_PV = {};
+  search_stats_->PVs_diverge_at_depth = 0;
   search_stats_->number_of_nodes_in_support_for_helper_eval_of_root = 0;
   search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child = 0;
   search_stats_->helper_eval_of_root = 0;
   search_stats_->helper_eval_of_leelas_preferred_child = 0;
-  search_stats_->helper_eval_of_helpers_preferred_child = 0;  
+  search_stats_->helper_eval_of_helpers_preferred_child = 0;
+  search_stats_->thread_one_and_two_have_started = false;
   search_stats_->best_move_candidates_mutex.unlock();
   search_stats_->auxengine_mutex_.lock();
   search_stats_->size_of_queue_at_start = search_stats_->persistent_queue_of_nodes.size();
@@ -271,14 +273,15 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
   // Take the lock once and make local copies outside the loop over edges below.
   search_stats_->best_move_candidates_mutex.lock_shared();
   std::vector<Move> local_copy_of_leelas_PV = search_stats_->Leelas_PV;
+  std::vector<Move> local_copy_of_helper_PV = search_stats_->helper_PV;  
   int local_copy_of_PVs_diverge_at_depth = search_stats_->PVs_diverge_at_depth;
   search_stats_->best_move_candidates_mutex.unlock_shared();
   std::vector<Move> local_copy_of_leelas_new_PV;
   int local_copy_of_PVs_diverge_at_new_depth;
   // change lock
-  search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.lock();
-  std::vector<Move> local_copy_of_vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_ = search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_;
-  search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
+  // search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.lock();
+  // std::vector<Move> local_copy_of_vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_ = search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_;
+  // search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
 
   for (const auto& edge : edges) {
     ++multipv;
@@ -355,28 +358,26 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
 	  int(local_copy_of_leelas_PV.size()) > depth && // The old PV still has moves in it that we can compare with the current PV
 	  ! iter.node()->IsTerminal()){ // child is not terminal // why is that relevant? Is it because we don't want to start the helper on a terminal node?
 	if(iter.GetMove().as_string() != local_copy_of_leelas_PV[depth].as_string()){
+	  notified_already = true; // only check until this is true, and thus only act once.
 	  if(depth < local_copy_of_PVs_diverge_at_depth){ // Disagreement is now earlier than it was before, both threads need to be restarted.
 	    need_to_restart_thread_one = true;
 	    need_to_restart_thread_two = true;	    
-	    if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Found a relevant change in Leelas PV at depth " << depth << ". Old divergence happened at depth=" << local_copy_of_PVs_diverge_at_depth << " New divergence at depth=" << depth << " Leelas new move here is: " << iter.GetMove().as_string() << " and is different from Leelas old move: " << local_copy_of_leelas_PV[depth].as_string() << " will thus restart both thread 1 and thread 2.";
-	    notified_already = true;
+	    if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Found a relevant change in Leelas PV at depth " << depth << ". Old divergence happened at depth=" << local_copy_of_PVs_diverge_at_depth << " New divergence at depth=" << depth << " Leelas new move here is: " << iter.GetMove().as_string() << " and is different from Leelas old move: " << local_copy_of_leelas_PV[depth].as_string() << ", will thus restart both thread 1 and thread 2.";
 	    local_copy_of_PVs_diverge_at_new_depth = depth;
 	  }
 	  // Change in Leelas PV at the same node as the previous divergence , necessarily restart thread one, but only restart thread two if there is still a divergence.
-	  if(int(local_copy_of_vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size()) == depth){
+	  // if(int(local_copy_of_vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size()) == depth){ // Why not use the same terms in the condition as in the test above?
+	  if(depth == local_copy_of_PVs_diverge_at_depth){
 	    need_to_restart_thread_one = true;
-	    if(iter.GetMove().as_string() == local_copy_of_vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_[depth].as_string()){
+	    if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Is this safe?";
+	    if(iter.GetMove().as_string() == local_copy_of_helper_PV[depth].as_string()){
 	      // Leela has changed her mind and does now agree with the helper. Thread two will have to find another starting point.
 	      need_to_restart_thread_two = true;
-	      if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Leela has changed her mind and does now agree with the helper that move " << iter.GetMove().as_string() << " is better then her old preference: " << local_copy_of_leelas_PV[depth].as_string() << ". Thread two will thus have to find another starting point, restarting thread 2 now.";
+	      if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Leela has changed her mind and does now agree with the helper that move " << iter.GetMove().as_string() << " is better than her old preference: " << local_copy_of_leelas_PV[depth].as_string() << ". Thread two will thus have to find another starting point, restarting thread 2 now.";
 	    } else {
-	      if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Leela changed her mind exactly where she and helper disagreed, but she still disagrees and prefers " << iter.GetMove().as_string() << " instead of " << local_copy_of_vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_[depth].as_string() << " helper (thread 2) can just continue.";
+	      if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Leela changed her mind exactly where she and helper disagreed, but she still disagrees and prefers " << iter.GetMove().as_string() << " instead of " << local_copy_of_helper_PV[depth].as_string() << " helper (thread 2) can just continue.";
 	    }
-	  }	    
-	  // Thread two only if
-	  if(!need_to_restart_thread_one){
-	    need_to_restart_thread_two = true; // only change it if needed.
-	    if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Found a relevant change in Leelas PV at depth " << depth << ". Current second divergence depth=" << local_copy_of_vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size() << " Current move: " << iter.GetMove().as_string() << " is different from old move: " << local_copy_of_leelas_PV[depth].as_string() << " will restart thread 2.";
+	    if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Yes this was safe.";
 	  }
 	}
       }
@@ -385,6 +386,7 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
   }
 
   if(need_to_restart_thread_one || need_to_restart_thread_two){
+    if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Survived the loop. Now modifying global vars and restarting threads";
     // update Leelas PV
     search_stats_->best_move_candidates_mutex.lock();
     search_stats_->Leelas_PV = local_copy_of_leelas_new_PV;
@@ -704,7 +706,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	  if(params_.GetAuxEngineVerbosity() >= 2){
 	    LOGFILE << "leelas preferred child differs from the move recommended by the helper. \n"
 		    << "Helper evaluates Leelas preferred move to: " << search_stats_->helper_eval_of_leelas_preferred_child << " based on " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child << " nodes.\n"
-	            << "Helper evaluates its own prefered move to: " << search_stats_->helper_eval_of_helpers_preferred_child << ".\n"
+	            << "Helper evaluates its own prefered move to: " << search_stats_->helper_eval_of_helpers_preferred_child << " based on " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_helpers_preferred_child << " nodes.\n"
 		    << "Helper evaluates root to: " << search_stats_->helper_eval_of_root << " based on " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_root << " nodes.";
 	  }
 	  // if((search_stats_->helper_eval_of_root > -160 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < -170) || // saving the draw
@@ -894,7 +896,9 @@ std::vector<EdgeAndNode> Search::GetBestChildrenNoTemperature(Node* parent,
   search_stats_->best_move_candidates_mutex.lock();
   bool winning_ = search_stats_->winning_ || search_stats_->stop_a_blunder_;
   Move winning_move_;
-  if (winning_){
+  bool notified = false;
+  if (winning_ && !notified){
+    notified = true;
     winning_move_ = search_stats_->winning_move_;
     if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "The move: " << winning_move_.as_string() << " will override Q and N based comparisons, since the helper claims it is winning.";
   }

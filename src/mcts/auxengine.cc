@@ -719,10 +719,6 @@ void Search::AuxEngineWorker() {
     bool local_copy_thread_one_and_two_have_started = search_stats_->thread_one_and_two_have_started;
     search_stats_->best_move_candidates_mutex.unlock_shared();
 
-    if(thread == 0){
-      LOGFILE << "Step 1";
-    }
-
     if(thread < 3 && nodes_to_support > 500000){
       // show the PV from continous helpers
       std::string debug_string_root;
@@ -736,11 +732,8 @@ void Search::AuxEngineWorker() {
       if(params_.GetAuxEngineVerbosity() >= 2 && thread == 2 && depth > 0) LOGFILE << "Helper PV from the favourite node of the helper, score (cp) "  << local_copy_helper_eval_of_helpers_preferred_child << " nodes: " << nodes_to_support << " PV: " << debug_string_root;
     }
 
-    if(thread == 0){
-      LOGFILE << "Step 2";
-    }
-
-    if(depth == 0 && thread == 0){
+    // Skip this until Leela has produced a PV.
+    if(depth == 0 && thread == 0 && local_copy_of_leelas_PV.size() > 0){
       // Only stop thread 1 and 2 if the change was relevant to the divergence.
       // thread 1 works with leelas prefered move, thread 2 with the helper's prefered move.
       // if i is less than local_copy_PVs_diverge_at_depth, then restart both thread 1 and 2.
@@ -751,10 +744,10 @@ void Search::AuxEngineWorker() {
       bool need_to_restart_thread_one = false;
       bool need_to_restart_thread_two = false;
 
-      LOGFILE << "my_moves.size: " << my_moves_from_the_white_side.size() << "\n"
-	"local_copy_PVs_diverge_at_depth: " << local_copy_PVs_diverge_at_depth << "\n"
-	"helper_PV_old.size: " << helper_PV_old.size() << "\n"
-	"local_copy_of_leelas_PV.size: " << local_copy_of_leelas_PV.size();
+      // LOGFILE << "my_moves.size: " << my_moves_from_the_white_side.size() << "\n"
+      // 	"local_copy_PVs_diverge_at_depth: " << local_copy_PVs_diverge_at_depth << "\n"
+      // 	"helper_PV_old.size: " << helper_PV_old.size() << "\n"
+      // 	"local_copy_of_leelas_PV.size: " << local_copy_of_leelas_PV.size();
 	
       // bool notified = false;
       // If the new PV is shorter than the depth of the old divergence point, then we know we must restart both thread 1 and thread 2
@@ -765,7 +758,6 @@ void Search::AuxEngineWorker() {
 	// notified = true;
       } else {
 	if(helper_PV_old.size() > 0){
-	  LOGFILE << "Step 2.1";
 	  for(int i = 0; i <= local_copy_PVs_diverge_at_depth; i++){
 	    // my_moves_from_the_white_side is guaranteed to be at least as long as local_copy_PVs_diverge_at_depth
 	    // can helper_PV_old be one ply shorter than local_copy_PVs_diverge_at_depth?
@@ -808,8 +800,6 @@ void Search::AuxEngineWorker() {
 	}
       }
 
-      LOGFILE << "Step 2.8";      
-
       search_stats_->best_move_candidates_mutex.lock();
       search_stats_->helper_PV = my_moves_from_the_white_side;
       search_stats_->best_move_candidates_mutex.unlock();
@@ -833,11 +823,6 @@ void Search::AuxEngineWorker() {
       } // End of restart, if needed
       
     } // End of thread == 0 & depth == 0
-
-    if(thread == 0){
-      LOGFILE << "Step 3";
-    }
-
 
     if (winning && !local_copy_winning_){
       // aquire a write lock
@@ -879,10 +864,6 @@ void Search::AuxEngineWorker() {
     }
     // Prepare autopilot and blunder vetoing STOP
 
-    if(thread == 0){
-      LOGFILE << "Step 4";
-    }
-    
     long unsigned int size;
     search_stats_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before starting to modify it
     size = search_stats_->fast_track_extend_and_evaluate_queue_.size();
@@ -897,11 +878,6 @@ void Search::AuxEngineWorker() {
       search_stats_->fast_track_extend_and_evaluate_queue_mutex_.unlock();	
     }
     if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread " << thread << ": Added a PV starting at depth " << depth << " with " << nodes_to_support  << " nodes to support it. Queue has size: " << size;
-
-    if(thread == 0){
-      LOGFILE << "Step 6";
-    }
-
   } else {
     if(pv_moves.size() > 0){
       if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Ignoring pv because it not of length " << min_pv_size << " or more. Actual size: " << pv_moves.size();

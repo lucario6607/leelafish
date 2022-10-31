@@ -277,7 +277,7 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
   int local_copy_of_PVs_diverge_at_depth = search_stats_->PVs_diverge_at_depth;
   search_stats_->best_move_candidates_mutex.unlock_shared();
   std::vector<Move> local_copy_of_leelas_new_PV;
-  int local_copy_of_PVs_diverge_at_new_depth;
+  int local_copy_of_PVs_diverge_at_new_depth = 0;
   // change lock
   // search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.lock();
   // std::vector<Move> local_copy_of_vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_ = search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_;
@@ -367,9 +367,8 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
 	  }
 	  // Change in Leelas PV at the same node as the previous divergence , necessarily restart thread one, but only restart thread two if there is still a divergence.
 	  // if(int(local_copy_of_vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size()) == depth){ // Why not use the same terms in the condition as in the test above?
-	  if(depth == local_copy_of_PVs_diverge_at_depth){
+	  if(depth == local_copy_of_PVs_diverge_at_depth && local_copy_of_helper_PV.size() > 0){ // The last condition is needed if there is not helper PV yet.
 	    need_to_restart_thread_one = true;
-	    if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Is this safe?";
 	    if(iter.GetMove().as_string() == local_copy_of_helper_PV[depth].as_string()){
 	      // Leela has changed her mind and does now agree with the helper. Thread two will have to find another starting point.
 	      need_to_restart_thread_two = true;
@@ -377,7 +376,6 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
 	    } else {
 	      if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Leela changed her mind exactly where she and helper disagreed, but she still disagrees and prefers " << iter.GetMove().as_string() << " instead of " << local_copy_of_helper_PV[depth].as_string() << " helper (thread 2) can just continue.";
 	    }
-	    if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Yes this was safe.";
 	  }
 	}
       }
@@ -385,13 +383,28 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
     }
   }
 
-  if(need_to_restart_thread_one || need_to_restart_thread_two){
-    if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Survived the loop. Now modifying global vars and restarting threads";
-    // update Leelas PV
+  // Even if the threads does not need to be restarted, update Leelas PV it is has changed.
+  bool leelas_pv_has_changed = false;
+  if(local_copy_of_leelas_PV.size() != local_copy_of_leelas_new_PV.size()){
+    leelas_pv_has_changed = true;
+  } else {
+    // Same size, compare element by element
+    for(long unsigned int i = 0; i < local_copy_of_leelas_PV.size(); i++) {
+      if(local_copy_of_leelas_PV[i].as_string() != local_copy_of_leelas_new_PV[i].as_string()){
+	leelas_pv_has_changed = true;
+	break;
+      }
+    }
+  }
+
+  if(leelas_pv_has_changed){
     search_stats_->best_move_candidates_mutex.lock();
     search_stats_->Leelas_PV = local_copy_of_leelas_new_PV;
     search_stats_->PVs_diverge_at_depth = local_copy_of_PVs_diverge_at_new_depth;
     search_stats_->best_move_candidates_mutex.unlock();
+  }
+
+  if(need_to_restart_thread_one || need_to_restart_thread_two){
     // Change lock and restart the helper threads.
     search_stats_->auxengine_stopped_mutex_.lock();
     if(need_to_restart_thread_one){

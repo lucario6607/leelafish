@@ -3030,9 +3030,9 @@ void SearchWorker::DoBackupUpdateSingleNode(
     float q_of_parent = node->GetParent()->GetQ(0.0f);
     float q_of_node = node->GetQ(0.0f);
     // float delta = std::abs(q_of_node - q_of_parent); // since they have opposite signs, adding works fine here.
-    float delta = q_of_node + q_of_parent; // since they have opposite signs, adding works fine here.    
-    if(delta > params_.GetQuiescenceDeltaThreshold()){
-      if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "a quiscence node will be added due to fluctuating eval" << " policy: " << node->GetOwnEdge()->GetP() << "delta: " << delta << " q_of_parent: " << q_of_parent << " q_of_node: " << q_of_node;
+    float delta = std::abs(q_of_node + q_of_parent); // since they have opposite signs, adding works fine here.    
+    if(delta > params_.GetQuiescenceDeltaThreshold() && q_of_node < q_of_parent){
+      if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "a quiscence node will be added due to fluctuating eval" << " policy: " << node->GetOwnEdge()->GetP() << " delta: " << delta << " q_of_parent: " << q_of_parent << " q_of_node: " << q_of_node;
       // Create a vector with elements of type Move from root to this node and queue that vector, and queue that vector
       std::vector<lczero::Move> my_moves_from_the_white_side;
       // Add best child

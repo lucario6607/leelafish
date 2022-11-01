@@ -752,18 +752,20 @@ void Search::AuxEngineWorker() {
       // bool notified = false;
       // If the new PV is shorter than the depth of the old divergence point, then we know we must restart both thread 1 and thread 2
       if(my_moves_from_the_white_side.size() < (long unsigned int)local_copy_PVs_diverge_at_depth  && local_copy_thread_one_and_two_have_started){
-	if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Helpers mainline (thread 0) is now of length " << my_moves_from_the_white_side.size() << " which is shorter than the depth of the previous divergence (was at depth" << local_copy_PVs_diverge_at_depth << " need to restart both thread 1 and 2.";
+	if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Helpers mainline (thread 0) is now of length " << my_moves_from_the_white_side.size() << " which is shorter than the depth of the previous divergence (was at depth " << local_copy_PVs_diverge_at_depth << " need to restart both thread 1 and 2.";
 	need_to_restart_thread_one = true;
 	need_to_restart_thread_two = true;
 	// notified = true;
       } else {
 	if(helper_PV_old.size() > 0){
 	  for(int i = 0; i <= local_copy_PVs_diverge_at_depth; i++){
-	    // my_moves_from_the_white_side is guaranteed to be at least as long as local_copy_PVs_diverge_at_depth
-	    // can helper_PV_old be one ply shorter than local_copy_PVs_diverge_at_depth?
-	    if(helper_PV_old.size() < (long unsigned int)local_copy_PVs_diverge_at_depth){
-	      LOGFILE << "helper_PV_old TO SHORT!";
-	      exit(1);
+	    // my_moves_from_the_white_side is guaranteed to be at least as long as local_copy_PVs_diverge_at_depth, but can helper_PV_old can be shorter?
+	    // I'd say no, but it still appears to happen (hopefully not after a change that updated the global vars even when there were no disagreement)
+	    if(helper_PV_old.size() < (long unsigned int)i){
+	      LOGFILE << "helper_PV_old is of size " << helper_PV_old.size() << " which is shorter than i which is " << i;
+	      break;
+	      // LOGFILE << "helper_PV_old TO SHORT!";
+	      // exit(1);
 	    }
 	    if(helper_PV_old[i].as_string() != my_moves_from_the_white_side[i].as_string()){
 	      // notified = true;
@@ -976,7 +978,7 @@ void Search::DoAuxEngine(Node* n, int index){
 	    bool flip = ! played_history_.IsBlackToMove() ^ (i % 2 == 0);
 	    if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Thread 1: Found the divergence between helper and Leela at depth " << i << ". " << s << ". The helper prefers: " << Move(helper_PV_local[i].as_string(), flip).as_string() << ", Leela prefers: " << divergent_node->GetOwnEdge()->GetMove(flip).as_string() << ". Thread 1 will start working with the move Leela prefers";
 	    divergence_found = true;
-	    depth = i;	    
+	    depth = i;
 	    break;
 	  } else {
 	    // We are thread 2, find the node corresponding the helper recommended move
@@ -1006,25 +1008,28 @@ void Search::DoAuxEngine(Node* n, int index){
     }
       
     nodes_mutex_.unlock_shared();
-      
+
+    // Even if there is perfect agreement, update the global vars
+    if(index == 1){	
+      search_stats_->best_move_candidates_mutex.lock();
+      search_stats_->Leelas_PV = Leelas_PV;
+      search_stats_->PVs_diverge_at_depth = depth;
+      search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child = 0;
+      search_stats_->thread_one_and_two_have_started = true;
+      search_stats_->best_move_candidates_mutex.unlock();
+    }
+    
     if(divergence_found){
       n = divergent_node;
-      if(index == 1){	
-	search_stats_->best_move_candidates_mutex.lock();
-	search_stats_->Leelas_PV = Leelas_PV;
-	search_stats_->PVs_diverge_at_depth = depth;
-	search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child = 0;
-	search_stats_->thread_one_and_two_have_started = true;
-	search_stats_->best_move_candidates_mutex.unlock();
-      }
-      depth++; // not sure why this one is here, but it messes up PVs_diverge_at_depth, so delaying it by moving down the line
+      depth++; // not sure why this one is here, perhaps used when defining flip later.
     } else {
-      // They agree completely, just fill the cache with useful nodes by exploring root until they disagree again.
+      // They agree completely, fill the cache with useful nodes by exploring root until they disagree again.
+      // But also make sure that the 
       if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Leela and helper is in perfect agreement. Thread 1 and 2 will explore root to have a up to date cache when Leela and Helper disagrees next time.";
       n = root_node_;
       depth = 0;
     }
-  }
+  } // end of if(index == 1 || index == 2)
 
   if(n != root_node_ && !divergence_found){  
   // if(n != root_node_){

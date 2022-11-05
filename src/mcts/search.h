@@ -395,7 +395,7 @@ class SearchWorker {
   // nodes to the minibatch
   const std::shared_ptr<Search::adjust_policy_stats> PreExtendTreeAndFastTrackForNNEvaluation();
   // std::queue<std::vector<Node*>> PreExtendTreeAndFastTrackForNNEvaluation();
-  void PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node, std::vector<lczero::Move> my_moves, int ply, int nodes_added, int source, std::vector<Node*>* nodes_from_helper_added_by_this_PV, int amount_of_support);
+  void PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node, std::vector<lczero::Move> my_moves, int ply, int nodes_added, int source, std::vector<Node*>* nodes_from_helper_added_by_this_PV, int amount_of_support, float probability_of_best_path);
   // void PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node,
   //     std::vector<lczero::Move> my_moves, int ply, int nodes_added, int source);
   
@@ -433,6 +433,9 @@ class SearchWorker {
     bool CanEvalOutOfOrder() const {
       return is_cache_hit || node->IsTerminal();
     }
+
+    // probability that this node is on the best path
+    float best_path_probability = 0;
 
     // The node to extend.
     Node* node;
@@ -541,6 +544,7 @@ class SearchWorker {
     int collision_limit;
     std::vector<Move> moves_to_base;
     std::vector<NodeToProcess> results;
+    float probability_of_best_path;
 
     // Task type post gather processing.
     int start_idx;
@@ -549,12 +553,13 @@ class SearchWorker {
     bool complete = false;
 
     PickTask(Node* node, uint16_t depth, const std::vector<Move>& base_moves,
-             int collision_limit)
+             int collision_limit, float probability_of_best_path)
         : task_type(kGathering),
           start(node),
           base_depth(depth),
           collision_limit(collision_limit),
-          moves_to_base(base_moves) {}
+          moves_to_base(base_moves),
+          probability_of_best_path(probability_of_best_path) {}
     PickTask(int start_idx, int end_idx)
         : task_type(kProcessing), start_idx(start_idx), end_idx(end_idx) {}
   };
@@ -572,7 +577,8 @@ class SearchWorker {
                              int base_depth,
                              const std::vector<Move>& moves_to_base,
                              std::vector<NodeToProcess>* receiver,
-                             TaskWorkspace* workspace);
+                             TaskWorkspace* workspace,
+			     float probability_of_best_path);
   void EnsureNodeTwoFoldCorrectForDepth(Node* node, int depth);
   void ProcessPickedTask(int batch_start, int batch_end,
                          TaskWorkspace* workspace);

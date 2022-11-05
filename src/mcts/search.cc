@@ -1385,7 +1385,7 @@ void SearchWorker::RunTasks(int tid) {
         case PickTask::kGathering: {
           PickNodesToExtendTask(task->start, task->base_depth,
                                 task->collision_limit, task->moves_to_base,
-                                &(task->results), &(task_workspaces_[tid]));
+                                &(task->results), &(task_workspaces_[tid]), task->probability_of_best_path);
           break;
         }
         case PickTask::kProcessing: {
@@ -1498,7 +1498,7 @@ void SearchWorker::InitializeIteration(
   minibatch_.reserve(2 * params_.GetMiniBatchSize());
 }
 
-  void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node, std::vector<lczero::Move> my_moves, int ply, int nodes_added, int source, std::vector<Node*>* nodes_from_helper_added_by_this_PV, int amount_of_support) {
+  void SearchWorker::PreExtendTreeAndFastTrackForNNEvaluation_inner(Node * my_node, std::vector<lczero::Move> my_moves, int ply, int nodes_added, int source, std::vector<Node*>* nodes_from_helper_added_by_this_PV, int amount_of_support, float probability_of_best_path) {
 
   bool black_to_move = ! search_->played_history_.IsBlackToMove() ^ (ply % 2 == 0);
   bool edge_found = false;
@@ -1542,6 +1542,11 @@ void SearchWorker::InitializeIteration(
       	if(Leelas_favourite.edge() != edge.edge()){
       	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Leelas favourite move: " << Leelas_favourite.GetMove(black_to_move).as_string() << " is not the same has the helper recommendation " << edge.GetMove(black_to_move).as_string();
       	  if(Leelas_favourite.HasNode()){
+	    // modify probability of best path if both nodes exists and has visits
+	    if(Leelas_favourite.node()->GetN() > 0){
+	      // Silently assume leelas favourite node is also node with best_q
+	      probability_of_best_path = (1-(Leelas_favourite.node()->GetQ(0.0f) - my_node->GetQ(0.0f))) * probability_of_best_path;
+	    }
       	    if(Leelas_favourite.node()->GetAuxEngineMove() == 0xffff){
       	      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Leelas favourite move has not been queried, it is " << Leelas_favourite.GetMove(black_to_move).as_string() << ", node: " << Leelas_favourite.DebugString() << ", queueing it now.";
       	      Node * n = Leelas_favourite.node();
@@ -1578,7 +1583,7 @@ void SearchWorker::InitializeIteration(
 	  // unlock nodes so that the next level can write stuff.
 	  search_->nodes_mutex_.unlock_shared();
 	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Releasing lock before calling PreExtendTreeAndFastTrackForNNEvaluation_inner() recursively.";
-	  PreExtendTreeAndFastTrackForNNEvaluation_inner(edge.node(), my_moves, ply+1, nodes_added, source, nodes_from_helper_added_by_this_PV, amount_of_support);
+	  PreExtendTreeAndFastTrackForNNEvaluation_inner(edge.node(), my_moves, ply+1, nodes_added, source, nodes_from_helper_added_by_this_PV, amount_of_support, probability_of_best_path);
 
 	} else {
 	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "All moves in the PV already expanded, nothing to do.";
@@ -1636,6 +1641,7 @@ void SearchWorker::InitializeIteration(
 	  // For now, do not re-implement the full cache-machinery in GatherMinibatch2() here.
 	  // Accept a small inefficiency by not using the NNCache.
 	  // For NN evaluation three things are needed: hash, input_planes and probabilities_to_cache.
+	  minibatch_[minibatch_.size()-1].best_path_probability = probability_of_best_path;
 	  const auto hash = history.HashLast(params_.GetCacheHistoryLength() + 1);
 	  minibatch_[minibatch_.size()-1].hash = hash;
 	  int transform;
@@ -1669,7 +1675,7 @@ void SearchWorker::InitializeIteration(
 	// if (!is_terminal && (int) my_moves.size() > ply+1){  
 	if (!child_node->IsTerminal() && (int) my_moves.size() > ply+1){
 	  // Go deeper.
-	  PreExtendTreeAndFastTrackForNNEvaluation_inner(child_node, my_moves, ply+1, nodes_added, source, nodes_from_helper_added_by_this_PV, amount_of_support);
+	  PreExtendTreeAndFastTrackForNNEvaluation_inner(child_node, my_moves, ply+1, nodes_added, source, nodes_from_helper_added_by_this_PV, amount_of_support, probability_of_best_path);
 	  return; // someone further down has already added visits_in_flight;
 	}
 	
@@ -1811,7 +1817,7 @@ const std::shared_ptr<Search::adjust_policy_stats> SearchWorker::PreExtendTreeAn
       int source = 0; // dummy while we don't track source for the moment.
       std::vector<Node*> nodes_from_helper_added_by_this_PV = {};
       // LOGFILE << "size: " << nodes_from_helper_added_by_this_PV.size();
-      PreExtendTreeAndFastTrackForNNEvaluation_inner(search_->root_node_, my_moves, 0, 0, source, &nodes_from_helper_added_by_this_PV, amount_of_support_for_PVs_);
+      PreExtendTreeAndFastTrackForNNEvaluation_inner(search_->root_node_, my_moves, 0, 0, source, &nodes_from_helper_added_by_this_PV, amount_of_support_for_PVs_, 1.0f);
       number_of_PVs_added++;
       if (nodes_from_helper_added_by_this_PV.size() > 0){
 	// add this vector to the queue, since it is not empty
@@ -2127,7 +2133,7 @@ void SearchWorker::PickNodesToExtend(int collision_limit) {
   // actually this thread does.
   SharedMutex::Lock lock(search_->nodes_mutex_);
   PickNodesToExtendTask(search_->root_node_, 0, collision_limit, empty_movelist,
-                        &minibatch_, &main_workspace_);
+                        &minibatch_, &main_workspace_, 1);
 
   WaitForTasks();
   for (int i = 0; i < static_cast<int>(picking_tasks_.size()); i++) {
@@ -2183,12 +2189,14 @@ void SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
                                          int collision_limit,
                                          const std::vector<Move>& moves_to_base,
                                          std::vector<NodeToProcess>* receiver,
-                                         TaskWorkspace* workspace) {
+                                         TaskWorkspace* workspace,
+					 float probability_of_best_path) {
 
   // TODO: Bring back pre-cached nodes created outside locks in a way that works
   // with tasks.
   // TODO: pre-reserve visits_to_perform for expected depth and likely maximum
   // width. Maybe even do so outside of lock scope.
+
   auto& vtp_buffer = workspace->vtp_buffer;
   auto& visits_to_perform = workspace->visits_to_perform;
   visits_to_perform.clear();
@@ -2297,12 +2305,22 @@ void SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
                                    : even_draw_score;
       m_evaluator.SetParent(node);
       float visited_pol = 0.0f;
+      float best_q = -1.0f;
+      int number_of_visited_nodes = 0;
       for (Node* child : node->VisitedNodes()) {
+	number_of_visited_nodes++;
         int index = child->Index();
         visited_pol += current_pol[index];
         float q = child->GetQ(draw_score);
+	if(q > best_q){
+	  best_q = q;
+	}
         current_util[index] = q + m_evaluator.GetM(child, q);
       }
+      // if(number_of_visited_nodes > 1){
+      // 	LOGFILE << "Node " << node->DebugString() << " has at least two visited nodes: calculate probabiliy of best path";
+      // }
+      
       const float fpu =
           GetFpu(params_, node, is_root_node, draw_score, visited_pol);
       for (int i = 0; i < max_needed; i++) {
@@ -2384,16 +2402,6 @@ void SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	  }
 	}
 
-	// 
-
-	// if(params_.GetQBasedMoveSelection() &&
-	//    this_edge_has_higher_expected_q_than_the_most_visited_child > -1){
-	//   if(this_edge_has_higher_expected_q_than_the_most_visited_child != best_idx){
-	//     best_idx = this_edge_has_higher_expected_q_than_the_most_visited_child;
-	//     best_edge = cur_iters[best_idx];
-	//   }
-	// }
-
         int new_visits = 0;
 	// easiest is to give the promising node all visits
         if (second_best_edge && (this_edge_has_higher_expected_q_than_the_most_visited_child == -1)) {
@@ -2449,6 +2457,9 @@ void SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
               child_node,
               static_cast<uint16_t>(current_path.size() + 1 + base_depth)));
           completed_visits++;
+	  
+	  // LOGFILE << "At a leaf: Parent " << node->DebugString() << " Child " << node->DebugString() << " setting probability of best path to: " << probability_of_best_path;
+	  receiver->back().best_path_probability = probability_of_best_path;
           receiver->back().moves_to_visit.reserve(moves_to_path.size() + 1);
           receiver->back().moves_to_visit = moves_to_path;
           receiver->back().moves_to_visit.push_back(best_edge.GetMove());
@@ -2480,10 +2491,16 @@ void SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
             Mutex::Lock lock(picking_tasks_mutex_);
             // Ensure not to exceed size of reservation.
             if (picking_tasks_.size() < MAX_TASKS) {
+	      float new_probability_of_best_path = (1-(best_q - child_node->GetQ(draw_score))) * probability_of_best_path;
+	      // LOGFILE << "Calculating probability of best path... q=" << child_node->GetQ(draw_score)
+	      // 	      << " best_q: " << best_q << " diff: " << best_q - child_node->GetQ(draw_score)
+	      // 	      << " 1-diff: " << 1-(best_q - child_node->GetQ(draw_score))
+	      // 	      << " old probability: " << probability_of_best_path
+	      // 	      << " 1-diff times the old probability: " << new_probability_of_best_path;
               moves_to_path.push_back(cur_iters[i].GetMove());
               picking_tasks_.emplace_back(
                   child_node, current_path.size() - 1 + base_depth + 1,
-                  moves_to_path, child_limit);
+                  moves_to_path, child_limit, new_probability_of_best_path);
               moves_to_path.pop_back();
               task_count_.fetch_add(1, std::memory_order_acq_rel);
               task_added_.notify_all();
@@ -2937,6 +2954,9 @@ void SearchWorker::DoBackupUpdateSingleNode(
   uint32_t solid_threshold =
       static_cast<uint32_t>(params_.GetSolidTreeThreshold());
 
+  float probability_of_best_path = node_to_process.best_path_probability;
+  // LOGFILE << "BackupUpdate: probability_of_best_path: " << probability_of_best_path;
+
   std::vector<Move> my_moves;
   int depth = 0;
   
@@ -3032,7 +3052,7 @@ void SearchWorker::DoBackupUpdateSingleNode(
     // float delta = std::abs(q_of_node - q_of_parent); // since they have opposite signs, adding works fine here.
     float delta = std::abs(q_of_node + q_of_parent); // since they have opposite signs, adding works fine here.    
     if(delta > params_.GetQuiescenceDeltaThreshold() && q_of_node < q_of_parent){
-      if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "a quiscence node will be added due to fluctuating eval" << " policy: " << node->GetOwnEdge()->GetP() << " delta: " << delta << " q_of_parent: " << q_of_parent << " q_of_node: " << q_of_node;
+      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "a quiscence node will be added due to fluctuating eval" << " policy: " << node->GetOwnEdge()->GetP() << " delta: " << delta << " q_of_parent: " << q_of_parent << " q_of_node: " << q_of_node;
       // Create a vector with elements of type Move from root to this node and queue that vector, and queue that vector
       std::vector<lczero::Move> my_moves_from_the_white_side;
       // Add best child
@@ -3060,98 +3080,90 @@ void SearchWorker::DoBackupUpdateSingleNode(
       search_->search_stats_->amount_of_support_for_PVs_.push(0);
       search_->search_stats_->fast_track_extend_and_evaluate_queue_mutex_.unlock();
     }
-  }
 
-  // Case B: Current move was a capture, or check
-  // my_moves has the moves from root to the non-extended child.
-  // 1. create the board of the previous position.
-  // 1b. count pieces
-  // 2. create the board of the node.
-  // 2b. count pieces
-  // If the number of pieces in 2b is not the same as the number of pieces in 1b then there was a capture
-  // For check, only check the position of the child.
+    // Case B: Current move was a capture, or check
+    // my_moves has the moves from root to the non-extended child.
+    // 1. create the board of the previous position.
+    // 1b. count pieces
+    // 2. create the board of the node.
+    // 2b. count pieces
+    // If the number of pieces in 2b is not the same as the number of pieces in 1b then there was a capture
+    // For check, only check the position of the child.
+    // if(node != search_->root_node_ && !node->IsTerminal() && node->GetOwnEdge()->GetP() > params_.GetQuiescencePolicyThreshold()){
 
-  if(node != search_->root_node_ && !node->IsTerminal() && node->GetOwnEdge()->GetP() > params_.GetQuiescencePolicyThreshold()){
-    // Todo, store the board in the minibatch_ so we don't have to traverse all the way from root for all new nodes.
-    // Even better, do this already at picknodestoextend(), there multiple nodes can efficiently share the same tree.
+    // if(delta > params_.GetQuiescencePolicyThreshold() && q_of_node < q_of_parent){    
+    if(probability_of_best_path > params_.GetQuiescencePolicyThreshold()){
 
-    ChessBoard my_board = search_->played_history_.Last().GetBoard();
-    if(search_->played_history_.IsBlackToMove()){
-      my_board.Mirror();
-    }
-
-    // reverse the order of the moves
-    std::reverse(my_moves.begin(), my_moves.end());
-    int number_of_pieces_before;
-    int number_of_pieces_now;
-    long unsigned int counter=0;
-    // apply the moves to construct the board
-    for(auto& move: my_moves) {
-      counter++;
-      my_board.ApplyMove(move);
-      my_board.Mirror();
-      if(counter == my_moves.size()-1){
-	number_of_pieces_before = my_board.ours().count() + my_board.theirs().count();
-      }
-      if(counter == my_moves.size()){
-	number_of_pieces_now = my_board.ours().count() + my_board.theirs().count();
-      }
-    }
-    if(number_of_pieces_before > number_of_pieces_now || my_board.IsUnderCheck()){
-      
-      // Add best child
-      float highest_p = 0;
-      Edge * this_edge_has_highest_p;	  
-      // loop through the policies of the children.
-      for (auto& edge : node->Edges()) {
-	if(edge.GetP() > highest_p) {
-	  highest_p = edge.GetP();
-	  this_edge_has_highest_p = edge.edge();
-	}
-      }
-      if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "adding node due to check or capture" << " policy: " << this_edge_has_highest_p->GetP();
-      
-      // Add this move to the queue.
-      std::vector<lczero::Move> my_moves_copy = my_moves;
-      my_moves_copy.push_back(this_edge_has_highest_p->GetMove());
-      // Queue the vector
+      // reverse the order of the moves
+      std::reverse(my_moves.begin(), my_moves.end());
+      // since this a highely relevant node, automatically extend all its edges.
       search_->search_stats_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before starting to modify it
-      search_->search_stats_->fast_track_extend_and_evaluate_queue_.push(my_moves_copy);
-      search_->search_stats_->starting_depth_of_PVs_.push(my_moves_copy.size());
-      search_->search_stats_->amount_of_support_for_PVs_.push(0);
+      for (auto& edge : node->Edges()) {
+	std::vector<lczero::Move> my_moves_copy = my_moves;
+	my_moves_copy.push_back(edge.GetMove());
+	search_->search_stats_->fast_track_extend_and_evaluate_queue_.push(my_moves_copy);
+	search_->search_stats_->starting_depth_of_PVs_.push(my_moves_copy.size());
+	search_->search_stats_->amount_of_support_for_PVs_.push(0);
+	}
       search_->search_stats_->fast_track_extend_and_evaluate_queue_mutex_.unlock();
     }
-    
-    // // count pieces on the board.
-    // int number_of_pieces_in_newly_evaluated_node = my_board.ours().count() + my_board.theirs().count();
 
-    // // loop through the edges
-    // for (auto& edge : node->Edges()) {
-    //   // For now require at least a decent policy or low depth. TODO. Workout the distance between this node and the best path, do an exhaustive search when (close to) the best path.
-    //   if(edge.GetP() > 0.20f){
-    // 	// construct the board for this edge
-    // 	ChessBoard my_board_copy = my_board;
-    // 	Move my_move = edge.GetMove();
-    // 	my_board_copy.ApplyMove(my_move);
-    // 	if(number_of_pieces_in_newly_evaluated_node != my_board_copy.ours().count() + my_board_copy.theirs().count() || my_board.IsUnderCheck()){
-    // 	  if(number_of_pieces_in_newly_evaluated_node == my_board_copy.ours().count() + my_board_copy.theirs().count()){
-    // 	    if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "adding node due to check" << " policy: " << edge.GetP();
-    // 	  } 
-    // 	  if(!my_board.IsUnderCheck()){
-    // 	    if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "adding node due to capture" << " policy: " << edge.GetP() << " n.pieces: " << number_of_pieces_in_newly_evaluated_node << " " << my_board_copy.ours().count() + my_board_copy.theirs().count();
-    // 	  } 
-    // 	  // Add this move to the queue.
-    // 	  std::vector<lczero::Move> my_moves_copy = my_moves;
-    // 	  my_moves_copy.push_back(my_move);
-    // 	  // Queue the vector
-    // 	  search_->search_stats_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before starting to modify it
-    // 	  search_->search_stats_->fast_track_extend_and_evaluate_queue_.push(my_moves_copy);
-    // 	  search_->search_stats_->starting_depth_of_PVs_.push(my_moves_copy.size());
-    // 	  search_->search_stats_->amount_of_support_for_PVs_.push(0);
-    // 	  search_->search_stats_->fast_track_extend_and_evaluate_queue_mutex_.unlock();
-    // 	}
-    // }
-    // }
+      // // Require only a small increase in Q to extend the best policy move if it is capture or check
+      
+      // // Todo, store the board in the minibatch_ so we don't have to traverse all the way from root for all new nodes.
+      // // Even better, do this already at picknodestoextend(), there multiple nodes can efficiently share the same tree.
+
+      // ChessBoard my_board = search_->played_history_.Last().GetBoard();
+      // if(search_->played_history_.IsBlackToMove()){
+      // 	my_board.Mirror();
+      // }
+
+      // // reverse the order of the moves
+      // std::reverse(my_moves.begin(), my_moves.end());
+      // int number_of_pieces_before;
+      // int number_of_pieces_now;
+      // long unsigned int counter=0;
+      // // apply the moves to construct the board
+      // for(auto& move: my_moves) {
+      // 	counter++;
+      // 	my_board.ApplyMove(move);
+      // 	my_board.Mirror();
+      // 	if(counter == my_moves.size()-1){
+      // 	  number_of_pieces_before = my_board.ours().count() + my_board.theirs().count();
+      // 	}
+      // 	if(counter == my_moves.size()){
+      // 	  number_of_pieces_now = my_board.ours().count() + my_board.theirs().count();
+      // 	}
+      // }
+      // if(number_of_pieces_before > number_of_pieces_now || my_board.IsUnderCheck()){
+      
+      // 	// find best child
+      // 	float highest_p = 0;
+      // 	Edge * this_edge_has_highest_p;	  
+      // 	// loop through the policies of the children.
+      // 	for (auto& edge : node->Edges()) {
+      // 	  if(edge.GetP() > highest_p) {
+      // 	    highest_p = edge.GetP();
+      // 	    this_edge_has_highest_p = edge.edge();
+      // 	  }
+      // 	}
+
+      // 	// Now check if this edge also involves a capture or check
+      // 	my_board.ApplyMove(this_edge_has_highest_p->GetMove());
+      // 	int number_of_pieces_in_the_future = my_board.ours().count() + my_board.theirs().count();
+      // 	if(number_of_pieces_in_the_future < number_of_pieces_now || my_board.IsUnderCheck()){
+      // 	  if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "adding node due to check or capture" << " policy: " << this_edge_has_highest_p->GetP() << " future: " << number_of_pieces_in_the_future << " past: " << number_of_pieces_before;
+      // 	  // Add this move to the queue.
+      // 	  std::vector<lczero::Move> my_moves_copy = my_moves;
+      // 	  my_moves_copy.push_back(this_edge_has_highest_p->GetMove());
+      // 	  // Queue the vector
+      // 	  search_->search_stats_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before starting to modify it
+      // 	  search_->search_stats_->fast_track_extend_and_evaluate_queue_.push(my_moves_copy);
+      // 	  search_->search_stats_->starting_depth_of_PVs_.push(my_moves_copy.size());
+      // 	  search_->search_stats_->amount_of_support_for_PVs_.push(0);
+      // 	  search_->search_stats_->fast_track_extend_and_evaluate_queue_mutex_.unlock();
+      // 	}
+      // }
   }
   
   search_->total_playouts_ += node_to_process.multivisit;

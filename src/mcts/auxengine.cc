@@ -1010,7 +1010,7 @@ void Search::DoAuxEngine(Node* n, int index){
     nodes_mutex_.unlock_shared();
 
     // Even if there is perfect agreement, update the global vars
-    if(index == 1){	
+    if(index == 1){
       search_stats_->best_move_candidates_mutex.lock();
       search_stats_->Leelas_PV = Leelas_PV;
       search_stats_->PVs_diverge_at_depth = depth;

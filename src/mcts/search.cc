@@ -277,14 +277,17 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
   search_stats_->best_move_candidates_mutex.lock_shared();
   std::vector<Move> local_copy_of_leelas_PV = search_stats_->Leelas_PV;
   std::vector<Move> local_copy_of_helper_PV = search_stats_->helper_PV;  
-  int local_copy_of_PVs_diverge_at_depth = search_stats_->PVs_diverge_at_depth;
+  long unsigned int local_copy_of_PVs_diverge_at_depth = search_stats_->PVs_diverge_at_depth;
   search_stats_->best_move_candidates_mutex.unlock_shared();
   std::vector<Move> local_copy_of_leelas_new_PV;
-  int local_copy_of_PVs_diverge_at_new_depth = 0;
+  // int local_copy_of_PVs_diverge_at_new_depth = 0;
   // change lock
   // search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.lock();
   // std::vector<Move> local_copy_of_vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_ = search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_;
   // search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
+
+  long unsigned int depth = 0;
+  bool notified_already = false;
 
   for (const auto& edge : edges) {
     ++multipv;
@@ -333,8 +336,8 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
     if (max_pv > 1) uci_info.multipv = multipv;
     if (per_pv_counters) uci_info.nodes = edge.GetN();
     bool flip = played_history_.IsBlackToMove();
-    int depth = 0;
-    bool notified_already = false;
+    // int depth = 0;
+    // bool notified_already = false;
     for (auto iter = edge; iter;
          iter = GetBestChildNoTemperature(iter.node(), depth), flip = !flip) {
       uci_info.pv.push_back(iter.GetMove(flip));
@@ -358,7 +361,7 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
                                          // in either case we can not detect that thread one should be restarted if it is not already.
 	  params_.GetAuxEngineFile() != "" && // helper is activated
 	  local_copy_of_leelas_PV.size() > 0 && // There is already a PV
-	  int(local_copy_of_leelas_PV.size()) > depth && // The old PV still has moves in it that we can compare with the current PV
+	  local_copy_of_leelas_PV.size() > depth && // The old PV still has moves in it that we can compare with the current PV
 	  ! iter.node()->IsTerminal()){ // child is not terminal // why is that relevant? Is it because we don't want to start the helper on a terminal node?
 	if(iter.GetMove().as_string() != local_copy_of_leelas_PV[depth].as_string()){
 	  notified_already = true; // only check until this is true, and thus only act once.
@@ -366,12 +369,13 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
 	    need_to_restart_thread_one = true;
 	    need_to_restart_thread_two = true;	    
 	    if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Found a relevant change in Leelas PV at depth " << depth << ". Old divergence happened at depth=" << local_copy_of_PVs_diverge_at_depth << " New divergence at depth=" << depth << " Leelas new move here is: " << iter.GetMove().as_string() << " and is different from Leelas old move: " << local_copy_of_leelas_PV[depth].as_string() << ", will thus restart both thread 1 and thread 2.";
-	    local_copy_of_PVs_diverge_at_new_depth = depth;
+	    // local_copy_of_PVs_diverge_at_new_depth = depth;
 	  }
 	  // Change in Leelas PV at the same node as the previous divergence , necessarily restart thread one, but only restart thread two if there is still a divergence.
 	  // if(int(local_copy_of_vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size()) == depth){ // Why not use the same terms in the condition as in the test above?
 	  if(depth == local_copy_of_PVs_diverge_at_depth && local_copy_of_helper_PV.size() > 0){ // The last condition is needed if there is not helper PV yet.
 	    need_to_restart_thread_one = true;
+	    // local_copy_of_PVs_diverge_at_new_depth = local_copy_of_PVs_diverge_at_depth;
 	    if(iter.GetMove().as_string() == local_copy_of_helper_PV[depth].as_string()){
 	      // Leela has changed her mind and does now agree with the helper. Thread two will have to find another starting point.
 	      need_to_restart_thread_two = true;
@@ -380,11 +384,15 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
 	      if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Leela changed her mind exactly where she and helper disagreed, but she still disagrees and prefers " << iter.GetMove().as_string() << " instead of " << local_copy_of_helper_PV[depth].as_string() << " helper (thread 2) can just continue.";
 	    }
 	  }
+	} else {
+	  // They still recommend the same move
+	  if(depth < local_copy_of_helper_PV.size()){
+	    depth += 1;
+	  }
 	}
       }
-      depth += 1;
-    }
-  }
+    } // End of for loop, here we have depth and notified_already
+  } // moved definition of depth and notified_already out the inner loop
 
   // Even if the threads does not need to be restarted, update Leelas PV it is has changed.
   bool leelas_pv_has_changed = false;
@@ -403,7 +411,16 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
   if(leelas_pv_has_changed){
     search_stats_->best_move_candidates_mutex.lock();
     search_stats_->Leelas_PV = local_copy_of_leelas_new_PV;
-    search_stats_->PVs_diverge_at_depth = local_copy_of_PVs_diverge_at_new_depth;
+    // if(notified_already && local_copy_of_helper_PV.size() > 0){
+    //   if(local_copy_of_PVs_diverge_at_new_depth != local_copy_of_PVs_diverge_at_depth){
+    // 	LOGFILE << " leelas_pv_has_changed is true, and PVs_diverge_at_depth will be set to: " << local_copy_of_PVs_diverge_at_new_depth;
+    // 	search_stats_->PVs_diverge_at_depth = local_copy_of_PVs_diverge_at_new_depth;
+    //   }
+    // }
+    // if(!notified_already && depth > local_copy_of_PVs_diverge_at_depth && local_copy_of_helper_PV.size() > 0){
+    //   LOGFILE << " leelas_pv_has_changed is true, they now agree longer than before setting diverge_at_depth will be set to: " << depth;
+    //   search_stats_->PVs_diverge_at_depth = depth;
+    // }
     search_stats_->best_move_candidates_mutex.unlock();
   }
 

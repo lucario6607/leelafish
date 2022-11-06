@@ -424,7 +424,7 @@ void SearchParams::Populate(OptionsParser* options) {
   options->Add<IntOption>(kMaxCollisionVisitsScalingEndId, 0, 100000000) =
       145000;
   options->Add<FloatOption>(kQuiescenceDeltaThresholdId, 0.0f, 2.0f) = 2.0f;
-  options->Add<FloatOption>(kQuiescencePolicyThresholdId, 0.0f, 1.0f) = 1.0f;    
+  options->Add<FloatOption>(kQuiescencePolicyThresholdId, 1.0f, 10.0f) = 1.0f;
   options->Add<FloatOption>(kMaxCollisionVisitsScalingPowerId, 0.01, 100) =
       1.25;
   options->Add<BoolOption>(kOutOfOrderEvalId) = true;

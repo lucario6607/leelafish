@@ -3055,17 +3055,16 @@ void SearchWorker::DoBackupUpdateSingleNode(
 
   // Quiescence search:
 
-  // Case A: if node has the highest policy then check if Q-delta compared to the parent is
-  // lower than some threshold, otherwise put the highest policy node in the preextend-queue right away.
-  // If parent node has a single visit, then this node must be its child with highest policy.
+  // Case A: Check if Q-delta between parent and best policy child is lower than some threshold, otherwise put the highest policy node in the preextend-queue right away.
+  // If parent node has two visits, then this node must be its child with highest policy.
   if(node != search_->root_node_ && node->GetParent()->GetN() == 2 && !node->IsTerminal()){
     float q_of_parent = node->GetParent()->GetQ(0.0f);
     float q_of_node = node->GetQ(0.0f);
     // float delta = std::abs(q_of_node - q_of_parent); // since they have opposite signs, adding works fine here.
     float delta = std::abs(q_of_node + q_of_parent); // since they have opposite signs, adding works fine here.    
-    if(delta > params_.GetQuiescenceDeltaThreshold() * probability_of_best_path &&
+    if(delta * probability_of_best_path > params_.GetQuiescenceDeltaThreshold() &&
        q_of_node < q_of_parent &&
-       delta > params_.GetQuiescenceDeltaThreshold() * pow(probability_of_best_path, params_.GetQuiescencePolicyThreshold())){
+       delta * pow(probability_of_best_path, params_.GetQuiescencePolicyThreshold()) > params_.GetQuiescenceDeltaThreshold() ){
       if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "a quiscence node will be added due to fluctuating eval" << " policy: " << node->GetOwnEdge()->GetP() << " delta: " << delta << " q_of_parent: " << q_of_parent << " q_of_node: " << q_of_node;
       // Create a vector with elements of type Move from root to this node and queue that vector, and queue that vector
       std::vector<lczero::Move> my_moves_from_the_white_side;

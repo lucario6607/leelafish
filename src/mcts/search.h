@@ -121,6 +121,7 @@ class Search {
     std::mutex auxengine_listen_mutex_;
     std::mutex auxengine_stopped_mutex_;
     std::mutex my_pv_cache_mutex_;
+    unsigned long long int Number_of_nodes_fast_tracked_because_of_fluctuating_eval GUARDED_BY(search_stats_->fast_track_extend_and_evaluate_queue_mutex_);
     // std::mutex best_move_candidates_mutex;
 
     // Node* Leelas_preferred_child_node_; // Not used currently, was used in stoppers.cc

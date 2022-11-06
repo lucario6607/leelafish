@@ -206,6 +206,9 @@ Search::Search(const NodeTree& tree, Network* network,
        << " size of search tree at start: " << search_stats_->Total_number_of_nodes
        << " threshold=" << search_stats_->AuxEngineThreshold;
   search_stats_->auxengine_mutex_.unlock();
+  search_stats_->fast_track_extend_and_evaluate_queue_mutex_.lock();
+  search_stats_->Number_of_nodes_fast_tracked_because_of_fluctuating_eval = 0;
+  search_stats_->fast_track_extend_and_evaluate_queue_mutex_.unlock();
 }
 
 namespace {
@@ -1532,7 +1535,6 @@ void SearchWorker::InitializeIteration(
   // Find the edge
   for (auto& edge : my_node->Edges()) {
     if(edge.GetMove() == my_moves[ply] ){
-
       // Queue Leelas favourite node START
       // If there are children, find leelas preferred move, and if that move hasn't
       // already been queried, enqueue it, unless it is the same move as the helper suggests or depth is too high.
@@ -1779,8 +1781,8 @@ const std::shared_ptr<Search::adjust_policy_stats> SearchWorker::PreExtendTreeAn
     int number_of_PVs_added = 0;
     
     while(search_->search_stats_->fast_track_extend_and_evaluate_queue_.size() > 0 &&
-	  search_->search_stats_->Number_of_nodes_added_by_AuxEngine - number_of_added_nodes_at_start < 50 && 
-	  number_of_PVs_added < 50 // don't drag the speed down.
+	  search_->search_stats_->Number_of_nodes_added_by_AuxEngine - number_of_added_nodes_at_start < 200 && 
+	  number_of_PVs_added < 200 // don't drag the speed down.
 	  ){
       // relase the lock, we only needed it to test if to continue or not
       search_->search_stats_->pure_stats_mutex_.unlock_shared();
@@ -1844,7 +1846,15 @@ const std::shared_ptr<Search::adjust_policy_stats> SearchWorker::PreExtendTreeAn
       search_->search_stats_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before reading from it again.
       search_->search_stats_->pure_stats_mutex_.lock_shared(); // Always end the while loop with the lock on.
     } // end of while loop
-    search_->search_stats_->pure_stats_mutex_.unlock_shared();
+    // If there are nodes left, then fill them with nodes along the highest probability path.    
+    number_of_added_nodes_at_start = search_->search_stats_->Number_of_nodes_added_by_AuxEngine;
+    search_->search_stats_->pure_stats_mutex_.lock_shared();
+    // Under construction:
+    // 1. make root the current node
+    // 2. make the best child of the current node the current node
+    // 3. if current node has any unextended nodes, extend them, by adding at most the nodes left to add.
+    // 4. if there are nodes to add left, then goto 2.
+    
   }
   search_->search_stats_->fast_track_extend_and_evaluate_queue_mutex_.unlock(); // unlock
   // LOGFILE << "PreExtendTreeAndFastTrackForNNEvaluation: finished.";
@@ -2965,9 +2975,11 @@ void SearchWorker::DoBackupUpdateSingleNode(
 
     // In order to be able to construct the board store the moves from
     // root to this node. Don't store the move leading to root.
-    if(n != search_->root_node_) {
+    if(n != search_->root_node_ && depth > 0) { // skip the last move, we want to extend siblings to the current node.    
       my_moves.push_back(n->GetOwnEdge()->GetMove());
       depth++;
+    } else {
+      depth++;      
     }
 
     // Current node might have become terminal from some other descendant, so
@@ -3051,7 +3063,7 @@ void SearchWorker::DoBackupUpdateSingleNode(
     float q_of_node = node->GetQ(0.0f);
     // float delta = std::abs(q_of_node - q_of_parent); // since they have opposite signs, adding works fine here.
     float delta = std::abs(q_of_node + q_of_parent); // since they have opposite signs, adding works fine here.    
-    if(delta > params_.GetQuiescenceDeltaThreshold() && q_of_node < q_of_parent){
+    if(delta > params_.GetQuiescenceDeltaThreshold() * probability_of_best_path && q_of_node < q_of_parent){
       if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "a quiscence node will be added due to fluctuating eval" << " policy: " << node->GetOwnEdge()->GetP() << " delta: " << delta << " q_of_parent: " << q_of_parent << " q_of_node: " << q_of_node;
       // Create a vector with elements of type Move from root to this node and queue that vector, and queue that vector
       std::vector<lczero::Move> my_moves_from_the_white_side;
@@ -3078,35 +3090,64 @@ void SearchWorker::DoBackupUpdateSingleNode(
       search_->search_stats_->fast_track_extend_and_evaluate_queue_.push(my_moves_from_the_white_side);
       search_->search_stats_->starting_depth_of_PVs_.push(my_moves_from_the_white_side.size());
       search_->search_stats_->amount_of_support_for_PVs_.push(0);
+      // Also do some stats
+      search_->search_stats_->Number_of_nodes_fast_tracked_because_of_fluctuating_eval++;
       search_->search_stats_->fast_track_extend_and_evaluate_queue_mutex_.unlock();
     }
+  }
 
-    // Case B: Current move was a capture, or check
-    // my_moves has the moves from root to the non-extended child.
-    // 1. create the board of the previous position.
-    // 1b. count pieces
-    // 2. create the board of the node.
-    // 2b. count pieces
-    // If the number of pieces in 2b is not the same as the number of pieces in 1b then there was a capture
-    // For check, only check the position of the child.
-    // if(node != search_->root_node_ && !node->IsTerminal() && node->GetOwnEdge()->GetP() > params_.GetQuiescencePolicyThreshold()){
+  // if(node != search_->root_node_ && node->GetParent()->GetN() == 2 && probability_of_best_path > params_.GetQuiescencePolicyThreshold()){
 
-    // if(delta > params_.GetQuiescencePolicyThreshold() && q_of_node < q_of_parent){    
-    if(probability_of_best_path > params_.GetQuiescencePolicyThreshold()){
+  //   // Case B: Current move was a capture, or check
+  //   // my_moves has the moves from root to the non-extended child.
+  //   // 1. create the board of the previous position.
+  //   // 1b. count pieces
+  //   // 2. create the board of the node.
+  //   // 2b. count pieces
+  //   // If the number of pieces in 2b is not the same as the number of pieces in 1b then there was a capture
+  //   // For check, only check the position of the child.
+  //   // if(node != search_->root_node_ && !node->IsTerminal() && node->GetOwnEdge()->GetP() > params_.GetQuiescencePolicyThreshold()){
+    
+  //   // if(delta > params_.GetQuiescencePolicyThreshold() && q_of_node < q_of_parent){    
+  //   // if(probability_of_best_path > params_.GetQuiescencePolicyThreshold()){
 
-      // reverse the order of the moves
-      std::reverse(my_moves.begin(), my_moves.end());
-      // since this a highely relevant node, automatically extend all its edges.
-      search_->search_stats_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before starting to modify it
-      for (auto& edge : node->Edges()) {
-	std::vector<lczero::Move> my_moves_copy = my_moves;
-	my_moves_copy.push_back(edge.GetMove());
-	search_->search_stats_->fast_track_extend_and_evaluate_queue_.push(my_moves_copy);
-	search_->search_stats_->starting_depth_of_PVs_.push(my_moves_copy.size());
-	search_->search_stats_->amount_of_support_for_PVs_.push(0);
-	}
-      search_->search_stats_->fast_track_extend_and_evaluate_queue_mutex_.unlock();
-    }
+  //   // reverse the order of the moves
+  //     std::reverse(my_moves.begin(), my_moves.end());
+  //     Node* parent = node->GetParent();
+      
+  //     // since this a highely relevant node, automatically extend all its edges.
+  //     search_->search_stats_->fast_track_extend_and_evaluate_queue_mutex_.lock(); // lock this queue before starting to modify it
+  //     for (auto& edge : parent->Edges()) {
+  // 	if(!edge.HasNode()){
+  // 	  std::vector<lczero::Move> my_moves_copy = my_moves;
+
+  // 	  // check if the PV is new
+  // 	  std::ostringstream oss;
+  // 	  // Convert all but the last element to avoid a trailing "," https://stackoverflow.com/questions/8581832/converting-a-vectorint-to-string
+  // 	  std::copy(pv_moves.begin(), pv_moves.end()-1, std::ostream_iterator<int>(oss, ","));
+  // 	  // Now add the last element with no delimiter
+  // 	  oss << pv_moves.back();
+  // 	  // TODO protect the PV cache with a mutex? Stockfish does not, and worst case scenario is that the same PV is sent again, so probably not needed.
+  // 	  // https://stackoverflow.com/questions/8581832/converting-a-vectorint-to-string
+  // 	  search_stats_->my_pv_cache_mutex_.lock();
+  // 	  if ( search_stats_->my_pv_cache_.find(oss.str()) == search_stats_->my_pv_cache_.end() ) {
+  // 	    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "string not found in the cache, adding it.";
+  // 	    search_stats_->my_pv_cache_[oss.str()] = true;
+  // 	  } else {
+  // 	    if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "string found in the cache. Return early.";
+  // 	    search_stats_->my_pv_cache_mutex_.unlock();
+  // 	    return;
+  // 	  }
+  // 	  search_stats_->my_pv_cache_mutex_.unlock();
+
+	  
+  // 	  my_moves_copy.push_back(edge.GetMove());
+  // 	  search_->search_stats_->fast_track_extend_and_evaluate_queue_.push(my_moves_copy);
+  // 	  search_->search_stats_->starting_depth_of_PVs_.push(my_moves_copy.size());
+  // 	  search_->search_stats_->amount_of_support_for_PVs_.push(0);
+  // 	}
+  //     }
+  //     search_->search_stats_->fast_track_extend_and_evaluate_queue_mutex_.unlock();
 
       // // Require only a small increase in Q to extend the best policy move if it is capture or check
       
@@ -3164,7 +3205,6 @@ void SearchWorker::DoBackupUpdateSingleNode(
       // 	  search_->search_stats_->fast_track_extend_and_evaluate_queue_mutex_.unlock();
       // 	}
       // }
-  }
   
   search_->total_playouts_ += node_to_process.multivisit;
   search_->cum_depth_ += node_to_process.depth * node_to_process.multivisit;

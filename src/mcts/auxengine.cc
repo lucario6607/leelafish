@@ -1319,7 +1319,14 @@ void Search::AuxWait() {
   search_stats_->my_pv_cache_mutex_.lock();
   int pv_cache_size = search_stats_->my_pv_cache_.size();
   search_stats_->my_pv_cache_.clear();
-  search_stats_->my_pv_cache_mutex_.unlock();  
+  search_stats_->my_pv_cache_mutex_.unlock();
+
+  // read a stat needed in the summary and protected by another lock than auxengine_mutex_
+  // possible optimisation: empty fast_track_extend_and_evaluate_queue_ before persistent_queue_of_nodes, and put summaries after fast_track_extend_and_evaluate_queue_, then summaries can share lock with persistent_queue_of_nodes.
+  long long int Number_of_nodes_fast_tracked_because_of_fluctuating_eval = search_stats_->Number_of_nodes_fast_tracked_because_of_fluctuating_eval;
+  search_stats_->fast_track_extend_and_evaluate_queue_mutex_.lock();
+  search_stats_->Number_of_nodes_fast_tracked_because_of_fluctuating_eval;
+  search_stats_->fast_track_extend_and_evaluate_queue_mutex_.unlock();    
 
   search_stats_->auxengine_mutex_.lock();
 
@@ -1389,6 +1396,7 @@ void Search::AuxWait() {
       << " New AuxEngineThreshold for next iteration " << search_stats_->AuxEngineThreshold
       << " Number of evals " << auxengine_num_evals
       << " Number of added nodes " << search_stats_->Number_of_nodes_added_by_AuxEngine
+      << " Number of nodes fast tracked because of fluctuating eval: " << Number_of_nodes_fast_tracked_because_of_fluctuating_eval
       << " Entries in the PV cache: " << pv_cache_size
       << " Called AuxMaybeEnqueueNode() " << number_of_times_called_AuxMaybeEnqueueNode_ << " times.";
 

@@ -280,12 +280,6 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
   long unsigned int local_copy_of_PVs_diverge_at_depth = search_stats_->PVs_diverge_at_depth;
   search_stats_->best_move_candidates_mutex.unlock_shared();
   std::vector<Move> local_copy_of_leelas_new_PV;
-  // int local_copy_of_PVs_diverge_at_new_depth = 0;
-  // change lock
-  // search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.lock();
-  // std::vector<Move> local_copy_of_vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_ = search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_;
-  // search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
-
   long unsigned int depth = 0;
   bool notified_already = false;
 
@@ -391,8 +385,8 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
 	  }
 	}
       }
-    } // End of for loop, here we have depth and notified_already
-  } // moved definition of depth and notified_already out the inner loop
+    }
+  }
 
   // Even if the threads does not need to be restarted, update Leelas PV it is has changed.
   bool leelas_pv_has_changed = false;
@@ -411,17 +405,7 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
   if(leelas_pv_has_changed){
     search_stats_->best_move_candidates_mutex.lock();
     search_stats_->Leelas_PV = local_copy_of_leelas_new_PV;
-    // if(notified_already && local_copy_of_helper_PV.size() > 0){
-    //   if(local_copy_of_PVs_diverge_at_new_depth != local_copy_of_PVs_diverge_at_depth){
-    // 	LOGFILE << " leelas_pv_has_changed is true, and PVs_diverge_at_depth will be set to: " << local_copy_of_PVs_diverge_at_new_depth;
-    // 	search_stats_->PVs_diverge_at_depth = local_copy_of_PVs_diverge_at_new_depth;
-    //   }
-    // }
-    // if(!notified_already && depth > local_copy_of_PVs_diverge_at_depth && local_copy_of_helper_PV.size() > 0){
-    //   LOGFILE << " leelas_pv_has_changed is true, they now agree longer than before setting diverge_at_depth will be set to: " << depth;
-    //   search_stats_->PVs_diverge_at_depth = depth;
-    // }
-    search_stats_->best_move_candidates_mutex.unlock();
+    search_stats_->best_move_candidates_mutex.unlock();    
   }
 
   if(need_to_restart_thread_one || need_to_restart_thread_two){
@@ -2984,6 +2968,7 @@ void SearchWorker::DoBackupUpdateSingleNode(
   float probability_of_best_path = node_to_process.best_path_probability;
   // LOGFILE << "BackupUpdate: probability_of_best_path: " << probability_of_best_path;
 
+  // no longer used
   std::vector<Move> my_moves;
   int depth = 0;
   
@@ -3082,8 +3067,7 @@ void SearchWorker::DoBackupUpdateSingleNode(
     if(delta * probability_of_best_path > params_.GetQuiescenceDeltaThreshold() &&
        q_of_node < q_of_parent &&
        delta * pow(probability_of_best_path, params_.GetQuiescencePolicyThreshold()) > params_.GetQuiescenceDeltaThreshold() ){
-      if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "a quiscence node will be added due to fluctuating eval" << " policy: " << node->GetOwnEdge()->GetP() << " delta: " << delta << " q_of_parent: " << q_of_parent << " q_of_node: " << q_of_node;
-      // Create a vector with elements of type Move from root to this node and queue that vector, and queue that vector
+      // Create a vector with elements of type Move from root to this node and queue that vector.
       std::vector<lczero::Move> my_moves_from_the_white_side;
       // Add best child
       float highest_p = 0;

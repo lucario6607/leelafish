@@ -674,6 +674,9 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     return;
   }
 
+  // auto remaining_time = hints->GetEstimatedRemainingTimeMs();
+  // LOGFILE << "Remaining time: " << remaining_time;
+
   hints->UpdateIndexOfBestEdge(-1);
   if (!stop_.load(std::memory_order_acquire)) {
     if(stopper_->ShouldStop(stats, hints)){
@@ -1389,7 +1392,7 @@ void SearchWorker::RunTasks(int tid) {
         case PickTask::kGathering: {
           PickNodesToExtendTask(task->start, task->base_depth,
                                 task->collision_limit, task->moves_to_base,
-                                &(task->results), &(task_workspaces_[tid]), task->probability_of_best_path);
+                                &(task->results), &(task_workspaces_[tid]), task->probability_of_best_path, task->distance_from_best_path);
           break;
         }
         case PickTask::kProcessing: {
@@ -1897,6 +1900,10 @@ void SearchWorker::GatherMinibatch2() {
     cur_n = search_->root_node_->GetN();
   }
   if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "GatherMinibatch2() Aquired and released a shared lock on nodes";
+
+  // const double remaining_time = latest_time_manager_hints_.GetEstimatedRemainingTimeMs() / 1000.0;
+  // LOGFILE << "Remaining time: " << remaining_time;
+  
   // TODO: GetEstimatedRemainingPlayouts has already had smart pruning factor
   // applied, which doesn't clearly make sense to include here...
   int64_t remaining_n =
@@ -2144,7 +2151,7 @@ void SearchWorker::PickNodesToExtend(int collision_limit) {
   // actually this thread does.
   SharedMutex::Lock lock(search_->nodes_mutex_);
   PickNodesToExtendTask(search_->root_node_, 0, collision_limit, empty_movelist,
-                        &minibatch_, &main_workspace_, 1);
+                        &minibatch_, &main_workspace_, 1, 0);
 
   WaitForTasks();
   for (int i = 0; i < static_cast<int>(picking_tasks_.size()); i++) {
@@ -2201,12 +2208,15 @@ void SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
                                          const std::vector<Move>& moves_to_base,
                                          std::vector<NodeToProcess>* receiver,
                                          TaskWorkspace* workspace,
-					 float probability_of_best_path) {
+					 float probability_of_best_path,
+					 int distance_from_best_path) {
 
   // TODO: Bring back pre-cached nodes created outside locks in a way that works
   // with tasks.
   // TODO: pre-reserve visits_to_perform for expected depth and likely maximum
   // width. Maybe even do so outside of lock scope.
+
+  if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "distance from best path: " << distance_from_best_path;
 
   auto& vtp_buffer = workspace->vtp_buffer;
   auto& visits_to_perform = workspace->visits_to_perform;
@@ -2509,9 +2519,12 @@ void SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	      // 	      << " old probability: " << probability_of_best_path
 	      // 	      << " 1-diff times the old probability: " << new_probability_of_best_path;
               moves_to_path.push_back(cur_iters[i].GetMove());
+	      if(new_probability_of_best_path != probability_of_best_path){
+		distance_from_best_path++;
+	      }
               picking_tasks_.emplace_back(
                   child_node, current_path.size() - 1 + base_depth + 1,
-                  moves_to_path, child_limit, new_probability_of_best_path);
+                  moves_to_path, child_limit, new_probability_of_best_path, distance_from_best_path);
               moves_to_path.pop_back();
               task_count_.fetch_add(1, std::memory_order_acq_rel);
               task_added_.notify_all();
@@ -3059,7 +3072,7 @@ void SearchWorker::DoBackupUpdateSingleNode(
 
   // Case A: Check if Q-delta between parent and best policy child is lower than some threshold, otherwise put the highest policy node in the preextend-queue right away.
   // If parent node has two visits, then this node must be its child with highest policy.
-  if(node != search_->root_node_ && node->GetParent()->GetN() == 2 && !node->IsTerminal()){
+  if(node != search_->root_node_ && node->GetParent()->GetN() == 2 && !node->IsTerminal() && params_.GetAuxEngineFile() != ""){
     float q_of_parent = node->GetParent()->GetQ(0.0f);
     float q_of_node = node->GetQ(0.0f);
     // float delta = std::abs(q_of_node - q_of_parent); // since they have opposite signs, adding works fine here.

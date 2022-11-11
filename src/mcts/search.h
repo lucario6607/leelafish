@@ -438,6 +438,8 @@ class SearchWorker {
     // probability that this node is on the best path
     float best_path_probability = 0;
 
+    int distance_from_best_path = 0;
+
     // The node to extend.
     Node* node;
     // Value from NN's value head, or -1/0/1 for terminal nodes.
@@ -546,6 +548,7 @@ class SearchWorker {
     std::vector<Move> moves_to_base;
     std::vector<NodeToProcess> results;
     float probability_of_best_path;
+    int distance_from_best_path = 0;
 
     // Task type post gather processing.
     int start_idx;
@@ -554,13 +557,14 @@ class SearchWorker {
     bool complete = false;
 
     PickTask(Node* node, uint16_t depth, const std::vector<Move>& base_moves,
-             int collision_limit, float probability_of_best_path)
+             int collision_limit, float probability_of_best_path, int distance_from_best_path)
         : task_type(kGathering),
           start(node),
           base_depth(depth),
           collision_limit(collision_limit),
           moves_to_base(base_moves),
-          probability_of_best_path(probability_of_best_path) {}
+          probability_of_best_path(probability_of_best_path),
+	  distance_from_best_path(distance_from_best_path) {}
     PickTask(int start_idx, int end_idx)
         : task_type(kProcessing), start_idx(start_idx), end_idx(end_idx) {}
   };
@@ -579,7 +583,8 @@ class SearchWorker {
                              const std::vector<Move>& moves_to_base,
                              std::vector<NodeToProcess>* receiver,
                              TaskWorkspace* workspace,
-			     float probability_of_best_path);
+			     float probability_of_best_path,
+			     int distance_from_best_path);
   void EnsureNodeTwoFoldCorrectForDepth(Node* node, int depth);
   void ProcessPickedTask(int batch_start, int batch_end,
                          TaskWorkspace* workspace);

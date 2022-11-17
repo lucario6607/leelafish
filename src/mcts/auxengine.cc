@@ -139,8 +139,7 @@ void Search::AuxEngineWorker() {
     std::string bar;
     // If AuxEngineOptionsOnRoot is set, Thread zero (and one and two if they exists) uses a different parameter and it continuosly explores the root node and the nodes where Leela and the helper disagree.
     // If AuxEngineOptionsOnRoot is not set, thread zero (and one and thread two) becomes just another in-tree helper instance.
-    // was < 3, but thread 3 (index 2)  only exists to get an evaluation that is more comparable with thread 2 (index 1), so not worth it.
-    if(our_index < 2 &&
+    if(our_index < 3 &&
        !params_.GetAuxEngineOptionsOnRoot().empty()
        ){
       bar = params_.GetAuxEngineOptionsOnRoot();

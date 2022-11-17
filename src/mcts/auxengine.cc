@@ -36,6 +36,7 @@
 #include <iterator>
 #include <sstream>
 #include <thread>
+#include <limits> // to get the max integer value
 
 #include "mcts/node.h"
 #include "neural/cache.h"
@@ -72,28 +73,26 @@ void SearchWorker::AuxMaybeEnqueueNode(Node* n) {
   
   // if purging has already happened, then do nothing
   if(! search_->search_stats_->final_purge_run) {
-    // if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE
-    //   << "AuxMaybeEnqueueNode() picked node: " << n->DebugString() 
-    //   << " for the persistent_queue_of_nodes which has size: "
-    //   << search_->search_stats_->persistent_queue_of_nodes.size()
-    //   << " The source was " << source;
     n->SetAuxEngineMove(0xfffe); // magic for pending
     if(search_->search_stats_->persistent_queue_of_nodes.size() < 15000) { // safety net for too low values of AuxEngineThreshold, which would cause this queue to overflow somehow, or just take too much time to check between moves.
       search_->search_stats_->persistent_queue_of_nodes.push(n);
-      // search_->search_stats_->source_of_queued_nodes.push(source);
       search_->auxengine_cv_.notify_one();
     }
   }
   search_->search_stats_->auxengine_mutex_.unlock();
 }
 
-void Search::AuxEngineWorker() {
+  // This thread makes heavy use of tricks to avoid relocking the same mutex, so it generates a lot of false positives.
+  // To counter this, I'll put debug statements around all lock taking and lock releasing in this function.
+void Search::AuxEngineWorker() NO_THREAD_SAFETY_ANALYSIS {
 
   // aquire a lock on pure_stats_mutex_ to ensure no other thread is
   // modifying search_stats_->thread_counter or the vector_of_*
   // vectors
 
+  if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE << " wait for pure stats mutex";  
   search_stats_->pure_stats_mutex_.lock();
+  if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE << " pure stats aquired. I don't know which thread I'll become just yet.";    
 
   // Find out which thread we are by reading the thread_counter.
 
@@ -118,7 +117,9 @@ void Search::AuxEngineWorker() {
  
     // populate the global vectors. 
     search_stats_->vector_of_ipstreams.emplace_back(new boost::process::ipstream);
+    if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE << "Thread " << our_index << " aquire auxengine_stopped";   
     search_stats_->auxengine_stopped_mutex_.lock();
+    if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE << "Thread " << our_index << " auxengine_stopped aquired";
     search_stats_->vector_of_opstreams.emplace_back(new boost::process::opstream);
     search_stats_->auxengine_stopped_mutex_.unlock();
     search_stats_->vector_of_children.emplace_back(new boost::process::child);
@@ -204,7 +205,7 @@ void Search::AuxEngineWorker() {
 	if(params_.GetAuxEngineInstances() == 1 &&
 	   !params_.GetAuxEngineOptionsOnRoot().empty()
 	   ){
-	  search_stats_->AuxEngineThreshold = 0;
+	  search_stats_->AuxEngineThreshold = 0; // Why would this require a write lock on nodes?
 	  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Inactivating the queueing machinery since there is exactly one instance and OnRoot is non-empty.";
 	} else  {
 	  search_stats_->AuxEngineThreshold = params_.GetAuxEngineThreshold();
@@ -242,13 +243,15 @@ void Search::AuxEngineWorker() {
       search_stats_->winning_threads_adjusted = false;
       search_stats_->number_of_nodes_in_support_for_helper_eval_of_root = 0;
       search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child = 0;
+      // before unlocking, save data on number of threads
+      int non_winning_number_of_threads = search_stats_->non_winning_root_threads_;
       search_stats_->best_move_candidates_mutex.unlock();
       if(reconfiguration_needed){
 	// during the previous game, the root exploring helper was reconfigured to use more threads, reconfigure again back to the normal state.
 	// if winning_ was changed from false to true only during the very last move, winning_threads_adjusted is false and no reconfiguration has yet taken place, thus no reconfiguration is needed here.
-	if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "AuxWorker() reconfigured the root-helper to use " << search_stats_->non_winning_root_threads_ << " number of threads again since a new game started.";
+	if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << " auxWorker() reconfigured the root-helper to use " << non_winning_number_of_threads << " number of threads again since a new game started.";
 	search_stats_->auxengine_stopped_mutex_.lock();
-	*search_stats_->vector_of_opstreams[our_index] << "setoption name Threads value " << search_stats_->non_winning_root_threads_ << std::endl;	    
+	*search_stats_->vector_of_opstreams[our_index] << "setoption name Threads value " << non_winning_number_of_threads << std::endl;
 	search_stats_->auxengine_stopped_mutex_.unlock();
       }
 
@@ -582,7 +585,7 @@ void Search::AuxEngineWorker() {
 
   int pv_length = 1;
   int depth_reached = 0;
-  int nodes_to_support = 0;
+  long unsigned int nodes_to_support = 0;
   int max_pv_length = 99; // Dirty work around for too many levels of recursion.
   int eval;
   bool winning = false;
@@ -720,7 +723,7 @@ void Search::AuxEngineWorker() {
     search_stats_->best_move_candidates_mutex.unlock_shared();
 
     if(thread < 3 && nodes_to_support > 500000){
-      // show the PV from continous helpers
+      // show the PV from continuous helpers
       std::string debug_string_root;
       bool flip = ! played_history_.IsBlackToMove(); // only needed for printing moves nicely.      
       for(int i = 0; i < (int) my_moves_from_the_white_side.size(); i++){
@@ -888,12 +891,6 @@ void Search::AuxEngineWorker() {
 }
 
 void Search::DoAuxEngine(Node* n, int index){
-  // before trying to take a lock on nodes_mutex_, always check if search has stopped, in which case we return early
-  // if(stop_.load(std::memory_order_acquire)) {
-  //   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "DoAuxEngine, thread " << index << " caught a stop signal beforing doing anything.";
-  //   return;
-  // }
-
   // Calculate depth.
   int depth = 0;
   bool divergence_found = false;
@@ -902,6 +899,7 @@ void Search::DoAuxEngine(Node* n, int index){
   // If there is a helper PV
   // 1. then put the node back into the queue,
   // 2. find the divergence between Leela and helper. Record the depth of this divergence so that others can tell if a change in either PV requires me to change node to explore. If the change is deeper, no need to interrupt.
+  // 2.5 record the path from root to the helpers preferred node (the edges) in the global vector vector_of_moves_from_root_to_Helpers_preferred_child_node_
   // 3. explore the node Leela prefers at the divergence infinitely
   // 4. someone else will stop the helper if Leela or helper change their mind.
   // 5. make sure the eval is reported so it can be used to veto leelas move.
@@ -1086,13 +1084,6 @@ void Search::DoAuxEngine(Node* n, int index){
     search_stats_->auxengine_mutex_.unlock();
   }
   
-  // if(depth > 1 &&
-  //    depth > params_.GetAuxEngineMaxDepth()){
-  //   // if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "DoAuxEngine processing a node with high depth: " << " since sample " << sample << " is less than " << float(1.0f)/(depth);
-  // }
-    
-  // if (params_.GetAuxEngineVerbosity() >= 6) LOGFILE << "DoAuxEngine processing a node with depth: " << depth;
-
   std::string s = "";
   // bool flip = played_history_.IsBlackToMove() ^ (depth % 2 == 0);
   bool flip = ! played_history_.IsBlackToMove() ^ (depth % 2 == 0);

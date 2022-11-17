@@ -891,7 +891,7 @@ std::vector<EdgeAndNode> Search::GetBestChildrenNoTemperature(Node* parent,
   if (parent->GetN() == 0) return {};
   const bool is_odd_depth = (depth % 2) == 1;
   const float draw_score = GetDrawScore(is_odd_depth);
-  const bool select_move_by_q = params_.GetQBasedMoveSelection();
+  const bool select_move_by_q = params_.GetQBasedMoveSelection() && (stop_.load(std::memory_order_acquire) || parent->GetN() > 10000); // GetBestChildrenNoTemperature is called by GetBestChildNotTemperature(), which in turn is called by PreExtend..() To enhance performance only do the beta calculations when needed.
   const float beta_prior = pow(parent->GetN() + number_of_skipped_playouts, params_.GetMoveSelectionVisitsScalingPower());
   number_of_skipped_playouts = 0; // if search runs out of time, this is the correct number, and if search is stopped early this value will be overwritten.
   // Best child is selected using the following criteria:
@@ -913,16 +913,22 @@ std::vector<EdgeAndNode> Search::GetBestChildrenNoTemperature(Node* parent,
                           ? edges.begin() + count
                           : edges.end();
 
-  search_stats_->best_move_candidates_mutex.lock();
-  bool winning_ = search_stats_->winning_ || search_stats_->stop_a_blunder_;
+  bool winning_ = false;
   Move winning_move_;
-  bool notified = false;
-  if (winning_ && !notified){
-    notified = true;
-    winning_move_ = search_stats_->winning_move_;
-    if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "The move: " << winning_move_.as_string() << " will override Q and N based comparisons, since the helper claims it is winning.";
+
+  // This function is called very often, only check for winning when
+  // it is move selection time. TODO, add a boolean parameter to this
+  // function, and use that from SendUCI info, that way we always
+  // display correct move ordering.
+  if(stop_.load(std::memory_order_acquire)){
+    search_stats_->best_move_candidates_mutex.lock();
+    winning_ = search_stats_->winning_ || search_stats_->stop_a_blunder_;
+    if (winning_){
+      winning_move_ = search_stats_->winning_move_;
+      if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "The move: winning_move_ will override Q and N based comparisons, since the helper claims it is winning.";
+    }
+    search_stats_->best_move_candidates_mutex.unlock();
   }
-  search_stats_->best_move_candidates_mutex.unlock();
   
   std::partial_sort(
       edges.begin(), middle, edges.end(),
@@ -1439,7 +1445,9 @@ void SearchWorker::ExecuteOneIteration() {
 
   if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << std::this_thread::get_id() << " PreExtendTreeAndFastTrackForNNEvaluation() finished in ExecuteOneIteration().";
   // 2. Gather minibatch.
-  GatherMinibatch2();
+  int number_of_nodes_already_added = minibatch_.size();
+  GatherMinibatch2(number_of_nodes_already_added);
+
   task_count_.store(-1, std::memory_order_release);
   search_->backend_waiting_counter_.fetch_add(1, std::memory_order_relaxed);
   // if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "GatherMinibatch2() finished in ExecuteOneIteration().";
@@ -1890,7 +1898,8 @@ int CalculateCollisionsLeft(int64_t nodes, const SearchParams& params) {
 }
 }  // namespace
 
-void SearchWorker::GatherMinibatch2() {
+void SearchWorker::GatherMinibatch2(int number_of_nodes_already_added) {
+  LOGFILE << "GatherMinibatch2() called with " << number_of_nodes_already_added;
   // Total number of nodes to process.
   int minibatch_size = 0;
   int cur_n = 0;

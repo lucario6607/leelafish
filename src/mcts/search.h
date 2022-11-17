@@ -89,7 +89,7 @@ class Search {
 
     std::vector<std::shared_ptr<boost::process::ipstream>> vector_of_ipstreams;
     std::vector<std::shared_ptr<boost::process::opstream>> vector_of_opstreams;
-    std::vector<std::shared_ptr<boost::process::child>> vector_of_children;
+    std::vector<std::shared_ptr<boost::process::child>> vector_of_children; // each pointer is only used by one thread, so no protection needed
     std::vector<bool> vector_of_auxengine_ready_;
     std::vector<bool> auxengine_stopped_;
     int thread_counter;
@@ -403,7 +403,7 @@ class SearchWorker {
   // 2. Gather minibatch.
   void GatherMinibatch();
   // Variant for multigather path.
-  void GatherMinibatch2();
+  void GatherMinibatch2(int number_of_nodes_already_added);
 
   // 2b. Copy collisions into shared_collisions_.
   void CollectCollisions();

@@ -706,6 +706,76 @@ void Search::AuxEngineWorker() NO_THREAD_SAFETY_ANALYSIS {
       }
     }
 
+    // force visit stuff START
+    // If thread 1, then find the divergent node compared to Leelas PV, and record a vector of moves up to that node.
+    // This seems to be a sensitive place, log entry and exit, to help spot more instances of crashes here.
+    
+    if(thread == 1 && nodes_to_support > 500000){
+      std::vector<Move> Leelas_PV;
+      Node * divergent_node = root_node_;
+      if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE << "Thread 1 entering sensitive part of the program, wish me luck!";
+      nodes_mutex_.lock_shared();
+      for(long unsigned int i = 0; i < my_moves_from_the_white_side.size(); i++){
+	if(divergent_node->GetN() > 0){
+	  if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE << "Debug 1";
+	  if(divergent_node->IsTerminal()){
+	    LOGFILE << "Found terminal node in helpers PV, it will probably not have edges, breaking the for loop now";
+	    break;
+	  }
+	  const EdgeAndNode my_edge_and_node = GetBestChildNoTemperature(divergent_node, 0);
+	  if(my_edge_and_node.edge() == nullptr){
+	    LOGFILE << "Got a nullptr as edge from the edgeandnode returned by GetBestChildNoTemperature(), depth = " << i << " out of expected depth (size of PV): " << my_moves_from_the_white_side.size() << " will break to cancel the loop. This is weird since the parent has at least one visit, I expected it to have edges, but perhaps it is terminal?";
+	    break;
+	  }
+	  Leelas_PV.push_back(GetBestChildNoTemperature(divergent_node, 0).edge()->GetMove());
+	  if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE << "Debug 2";	  
+	  auto maybe_a_node = GetBestChildNoTemperature(divergent_node, 0);
+	  if(!maybe_a_node.HasNode()){
+	    LOGFILE << "No node here yet. Nothing to do";
+	    break;
+	  }
+	  if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE << "Debug 3";
+	  divergent_node = maybe_a_node.node();
+	  if(Leelas_PV[i].as_string() != my_moves_from_the_white_side[i].as_string()){
+	  if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE << "Debug 4";
+	    // find the node corresponding the helper recommended move
+	    for (auto& edge_and_node : divergent_node->GetParent()->Edges()){
+	      if(edge_and_node.GetMove().as_string() == my_moves_from_the_white_side[i].as_string()){
+		if(!edge_and_node.HasNode()){
+		  LOGFILE << "The helper recommendation at depth " << i << " does not have a node yet!";
+		} else {
+		  if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE << "Thread 1 found the node which corresponds to the helper recommendation in Leelas PV: " << my_moves_from_the_white_side[i].as_string() << " at depth " << i << ". About to set stuff.";
+		  divergent_node = edge_and_node.node();
+		  // Record the path to this node, and the node itself
+		  search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.lock();
+		  if(search_stats_->Helpers_preferred_child_node_in_Leelas_PV_ != divergent_node &&
+		     search_stats_->Helpers_preferred_child_node_ != divergent_node){
+		    search_stats_->Helpers_preferred_child_node_in_Leelas_PV_ = divergent_node;
+		    search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_ = {};
+		    if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE << "Thread 1 found the node which corresponds to the helper recommendation in Leelas PV: " << my_moves_from_the_white_side[i].as_string() << " at depth " << i << ". Setting Helpers_preferred_child_node_in_Leelas_PV_ and cleared vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_";
+		    for(Node * n = divergent_node; n != root_node_; n = n->GetParent()){
+		      search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.push_back(n->GetOwnEdge()->GetMove());
+		    }
+		    // Reverse the order, need to be move to child from root at the beginning.
+		    std::reverse(search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.begin(), search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.end());
+		    if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE << "Finished populating and reversing the vector vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_";
+		  }
+		  search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
+		  break;
+		}
+	      }
+	    }
+	    break;
+	  }
+	}
+	// Leela agrees until a leaf
+      }
+      nodes_mutex_.unlock_shared();
+      if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE << "Thread 1 survived sensitive part of the program.";      
+    }
+    
+    // force visit stuff STOP    
+
     // Prepare autopilot and blunder vetoing START
     // before search_stats_->winning_threads_adjusted is set, accept changes in all directions.
     // after search_stats_->winning_threads_adjusted is set, just inform, don't change the state of search_stats_->winning_
@@ -993,6 +1063,20 @@ void Search::DoAuxEngine(Node* n, int index){
 		// if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Thread 2 found special work with node: " << divergent_node->DebugString() << " which corresponds to the helper recommendation: " << helper_PV_local[i].as_string();
 		bool flip = played_history_.IsBlackToMove() ^ (i % 2 == 0);
 		if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Thread 2: Will start working with the move that the helper recommends: " << Move(helper_PV_local[i].as_string(), !flip).as_string();
+
+		// stuff required for force visits START
+		// Record the path to this node, and the node itself
+		search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.lock();
+		search_stats_->Helpers_preferred_child_node_ = divergent_node;
+		search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_ = {};
+		for(n = divergent_node; n != root_node_; n = n->GetParent()){
+		  search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.push_back(n->GetOwnEdge()->GetMove());
+		}
+		// Reverse the order, need to be move to child from root at the beginning.
+		std::reverse(search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.begin(), search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.end());
+		search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
+		// stuff required for force visits STOP		
+		
 		divergence_found = true;
 		break;
 	      }
@@ -1437,7 +1521,14 @@ void Search::AuxWait() {
     if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Number of PV:s in the queue after purging: " << search_stats_->fast_track_extend_and_evaluate_queue_.size();
   }
   search_stats_->fast_track_extend_and_evaluate_queue_mutex_.unlock();
-  if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "AuxWait done search_stats_ at: " << &search_stats_;
+
+  // Reset the force visits vector.
+  search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.lock();
+  search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_ = {};
+  search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_ = {};
+  search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
+
+  if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "AuxWait done search_stats_ at: " << &search_stats_;
 }
 
 }  // namespace lczero

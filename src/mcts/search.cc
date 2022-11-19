@@ -1398,7 +1398,7 @@ void SearchWorker::RunTasks(int tid) {
         case PickTask::kGathering: {
           PickNodesToExtendTask(task->start, task->base_depth,
                                 task->collision_limit, task->moves_to_base,
-                                &(task->results), &(task_workspaces_[tid]), task->probability_of_best_path, task->distance_from_best_path);
+                                &(task->results), &(task_workspaces_[tid]), task->probability_of_best_path, task->distance_from_best_path, false);
           break;
         }
         case PickTask::kProcessing: {
@@ -1899,7 +1899,7 @@ int CalculateCollisionsLeft(int64_t nodes, const SearchParams& params) {
 }  // namespace
 
 void SearchWorker::GatherMinibatch2(int number_of_nodes_already_added) {
-  LOGFILE << "GatherMinibatch2() called with " << number_of_nodes_already_added;
+  if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE << "GatherMinibatch2() called with " << number_of_nodes_already_added;
   // Total number of nodes to process.
   int minibatch_size = 0;
   int cur_n = 0;
@@ -1925,10 +1925,13 @@ void SearchWorker::GatherMinibatch2(int number_of_nodes_already_added) {
 
   int thread_count = search_->thread_count_.load(std::memory_order_acquire);
 
+  int iteration_counter = 0;
+
   // Gather nodes to process in the current batch.
   // If we had too many nodes out of order, also interrupt the iteration so
   // that search can exit.
-  while (minibatch_size < params_.GetMiniBatchSize() &&
+
+  while (minibatch_size < params_.GetMiniBatchSize() - number_of_nodes_already_added &&
          number_out_of_order_ < params_.GetMaxOutOfOrderEvals()) {
     // If there's something to process without touching slow neural net, do it.
     if (minibatch_size > 0 && computation_->GetCacheMisses() == 0) return;
@@ -1948,21 +1951,37 @@ void SearchWorker::GatherMinibatch2(int number_of_nodes_already_added) {
     }
 
     int new_start = static_cast<int>(minibatch_.size());
+    long unsigned int size_before_picking = new_start;
 
-    PickNodesToExtend(
-        std::min({collisions_left, params_.GetMiniBatchSize() - minibatch_size,
-                  params_.GetMaxOutOfOrderEvals() - number_out_of_order_}));
-
-    // Count the non-collisions.
-    int non_collisions = 0;
-    for (int i = new_start; i < static_cast<int>(minibatch_.size()); i++) {
-      auto& picked_node = minibatch_[i];
-      if (picked_node.IsCollision()) {
-        continue;
-      }
-      ++non_collisions;
-      ++minibatch_size;
+    // if(iteration_counter == 0 && number_of_nodes_already_added == 0){
+    if(iteration_counter == 0){      
+      // First run is a custom run which may override CPUCT and force visits into a specific line.
+      // int max_force_visits = int(floor((params_.GetMiniBatchSize() - number_of_nodes_already_added)* params_.GetAuxEngineForceVisitsRatio()));
+      int max_force_visits = int((params_.GetMiniBatchSize() - number_of_nodes_already_added)* 0.5);
+      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::GatherMinibatch2 About to run PickNodesToExtend() with override_cpuct = true and max_force_visits (collision_limit)=" << max_force_visits;
+      PickNodesToExtend(max_force_visits, true);
+    } else {
+      // Normal run
+      if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE << "Will call PickNodesToExtend() with collision_limit=" << std::min({collisions_left, params_.GetMiniBatchSize() - number_of_nodes_already_added - minibatch_size,
+	    params_.GetMaxOutOfOrderEvals() - number_out_of_order_}) << " current minibatch size = " << (minibatch_size + number_of_nodes_already_added) << " real minibatch (including collions?)_size is " << minibatch_.size();
+      PickNodesToExtend(
+			  std::min({collisions_left, params_.GetMiniBatchSize() - number_of_nodes_already_added - minibatch_size,
+			      params_.GetMaxOutOfOrderEvals() - number_out_of_order_}), false);
     }
+    iteration_counter++;
+
+      // Count the non-collisions.
+      int non_collisions = 0;
+      for (int i = new_start; i < static_cast<int>(minibatch_.size()); i++) {
+	auto& picked_node = minibatch_[i];
+	if (picked_node.IsCollision()) {
+	  continue;
+	}
+	++non_collisions;
+	++minibatch_size;
+      }
+
+      if (params_.GetAuxEngineVerbosity() >= 2 && iteration_counter == 1 && size_before_picking < minibatch_.size()) LOGFILE << "GatherMinibatch2() did add nodes with override cpuct = true and found " << non_collisions << " non_collisions out of " << minibatch_.size() - size_before_picking << " tested nodes";
 
     bool needs_wait = false;
     int ppt_start = new_start;
@@ -2146,7 +2165,7 @@ int SearchWorker::WaitForTasks() {
   }
 }
 
-void SearchWorker::PickNodesToExtend(int collision_limit) {
+void SearchWorker::PickNodesToExtend(int collision_limit, bool override_cpuct) {
   ResetTasks();
   {
     // While nothing is ready yet - wake the task runners so they are ready to
@@ -2159,14 +2178,15 @@ void SearchWorker::PickNodesToExtend(int collision_limit) {
   // Since the tasks perform work which assumes they have the lock, even though
   // actually this thread does.
   SharedMutex::Lock lock(search_->nodes_mutex_);
-  PickNodesToExtendTask(search_->root_node_, 0, collision_limit, empty_movelist,
-                        &minibatch_, &main_workspace_, 1, 0);
-
-  WaitForTasks();
-  for (int i = 0; i < static_cast<int>(picking_tasks_.size()); i++) {
-    for (int j = 0; j < static_cast<int>(picking_tasks_[i].results.size());
-         j++) {
-      minibatch_.emplace_back(std::move(picking_tasks_[i].results[j]));
+  bool more_work = PickNodesToExtendTask(search_->root_node_, 0, collision_limit, empty_movelist,
+                        &minibatch_, &main_workspace_, 1, 0, override_cpuct);
+  if(more_work){
+    WaitForTasks();
+    for (int i = 0; i < static_cast<int>(picking_tasks_.size()); i++) {
+      for (int j = 0; j < static_cast<int>(picking_tasks_[i].results.size());
+	   j++) {
+	minibatch_.emplace_back(std::move(picking_tasks_[i].results[j]));
+      }
     }
   }
 }
@@ -2212,20 +2232,238 @@ void SearchWorker::EnsureNodeTwoFoldCorrectForDepth(Node* child_node,
   }
 }
 
-void SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
+bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
                                          int collision_limit,
                                          const std::vector<Move>& moves_to_base,
                                          std::vector<NodeToProcess>* receiver,
                                          TaskWorkspace* workspace,
 					 float probability_of_best_path,
-					 int distance_from_best_path) {
+					 int distance_from_best_path,
+					 bool override_cpuct) {
 
   // TODO: Bring back pre-cached nodes created outside locks in a way that works
   // with tasks.
   // TODO: pre-reserve visits_to_perform for expected depth and likely maximum
   // width. Maybe even do so outside of lock scope.
 
-  if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << "distance from best path: " << distance_from_best_path;
+  if(override_cpuct){
+
+    // 1. under what condition will we actually override cpuct?
+    // A: the helpers PV should have a positive number of nodes of support
+    // B: the helpers should claim that the helpers PV is better than leelas PV
+
+    // 2. under what conditions do we also reserve visits for the "refutation" of Leelas PV? Whenever the above conditions hold and:
+    // A: There is a refutation, a) there is a disagreement between Leelas PV and helper PV; b) the helper and leela disagrees about the continuation after the point where they diverge in a).
+    // operationalisation
+    // A: the refutation is not identical to the helpers preferred PV (they are identical when the helper and Leela disagrees on the first ply) and
+    // B: there are collisions left enough for both the PV and the refutation.
+    // The vector of moves from root to helpers preferred continuation IN LEELAS PV has more moves than the
+    // There is a refutation: vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size() > 0 (is this reset to empty when leela and helper start to agree?
+    
+    
+    float ratio_to_refutation = 0.25; // Tune this?
+    int orig_collision_limit = collision_limit;
+    if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() About to aquire a lock on best_move_candidates.";
+    search_->search_stats_->best_move_candidates_mutex.lock(); // for reading search_stats_->winning_ and the other
+    if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Lock on best_move_candidates aquired.";    
+    int centipawn_diff = std::abs(search_->search_stats_->helper_eval_of_leelas_preferred_child - search_->search_stats_->helper_eval_of_helpers_preferred_child);
+    // force visits unless the helper really thinks its own line is worse.    
+    if(search_->search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child > 0 &&
+       search_->search_stats_->helper_eval_of_leelas_preferred_child < search_->search_stats_->helper_eval_of_helpers_preferred_child + 20 &&
+       search_->search_stats_->Helpers_preferred_child_node_in_Leelas_PV_ != nullptr &&
+       search_->search_stats_->Helpers_preferred_child_node_ != nullptr &&
+       search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size() > 0 &&
+       search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size() > 0       
+       ){
+      if(!search_->search_stats_->helper_thinks_it_is_better && search_->search_stats_->helper_eval_of_leelas_preferred_child < search_->search_stats_->helper_eval_of_helpers_preferred_child){
+	search_->search_stats_->helper_thinks_it_is_better = true;
+	if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Helper thinks it is better.";
+      }
+      search_->search_stats_->best_move_candidates_mutex.unlock();
+      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Lock on best_move_candidates released.";
+      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() About to aquire a lock on vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.";
+      search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.lock();
+      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_ aquired.";
+
+      int depth = search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size();
+      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() vector_of_moves_from_root_to_Helpers_preferred_child_node_size() read.";
+      // scale the number of visits by some factor that corresponds to how acute it is that Leela learns what the helper thinks. The downside is that Leela will have fewer free visits to find out unexpected stuff.
+      // highly acute is large diff and low depth of divergence.
+      // SSS Test showed that relevance 1.0 is best with 18 threads on root. The stronger the helpers, the better a high relevance will perform. For a 64 threads system this is good (SSS). Lower ForceVisitsRatio if you want less.
+      // float relevance = 1.0; // between 1 and 0
+      // if(depth == 1 && centipawn_diff > 5){
+      //   relevance = 1.0;
+      // }
+      // if(depth == 1 && centipawn_diff <= 5){
+      //   relevance = 0.8;
+      // }
+      // if(depth == 2 && centipawn_diff > 5){
+      //   relevance = 0.8;
+      // }
+      // if(depth == 2 && centipawn_diff <= 5){
+      //   relevance = 0.5;
+      // }
+      // if(depth == 3 && centipawn_diff > 5){
+      //   relevance = 0.6;
+      // }
+      // if(depth == 3 && centipawn_diff <= 5){
+      //   relevance = 0.25;
+      // }
+      // if(depth > 3 && centipawn_diff > depth){
+      //   relevance = 0.5;
+      // }
+      // orig_collision_limit = int(std::floor(orig_collision_limit * relevance));
+      // collision_limit = std::max(2, orig_collision_limit);
+      // a_size, b_size, hpc_visits and hpcb_visits not used, why?
+      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() about to read vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_size() .";
+      int a_size = search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size();
+      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() about to read vector_of_moves_from_root_to_Helpers_preferred_child_node_size() .";      
+      int b_size = search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size();
+      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() about to read number of visits from Helpers preferred child node .";            
+      long unsigned int hpc_visits = search_->search_stats_->Helpers_preferred_child_node_->GetN(); // assume nodes shared lock
+      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() about to read number of visits from Helpers preferred child node in Leelas PV.";
+      long unsigned int hpcb_visits = search_->search_stats_->Helpers_preferred_child_node_in_Leelas_PV_->GetN();
+      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() read finished. Length of Helpers preferred child node in Leelas PV: " << a_size
+						       << " Length of Helpers preferred child node: " << b_size
+						       << " Visits to Helpers_preferred_child_node: " << hpc_visits
+						       << " Visits to Helpers_preferred_child_node in Leelas PV: " << hpcb_visits;
+      // // These can be the same. We assure they are different by requiring the first to be deeper/larger.
+      // if(search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size() >
+      // 	 search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size()){
+      // 	// The visits is to be shared on two paths, with at least 2 nodes to share into one node each.
+      // 	collision_limit = std::max(2, int(std::floor(collision_limit * (1 - ratio_to_refutation))));
+      // }
+
+      // Just logging
+      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "The helper engine thinks the root explorers preferred continuation is " << centipawn_diff << " centipawns better than Leelas, so forcing " << collision_limit << " visits via the node the helper prefers until further notice. The divergence is at depth: " << search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size() << " the helper's preferred node has " << search_->search_stats_->Helpers_preferred_child_node_->GetN() << " visits.";
+      if(params_.GetAuxEngineVerbosity() >= 2 && search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size() >
+	 search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size()) LOGFILE << std::max(1, orig_collision_limit - collision_limit) << " visits will be forced via the node where the helper diverges in Leelas PV, which happens at depth: " << search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size();
+
+      // Note nested lock picking_tasks_mutex_ within vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_
+      signed int initial_n_in_flight = search_->search_stats_->Helpers_preferred_child_node_->GetNInFlight();
+
+      // negative n in flights spotted
+      if(initial_n_in_flight < 0){ // Weird, don't do anything
+	// release locks and return early
+	LOGFILE << "Negative n in flight, back out and return early";
+	search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
+	return false;
+      }
+      
+      int initial_batch_size = minibatch_.size();
+      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "initial n in flight: " << initial_n_in_flight;
+      {
+	Mutex::Lock lock(picking_tasks_mutex_);
+	picking_tasks_.emplace_back(
+		  search_->search_stats_->Helpers_preferred_child_node_,
+		  search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size(),
+                  search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_,
+		  collision_limit, probability_of_best_path, distance_from_best_path);
+	task_count_.fetch_add(1, std::memory_order_acq_rel);
+	task_added_.notify_all();
+      }
+      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Will wait for tasks";
+      WaitForTasks();
+      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Finished waiting for tasks";      
+      for (int i = 0; i < static_cast<int>(picking_tasks_.size()); i++) {
+	for (int j = 0; j < static_cast<int>(picking_tasks_[i].results.size());
+	     j++) {
+	    minibatch_.emplace_back(std::move(picking_tasks_[i].results[j]));
+	}
+      }
+      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Finished copying results to minibatch";            
+
+      // Fix N-in-flight for parents above the starting node
+      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "new n-in-flight: " << search_->search_stats_->Helpers_preferred_child_node_->GetNInFlight();
+      // What about OOE, would the visits add up?
+      int visits_to_add = minibatch_.size() - initial_batch_size;
+      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "visits to add: " << visits_to_add;
+      if(visits_to_add > 0){
+	for(Node * n = search_->search_stats_->Helpers_preferred_child_node_; n != search_->root_node_; n = n->GetParent()){
+	  n->IncrementNInFlight(visits_to_add);
+	}
+	// The loop above stops just before root, so fix root too. // TODO fix this ugly off-by-one hack. (perhaps test for n != nullptr)
+	search_->root_node_->IncrementNInFlight(visits_to_add);
+	if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Added visits in flight, start node now has: " << search_->search_stats_->Helpers_preferred_child_node_->GetNInFlight() << " visits in flight.";
+      }
+      
+      // And now do the same for the Helpers recommended node in Leelas PV, if it exists.
+      // if(search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size() >
+      // 	   search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size()){
+      if(search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size() > 0){
+	if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "visits for the helpers preferred node in Leelas PV:" << search_->search_stats_->Helpers_preferred_child_node_in_Leelas_PV_->GetN();
+
+	initial_batch_size = minibatch_.size();	
+
+	{	  
+	  Mutex::Lock lock(picking_tasks_mutex_);
+	  picking_tasks_.emplace_back(
+		  search_->search_stats_->Helpers_preferred_child_node_in_Leelas_PV_,
+		  search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size(),
+                  search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_,
+		  std::max(1, orig_collision_limit - collision_limit), probability_of_best_path, distance_from_best_path);
+	  task_count_.fetch_add(1, std::memory_order_acq_rel);
+	  task_added_.notify_all();
+	}	
+	WaitForTasks();
+	for (int i = 0; i < static_cast<int>(picking_tasks_.size()); i++) {
+	  for (int j = 0; j < static_cast<int>(picking_tasks_[i].results.size());
+	       j++) {
+	    minibatch_.emplace_back(std::move(picking_tasks_[i].results[j]));
+	  }
+	}
+
+	// Fix N-in-flight for parents above the starting node
+	visits_to_add = minibatch_.size() - initial_batch_size;
+	if(visits_to_add > 0){
+	  for(Node * n = search_->search_stats_->Helpers_preferred_child_node_in_Leelas_PV_->GetParent(); n != search_->root_node_; n = n->GetParent()){
+	    n->IncrementNInFlight(visits_to_add);  
+	  }
+	  // The loop above stops just before root, so fix root too. // TODO fix this ugly off-by-one hack. (perhaps test for n != nullptr)
+	  search_->root_node_->IncrementNInFlight(visits_to_add);
+	}
+      } else {
+	if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "No second level divergence to add";
+      }
+
+      // TODO: use local vars and release locks faster?
+      search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
+      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_ released.";
+      return false; // no more work for PickNodesToExtend()
+    } else { // Helper does not think it is better
+      if (params_.GetAuxEngineVerbosity() >= 2){
+	// Explain why we did not forced visits
+	LOGFILE << "Not forcing visits in PickNodesToExtendTask";;
+	if(!search_->search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child > 0){
+	  LOGFILE << "search_->search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child not greater than 0";
+	}
+	if(!search_->search_stats_->helper_eval_of_leelas_preferred_child < search_->search_stats_->helper_eval_of_helpers_preferred_child + 20){
+	  LOGFILE << "search_->search_stats_->helper_eval_of_leelas_preferred_child" << " is less than search_->search_stats_->helper_eval_of_helpers_preferred_child + 20 which is: " << search_->search_stats_->helper_eval_of_helpers_preferred_child + 20;
+	}
+	if(search_->search_stats_->Helpers_preferred_child_node_in_Leelas_PV_ == nullptr){
+	  LOGFILE << "search_->search_stats_->Helpers_preferred_child_node_in_Leelas_PV_ is a null pointer";
+	}
+	if(search_->search_stats_->Helpers_preferred_child_node_ == nullptr){
+	  LOGFILE << "search_->search_stats_->Helpers_preferred_child_node_ is a null pointer";
+	}
+	if(!search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size() > 0){
+	  LOGFILE << "search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size() is zero";
+	}
+	if(!search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size() > 0){
+	  LOGFILE << "search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size() is zero";
+	}
+	if(search_->search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child > 0) LOGFILE << "The helper engine does not think the root explorers continuation (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") is better than Leelas (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "), so not forcing any visits this batch.";
+	if(search_->search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child == 0) LOGFILE << "The helper engine (thread 1) has not yet provided PV.";
+      }
+      // If it previously thought so, then change that now
+      if(search_->search_stats_->helper_thinks_it_is_better){
+	search_->search_stats_->helper_thinks_it_is_better = false;
+	if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "The helper engine has changed it's mind and it does not think that the root explorers continuation is better than Leelas PV.";
+      }
+      search_->search_stats_->best_move_candidates_mutex.unlock();
+      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() best_move_candidates released.";
+    } // End of Helper does not think it is better any more.
+  } // end of override CPUCT
 
   auto& vtp_buffer = workspace->vtp_buffer;
   auto& visits_to_perform = workspace->visits_to_perform;
@@ -2578,6 +2816,7 @@ void SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
       vtp_last_filled.pop_back();
     }
   }
+  return true;
 }
 
 void SearchWorker::ExtendNode(Node* node, int depth,
@@ -3419,7 +3658,7 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 	    // if(factor_for_us * n->GetQ(0.0f) > root_q){
 	    // LOGFILE << "We are better than root. we: " << factor_for_us * n->GetQ(0.0f) << " root: " << root_q << " will enqueue it (unless the node is terminal).";
 	    // Check that it's not terminal and not already queued and not too deep.
-	    if(!n->IsTerminal() && n->GetAuxEngineMove() == 0xffff && depth < 30){
+	    if(!n->IsTerminal() && n->GetAuxEngineMove() == 0xffff && depth < 35 && current_amount_of_support > 5000){
 	      AuxMaybeEnqueueNode(n);
 	    }
 	    

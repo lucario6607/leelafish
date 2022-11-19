@@ -69,6 +69,7 @@ class Search {
     // std::queue<int> source_of_PVs; // 0 = SearchWorker::PickNodesToExtendTask(); 1 = Search::DoBackupUpdateSingleNode(); 2 = Search::SendUciInfo(); 3 = Search::AuxEngineWorker() node is root. Whenever k (=1 or more) PVs are created from a single node, add k elements with value source from source_of_queued_nodes into this queue.
     std::queue<int> amount_of_support_for_PVs_; // Whenever an element from fast_track_extend_and_evaluate_queue_ is popped by PreExt...(), record the number of nodes to support for that PV in this vector. This way MaybeAdjustPolicyForHelperAddedNodes() can guesstimate the number of nodes there are to backup an added node.
     std::queue<int> starting_depth_of_PVs_; // needed to calculate the estimated number of nodes in support for a recommended move.
+    bool helper_thinks_it_is_better GUARDED_BY(best_move_candidates_mutex) = false;    
     bool winning_ GUARDED_BY(best_move_candidates_mutex) = false;
     bool winning_threads_adjusted GUARDED_BY(best_move_candidates_mutex) = false;
     bool stop_a_blunder_ GUARDED_BY(best_move_candidates_mutex) = false;
@@ -577,14 +578,15 @@ class SearchWorker {
   // Returns whether a node's bounds were set based on its children.
   bool MaybeSetBounds(Node* p, float m, int* n_to_fix, float* v_delta,
                       float* d_delta, float* m_delta) const;
-  void PickNodesToExtend(int collision_limit);
-  void PickNodesToExtendTask(Node* starting_point, int collision_limit,
+  void PickNodesToExtend(int collision_limit, bool override_cpuct);
+  bool PickNodesToExtendTask(Node* starting_point, int collision_limit,
                              int base_depth,
                              const std::vector<Move>& moves_to_base,
                              std::vector<NodeToProcess>* receiver,
                              TaskWorkspace* workspace,
 			     float probability_of_best_path,
-			     int distance_from_best_path);
+			     int distance_from_best_path,
+			     bool override_cpuct);
   void EnsureNodeTwoFoldCorrectForDepth(Node* node, int depth);
   void ProcessPickedTask(int batch_start, int batch_end,
                          TaskWorkspace* workspace);

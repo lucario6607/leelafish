@@ -710,7 +710,7 @@ void Search::AuxEngineWorker() NO_THREAD_SAFETY_ANALYSIS {
     // If thread 1, then find the divergent node compared to Leelas PV, and record a vector of moves up to that node.
     // This seems to be a sensitive place, log entry and exit, to help spot more instances of crashes here.
     
-    if(thread == 1 && nodes_to_support > 500000){
+    if(thread == 1 && nodes_to_support > 5000){
       std::vector<Move> Leelas_PV;
       Node * divergent_node = root_node_;
       if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE << "Thread 1 entering sensitive part of the program, wish me luck!";
@@ -796,7 +796,7 @@ void Search::AuxEngineWorker() NO_THREAD_SAFETY_ANALYSIS {
     bool local_copy_thread_one_and_two_have_started = search_stats_->thread_one_and_two_have_started;
     search_stats_->best_move_candidates_mutex.unlock_shared();
 
-    if(thread < 3 && nodes_to_support > 500000){
+    if(thread < 3 && nodes_to_support > 5000){
       // show the PV from continuous helpers
       std::string debug_string_root;
       bool flip = played_history_.IsBlackToMove(); // only needed for printing moves nicely.      
@@ -855,7 +855,7 @@ void Search::AuxEngineWorker() NO_THREAD_SAFETY_ANALYSIS {
 	      if(i == local_copy_PVs_diverge_at_depth){
 		// helper changed its mind at the same node as the old divergence, but leela hasn't changed, so no need to restart thread one unless helper now agrees with leela
 		// does helper now agree with leela?
-		bool flip = ! played_history_.IsBlackToMove() ^ (i % 2 == 0); // only needed for printing moves nicely.
+		bool flip = played_history_.IsBlackToMove() ^ (i % 2 == 0); // only needed for printing moves nicely.
 		if(local_copy_of_leelas_PV[i] == my_moves_from_the_white_side[i]){
 		  // Helper changed its mind and now agrees with Leela, also restart thread one.
 		  need_to_restart_thread_one = true;

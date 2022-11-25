@@ -2283,7 +2283,7 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
       // alternate forcing visits to the first and the second divergence.
       if(!search_->search_stats_->first_divergence_already_covered){
 	bool act_on_first_divergence = false;
-	if((search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size() % 2) == 0){
+	if((search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size() % 2) != 0){
 	  if(search_->search_stats_->helper_eval_of_leelas_preferred_child < search_->search_stats_->helper_eval_of_helpers_preferred_child){
 	    if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() found divergence at an odd distance from root, so maximising helper eval, and helper eval of helper preferred line is higher (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "). This means the helper has found a better move for the side to move (Leela).";
 	    act_on_first_divergence = true;

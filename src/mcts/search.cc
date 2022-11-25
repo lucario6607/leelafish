@@ -1960,7 +1960,7 @@ void SearchWorker::GatherMinibatch2(int number_of_nodes_already_added) {
     if(iteration_counter == 0){      
       // First run is a custom run which may override CPUCT and force visits into a specific line.
       // int max_force_visits = int(floor((params_.GetMiniBatchSize() - number_of_nodes_already_added)* params_.GetAuxEngineForceVisitsRatio()));
-      int max_force_visits = int((params_.GetMiniBatchSize() - number_of_nodes_already_added)* 0.5);
+      int max_force_visits = int((params_.GetMiniBatchSize() - number_of_nodes_already_added)* 0.8);
       // if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::GatherMinibatch2 About to run PickNodesToExtend() with override_cpuct = true and max_force_visits (collision_limit)=" << max_force_visits;
       PickNodesToExtend(max_force_visits, true);
     } else {
@@ -2289,6 +2289,8 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	    act_on_first_divergence = true;
 	  } else {
 	    if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() found divergence at an odd distance from root, so maximising helper eval, and helper eval of helper preferred line is lower (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "), so Leela has found a better move for the side to move (Leela). Not forcing any visits.";
+	    act_on_first_divergence = true;
+	    collision_limit_one = collision_limit_one * 0.1;
 	  }
 	} else {
 	  if(search_->search_stats_->helper_eval_of_leelas_preferred_child > search_->search_stats_->helper_eval_of_helpers_preferred_child){
@@ -2296,6 +2298,8 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	    act_on_first_divergence = true;
 	  } else {
 	    if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() found divergence at an even distance from root, so minimising helper eval, and helper eval of helper preferred line is higher (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "), so Leelas has found a better move for the opponent. Not forcing any visits.";
+	    act_on_first_divergence = true;	    
+	    collision_limit_one = collision_limit_one * 0.1;	    
 	  }
 	}
 

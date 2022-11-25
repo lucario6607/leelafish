@@ -376,7 +376,7 @@ const OptionId SearchParams::kQuiescenceDeltaThresholdId{
     "which triggers immediate extension of the child if Delta Q is higher "
     "than this threshold."};
 const OptionId SearchParams::kQuiescencePolicyThresholdId{
-    "quiscence-delta-threshold", "QuiescencePolicyThreshold",
+    "quiscence-policy-threshold", "QuiescencePolicyThreshold",
     "Threshold for Policy of an unextended edge that will be automatically " 
     "extended if the previous move was a capture or put the opponent into check."};
 

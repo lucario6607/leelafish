@@ -361,8 +361,10 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
 	  notified_already = true; // only check until this is true, and thus only act once.
 	  if(depth < local_copy_of_PVs_diverge_at_depth){ // Disagreement is now earlier than it was before, both threads need to be restarted.
 	    need_to_restart_thread_one = true;
-	    need_to_restart_thread_two = true;	    
-	    if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Found a relevant change in Leelas PV at depth " << depth << ". Old divergence happened at depth=" << local_copy_of_PVs_diverge_at_depth << " New divergence at depth=" << depth << " Leelas new move here is: " << iter.GetMove().as_string() << " and is different from Leelas old move: " << local_copy_of_leelas_PV[depth].as_string() << ", will thus restart both thread 1 and thread 2.";
+	    need_to_restart_thread_two = true;
+	    Move m;
+	    Move::ParseMove(&m, local_copy_of_leelas_PV[depth].as_string(), flip);
+	    if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Found a relevant change in Leelas PV at depth " << depth << ". Old divergence happened at depth=" << local_copy_of_PVs_diverge_at_depth << " New divergence at depth=" << depth << " Leelas new move here is: " << iter.GetMove(flip).as_string() << " and is different from Leelas old move: " << m.as_string() << ", will thus restart both thread 1 and thread 2.";
 	    // local_copy_of_PVs_diverge_at_new_depth = depth;
 	  }
 	  // Change in Leelas PV at the same node as the previous divergence , necessarily restart thread one, but only restart thread two if there is still a divergence.
@@ -373,9 +375,9 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
 	    if(iter.GetMove().as_string() == local_copy_of_helper_PV[depth].as_string()){
 	      // Leela has changed her mind and does now agree with the helper. Thread two will have to find another starting point.
 	      need_to_restart_thread_two = true;
-	      if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Leela has changed her mind and does now agree with the helper that move " << iter.GetMove().as_string() << " is better than her old preference: " << local_copy_of_leelas_PV[depth].as_string() << ". Thread two will thus have to find another starting point, restarting thread 2 now.";
+	      if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Leela has changed her mind and does now agree with the helper that move " << iter.GetMove(flip).as_string() << " is better than her old preference: " << local_copy_of_leelas_PV[depth].as_string() << ". will thus restarting both thread 1 and thread 2 now.";
 	    } else {
-	      if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Leela changed her mind exactly where she and helper disagreed, but she still disagrees and prefers " << iter.GetMove().as_string() << " instead of " << local_copy_of_helper_PV[depth].as_string() << " helper (thread 2) can just continue.";
+	      if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Leela changed her mind exactly where she and helper disagreed, but she still disagrees and prefers " << iter.GetMove(flip).as_string() << " instead of " << local_copy_of_helper_PV[depth].as_string() << " helper (thread 2) can just continue.";
 	    }
 	  }
 	} else {
@@ -1481,7 +1483,7 @@ void SearchWorker::ExecuteOneIteration() {
   // 7. Update the Search's status and progress information.
   UpdateCounters();
 
-  if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << std::this_thread::get_id() << " finished one full iteration.";  
+  // if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << std::this_thread::get_id() << " finished one full iteration.";  
 
   // If required, waste time to limit nps.
   if (params_.GetNpsLimit() > 0) {
@@ -1900,7 +1902,7 @@ int CalculateCollisionsLeft(int64_t nodes, const SearchParams& params) {
 }  // namespace
 
 void SearchWorker::GatherMinibatch2(int number_of_nodes_already_added) {
-  if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "GatherMinibatch2() called with " << number_of_nodes_already_added;
+  if (params_.GetAuxEngineVerbosity() >= 2 && number_of_nodes_already_added > 0) LOGFILE << "GatherMinibatch2() called with " << number_of_nodes_already_added;
   // Total number of nodes to process.
   int minibatch_size = 0;
   int cur_n = 0;
@@ -1952,19 +1954,19 @@ void SearchWorker::GatherMinibatch2(int number_of_nodes_already_added) {
     }
 
     int new_start = static_cast<int>(minibatch_.size());
-    long unsigned int size_before_picking = new_start;
+    // long unsigned int size_before_picking = new_start;
 
     // if(iteration_counter == 0 && number_of_nodes_already_added == 0){
     if(iteration_counter == 0){      
       // First run is a custom run which may override CPUCT and force visits into a specific line.
       // int max_force_visits = int(floor((params_.GetMiniBatchSize() - number_of_nodes_already_added)* params_.GetAuxEngineForceVisitsRatio()));
       int max_force_visits = int((params_.GetMiniBatchSize() - number_of_nodes_already_added)* 0.5);
-      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::GatherMinibatch2 About to run PickNodesToExtend() with override_cpuct = true and max_force_visits (collision_limit)=" << max_force_visits;
+      // if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::GatherMinibatch2 About to run PickNodesToExtend() with override_cpuct = true and max_force_visits (collision_limit)=" << max_force_visits;
       PickNodesToExtend(max_force_visits, true);
     } else {
       // Normal run
-      if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE << "Will call PickNodesToExtend() with collision_limit=" << std::min({collisions_left, params_.GetMiniBatchSize() - number_of_nodes_already_added - minibatch_size,
-	    params_.GetMaxOutOfOrderEvals() - number_out_of_order_}) << " current minibatch size = " << (minibatch_size + number_of_nodes_already_added) << " real minibatch (including collions?)_size is " << minibatch_.size();
+      // if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE << "Will call PickNodesToExtend() with collision_limit=" << std::min({collisions_left, params_.GetMiniBatchSize() - number_of_nodes_already_added - minibatch_size,
+      // 	    params_.GetMaxOutOfOrderEvals() - number_out_of_order_}) << " current minibatch size = " << (minibatch_size + number_of_nodes_already_added) << " real minibatch (including collions?)_size is " << minibatch_.size();
       PickNodesToExtend(
 			  std::min({collisions_left, params_.GetMiniBatchSize() - number_of_nodes_already_added - minibatch_size,
 			      params_.GetMaxOutOfOrderEvals() - number_out_of_order_}), false);
@@ -1982,7 +1984,7 @@ void SearchWorker::GatherMinibatch2(int number_of_nodes_already_added) {
 	++minibatch_size;
       }
 
-      if (params_.GetAuxEngineVerbosity() >= 2 && iteration_counter == 1 && size_before_picking < minibatch_.size()) LOGFILE << "GatherMinibatch2() did add nodes with override cpuct = true and found " << non_collisions << " non_collisions out of " << minibatch_.size() - size_before_picking << " tested nodes";
+      // if (params_.GetAuxEngineVerbosity() >= 2 && iteration_counter == 1 && size_before_picking < minibatch_.size()) LOGFILE << "GatherMinibatch2() did add nodes with override cpuct = true and found " << non_collisions << " non_collisions out of " << minibatch_.size() - size_before_picking << " tested nodes";
 
     bool needs_wait = false;
     int ppt_start = new_start;
@@ -2247,8 +2249,6 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
   // TODO: pre-reserve visits_to_perform for expected depth and likely maximum
   // width. Maybe even do so outside of lock scope.
 
-  bool override_cpuct_added_nodes = false;
-
   if(override_cpuct){
 
     // 1. under what condition will we actually override cpuct?
@@ -2262,7 +2262,7 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
     // B: there are collisions left enough for both the PV and the refutation.
     // There is a refutation: vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size() > 0 (is this reset to empty when leela and helper start to agree?
     
-    float ratio_to_refutation = 0.5; // Tune this?
+    float ratio_to_refutation = 0.2; // Tune this?
     int collision_limit_two = std::floor(collision_limit * ratio_to_refutation);    
     int collision_limit_one = collision_limit - collision_limit_two;
 
@@ -2270,249 +2270,127 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
     search_->search_stats_->best_move_candidates_mutex.lock(); // for reading search_stats_->winning_ and the other
     // if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Lock on best_move_candidates aquired.";    
     int centipawn_diff = std::abs(search_->search_stats_->helper_eval_of_leelas_preferred_child - search_->search_stats_->helper_eval_of_helpers_preferred_child);
-    // force visits unless the helper really thinks its own line is worse.    
+    search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.lock(); // for reading Helpers_preferred_child_node_ and vector_of_moves_from_root_to_Helpers_preferred_child_node_ and the other two.
     if(search_->search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child > 0 &&
-       search_->search_stats_->helper_eval_of_leelas_preferred_child < search_->search_stats_->helper_eval_of_helpers_preferred_child + 20 &&
        search_->search_stats_->Helpers_preferred_child_node_in_Leelas_PV_ != nullptr &&
        search_->search_stats_->Helpers_preferred_child_node_ != nullptr &&
        search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size() > 0 &&
-       search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size() > 0       
+       search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size() > 0 
        ){
-      if(!search_->search_stats_->helper_thinks_it_is_better && search_->search_stats_->helper_eval_of_leelas_preferred_child < search_->search_stats_->helper_eval_of_helpers_preferred_child){
-	search_->search_stats_->helper_thinks_it_is_better = true;
-	if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Helper thinks it is better.";
-      }
-      search_->search_stats_->best_move_candidates_mutex.unlock();
-      // if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Lock on best_move_candidates released.";
-      // if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() About to aquire a lock on vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.";
-      search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.lock();
-      // if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_ aquired.";
 
-      // int depth = search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size();
-      // if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() vector_of_moves_from_root_to_Helpers_preferred_child_node_size() read.";
-      // scale the number of visits by some factor that corresponds to how acute it is that Leela learns what the helper thinks. The downside is that Leela will have fewer free visits to find out unexpected stuff.
-      // highly acute is large diff and low depth of divergence.
-      // SSS Test showed that relevance 1.0 is best with 18 threads on root. The stronger the helpers, the better a high relevance will perform. For a 64 threads system this is good (SSS). Lower ForceVisitsRatio if you want less.
-      // float relevance = 1.0; // between 1 and 0
-      // if(depth == 1 && centipawn_diff > 5){
-      //   relevance = 1.0;
-      // }
-      // if(depth == 1 && centipawn_diff <= 5){
-      //   relevance = 0.8;
-      // }
-      // if(depth == 2 && centipawn_diff > 5){
-      //   relevance = 0.8;
-      // }
-      // if(depth == 2 && centipawn_diff <= 5){
-      //   relevance = 0.5;
-      // }
-      // if(depth == 3 && centipawn_diff > 5){
-      //   relevance = 0.6;
-      // }
-      // if(depth == 3 && centipawn_diff <= 5){
-      //   relevance = 0.25;
-      // }
-      // if(depth > 3 && centipawn_diff > depth){
-      //   relevance = 0.5;
-      // }
-      // orig_collision_limit = int(std::floor(orig_collision_limit * relevance));
-      // collision_limit = std::max(2, orig_collision_limit);
-      // a_size, b_size, hpc_visits and hpcb_visits not used, why?
-      // if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() about to read vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_size() .";
-      // int a_size = search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size();
-      // if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() about to read vector_of_moves_from_root_to_Helpers_preferred_child_node_size() .";      
-      // int b_size = search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size();
-      // if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() about to read number of visits from Helpers preferred child node .";            
-      // long unsigned int hpc_visits = search_->search_stats_->Helpers_preferred_child_node_->GetN(); // assume nodes shared lock
-      // if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() about to read number of visits from Helpers preferred child node in Leelas PV.";
-      // long unsigned int hpcb_visits = search_->search_stats_->Helpers_preferred_child_node_in_Leelas_PV_->GetN();
-      // if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() read finished. Length of Helpers preferred child node in Leelas PV: " << a_size
-      // 						       << " Length of Helpers preferred child node: " << b_size
-      // 						       << " Visits to Helpers_preferred_child_node: " << hpc_visits
-      // 						       << " Visits to Helpers_preferred_child_node in Leelas PV: " << hpcb_visits;
-      // // These can be the same. We assure they are different by requiring the first to be deeper/larger.
-      // if(search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size() >
-      // 	 search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size()){
-      // 	// The visits is to be shared on two paths, with at least 2 nodes to share into one node each.
-      // 	collision_limit = std::max(2, int(std::floor(collision_limit * (1 - ratio_to_refutation))));
-      // }
+      LOGFILE << "Centipawn diff: " << centipawn_diff << " leelas_preferred_child: " << search_->search_stats_->helper_eval_of_leelas_preferred_child << " helpers_preferred_child: " << search_->search_stats_->helper_eval_of_helpers_preferred_child;
 
-      // if(params_.GetAuxEngineVerbosity() >= 2 && search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size() >
-      // 	 search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size()) LOGFILE << collision_limit_one << " visits will be forced via the node where the helper diverges in Leelas PV, which happens at depth: " << search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size();
-
-      // Note nested lock picking_tasks_mutex_ within vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_
-      signed int initial_n_in_flight = search_->search_stats_->Helpers_preferred_child_node_->GetNInFlight();
-
-      // negative n in flights spotted
-      if(initial_n_in_flight < 0){ // Weird, fix this
-	LOGFILE << "Negative n in flight (1): " << initial_n_in_flight << " hackingly setting this to zero.";
-	search_->search_stats_->Helpers_preferred_child_node_->IncrementNInFlight(std::abs(initial_n_in_flight));
-	initial_n_in_flight = 0;	
-	// // release locks and return early
-	// LOGFILE << "Negative n in flight (1): " << initial_n_in_flight << " back out and return early";
-	// search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
-	// return false;
-      }
-
-      int collisions_before_adding = 0;
-      for (int i = 0; i < static_cast<int>(picking_tasks_.size()); i++) {
-	for (int j = 0; j < static_cast<int>(picking_tasks_[i].results.size());
-	     j++) {
-	  auto& picked_node = minibatch_[j];
-	  if (picked_node.IsCollision()){
-	    ++collisions_before_adding;
+      // alternate forcing visits to the first and the second divergence.
+      if(!search_->search_stats_->first_divergence_already_covered){
+	bool act_on_first_divergence = false;
+	if((search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size() % 2) == 0){
+	  if(search_->search_stats_->helper_eval_of_leelas_preferred_child < search_->search_stats_->helper_eval_of_helpers_preferred_child){
+	    if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() found divergence at an odd distance from root, so maximising helper eval, and helper eval of helper preferred line is higher (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "). This means the helper has found a better move for the side to move (Leela).";
+	    act_on_first_divergence = true;
+	  } else {
+	    if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() found divergence at an odd distance from root, so maximising helper eval, and helper eval of helper preferred line is lower (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "), so Leela has found a better move for the side to move (Leela). Not forcing any visits.";
+	  }
+	} else {
+	  if(search_->search_stats_->helper_eval_of_leelas_preferred_child > search_->search_stats_->helper_eval_of_helpers_preferred_child){
+	    if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() found divergence at an even distance from root, so minimising helper eval, and helper eval of helper preferred line is lower (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "). This means the helper has found a better move the for the opponent.";
+	    act_on_first_divergence = true;
+	  } else {
+	    if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() found divergence at an even distance from root, so minimising helper eval, and helper eval of helper preferred line is higher (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "), so Leelas has found a better move for the opponent. Not forcing any visits.";
 	  }
 	}
-      }
-      
-      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "initial n in flight: " << initial_n_in_flight;
-      {
-	std::string debug_string;
-	bool flip = search_->played_history_.IsBlackToMove(); // only needed for printing moves nicely.      
-	for(int i = 0; i < (int) search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size(); i++){
-	  debug_string = debug_string + Move(search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_[i].as_string(), flip).as_string() + " ";
-	  flip = ! flip;
-	}
-	LOGFILE << "The helper engine thinks the root explorers preferred continuation is " << centipawn_diff << " centipawns better than Leelas. The divergence is at depth: " << search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size() << "Forcing " << collision_limit_one << " visits to the helpers recommended move at the first divergence from Leelas PV: " << debug_string << " that node has " << search_->search_stats_->Helpers_preferred_child_node_->GetN() << " visits, and the move leading up to that node is " << search_->search_stats_->Helpers_preferred_child_node_->GetOwnEdge()->GetMove(!flip).as_string();
 
-	Mutex::Lock lock(picking_tasks_mutex_);
-	picking_tasks_.emplace_back(
-		  search_->search_stats_->Helpers_preferred_child_node_,
-		  search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size(),
-                  search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_,
-		  collision_limit_one, probability_of_best_path, distance_from_best_path);
-	task_count_.fetch_add(1, std::memory_order_acq_rel);
-	task_added_.notify_all();
-	override_cpuct_added_nodes = true;
-      }
-      WaitForTasks();
-      // if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Finished waiting for tasks (1), size is now: " << picking_tasks_[0].results.size();
-      int collisions_after_adding = 0;
-      for (int i = 0; i < static_cast<int>(picking_tasks_.size()); i++) {
-	for (int j = 0; j < static_cast<int>(picking_tasks_[i].results.size());
-	     j++) {
-	  minibatch_.emplace_back(std::move(picking_tasks_[i].results[j]));
-	  auto& picked_node = minibatch_[j];
-	  if (picked_node.IsCollision()){
-	    ++collisions_after_adding;
-	  }
-	}
-      }
+	if(act_on_first_divergence){
+	  // Act on the first divergence
+	  search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
+	  search_->search_stats_->best_move_candidates_mutex.unlock();
+	  search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.lock();
 
-      {
-	Mutex::Lock lock(picking_tasks_mutex_);
-	ResetTasks();
-      }
-      
-      // if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Cleared tasks, size is now: " << picking_tasks_[0].results.size();      
-      
-      // int visits_to_add = collision_limit_one - (collisions_after_adding - collisions_before_adding);
-      int visits_to_add = collision_limit_one;
-      // if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Finished copying results to minibatch for helpers favorite (first divergence), found " << visits_to_add << " non-collisions. (collision_limit=" << collision_limit_one << ", collisions after adding=" << collisions_after_adding << ", collisions before adding: " << collisions_before_adding ;            
-
-      // Fix N-in-flight for parents above the starting node
-      if(visits_to_add > 0){
-	for(Node * n = search_->search_stats_->Helpers_preferred_child_node_; n != search_->root_node_; n = n->GetParent()){
-	  n->IncrementNInFlight(visits_to_add);
-	}
-	// // The loop above stops just before root, so fix root too. // TODO fix this ugly off-by-one hack. (perhaps test for n != nullptr)
-	search_->root_node_->IncrementNInFlight(visits_to_add);
-	// if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Added visits in flight, start node now has: " << search_->search_stats_->Helpers_preferred_child_node_->GetNInFlight() << " visits in flight.";
-      }
-      // if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "new n-in-flight: " << search_->search_stats_->Helpers_preferred_child_node_->GetNInFlight();
-      
-      // And now do the same for the Helpers recommended node in Leelas PV, if it exists.
-      // if(search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size() >
-      // 	   search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size()){
-      if(search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size() > 0){
-	// if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "visits for the helpers preferred node in Leelas PV:" << search_->search_stats_->Helpers_preferred_child_node_in_Leelas_PV_->GetN();
-	collisions_before_adding = collisions_after_adding;
-
-	{
-	  initial_n_in_flight = search_->search_stats_->Helpers_preferred_child_node_in_Leelas_PV_->GetNInFlight();
-
-	  // negative n in flights spotted
-	  if(initial_n_in_flight < 0){ // Weird, fix this
-	    LOGFILE << "Negative n in flight (2): " << initial_n_in_flight << " hackingly setting this to zero.";
-	    search_->search_stats_->Helpers_preferred_child_node_->IncrementNInFlight(std::abs(initial_n_in_flight));
-	    initial_n_in_flight = 0;	
-	  }
-	  
-	  std::string debug_string;
-	  bool flip = search_->played_history_.IsBlackToMove(); // only needed for printing moves nicely.      
-	  for(int i = 0; i < (int) search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size(); i++){
-	    debug_string = debug_string + Move(search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_[i].as_string(), flip).as_string() + " ";
-	    flip = ! flip;
-	  }
-	  LOGFILE << "Forcing " << collision_limit_two << " visits to the helpers recommended move at the second divergence from Leelas PV: " << debug_string << " that node has " << search_->search_stats_->Helpers_preferred_child_node_in_Leelas_PV_->GetN() << " visits, and the move leading up to that node is " << search_->search_stats_->Helpers_preferred_child_node_in_Leelas_PV_->GetOwnEdge()->GetMove(!flip).as_string();
-	  Mutex::Lock lock(picking_tasks_mutex_);
-	  picking_tasks_.emplace_back(
-		  search_->search_stats_->Helpers_preferred_child_node_in_Leelas_PV_,
-		  search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size(),
-                  search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_,
-		  collision_limit_two, probability_of_best_path, distance_from_best_path);
-	  task_count_.fetch_add(1, std::memory_order_acq_rel);
-	  task_added_.notify_all();
-	}	
-	WaitForTasks();
-
-	collisions_after_adding = 0;	
-	for (int i = 0; i < static_cast<int>(picking_tasks_.size()); i++) {
-	  for (int j = 0; j < static_cast<int>(picking_tasks_[i].results.size());
-	       j++) {
-	    minibatch_.emplace_back(std::move(picking_tasks_[i].results[j]));
-	    auto& picked_node = minibatch_[j];
-	    if (picked_node.IsCollision()){
-	      ++collisions_after_adding;
+	  {
+	    std::string debug_string;
+	    bool flip = search_->played_history_.IsBlackToMove(); // only needed for printing moves nicely.      
+	    for(int i = 0; i < (int) search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size(); i++){
+	      debug_string = debug_string + Move(search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_[i].as_string(), flip).as_string() + " ";
+	      flip = ! flip;
 	    }
-	  }
-	}
+	    LOGFILE << "The helper engine thinks the root explorers preferred continuation is " << centipawn_diff << " centipawns better than Leelas. The divergence is at depth: " << search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size() << ". Forcing " << collision_limit_one << " visits to the helpers recommended move at the first divergence from Leelas PV: " << debug_string << " that node has " << search_->search_stats_->Helpers_preferred_child_node_->GetN() << " visits.";
 
-	// int visits_to_add_second = collision_limit_two - (collisions_after_adding - collisions_before_adding);
-	int visits_to_add_second = collision_limit_two;
-	if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Finished copying results to minibatch for helpers favorite in Leelas PV (second divergence), found " << visits_to_add_second << " additional non-collisions.";
-	// Fix N-in-flight for parents above the starting node
-	if(visits_to_add_second > 0){
-	  for(Node * n = search_->search_stats_->Helpers_preferred_child_node_in_Leelas_PV_; n != search_->root_node_; n = n->GetParent()){
-	    n->IncrementNInFlight(visits_to_add_second);  
+	    Mutex::Lock lock(picking_tasks_mutex_);
+	    picking_tasks_.emplace_back(
+					search_->search_stats_->Helpers_preferred_child_node_,
+					search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size(),
+					search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_,
+					collision_limit_one, probability_of_best_path, distance_from_best_path);
+	    task_count_.fetch_add(1, std::memory_order_acq_rel);
+	    task_added_.notify_all();
+	  }
+	  WaitForTasks();
+
+	  // Add a VisitInFlight for every non_collision
+	  // search_->nodes_mutex_.unlock_shared();
+	  // search_->nodes_mutex_.lock();
+	  for(Node * n = search_->search_stats_->Helpers_preferred_child_node_; n != search_->root_node_; n = n->GetParent()){
+	    n->IncrementNInFlight(collision_limit_one);
 	  }
 	  // // The loop above stops just before root, so fix root too. // TODO fix this ugly off-by-one hack. (perhaps test for n != nullptr)
-	  search_->root_node_->IncrementNInFlight(visits_to_add_second);
-	  if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "new n-in-flight: " << search_->search_stats_->Helpers_preferred_child_node_in_Leelas_PV_->GetNInFlight();
+	  search_->root_node_->IncrementNInFlight(collision_limit_one);
+	  // search_->nodes_mutex_.unlock();
+	  // search_->nodes_mutex_.lock_shared();	    
+
+	  search_->search_stats_->first_divergence_already_covered = true;
+	  search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
+	  if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Ready with first convergence. vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_ released.";
+	  return true;
+	} else {
+	  // It was time to act on the first divergence, but the helper didn't have any recommendation better than what Leela already has found.
+	  if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() time to force visits to the helpers PV, but even the helper thinks Leelas line is better so doing nothing";	  
 	}
       } else {
-	if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "No second level divergence to add";
-      }
+	// Act on the second divergence instead.
+	search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
+	search_->search_stats_->best_move_candidates_mutex.unlock();
+	search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.lock();
+	
+	std::string debug_string;
+	bool flip = search_->played_history_.IsBlackToMove(); // only needed for printing moves nicely.      
+	for(int i = 0; i < (int) search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size(); i++){
+	  debug_string = debug_string + Move(search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_[i].as_string(), flip).as_string() + " ";
+	  flip = ! flip;
+	}
 
-      // TODO: use local vars and release locks faster?
-      search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
-      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_ released.";
-      return false; // no more work for PickNodesToExtend()
-    } else { // Helper does not think it is better
-      if (params_.GetAuxEngineVerbosity() >= 2){
-	// // Explain why we did not forced visits
-	// LOGFILE << "Not forcing visits in PickNodesToExtendTask, stay tuned for why...";
-	// if(!(search_->search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child > 0)) LOGFILE << "search_->search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child not greater than 0";
-	// if(search_->search_stats_->helper_eval_of_leelas_preferred_child >= search_->search_stats_->helper_eval_of_helpers_preferred_child + 20) LOGFILE << "search_->search_stats_->helper_eval_of_leelas_preferred_child " << search_->search_stats_->helper_eval_of_leelas_preferred_child << " is equal to or higher than search_->search_stats_->helper_eval_of_helpers_preferred_child + 20 which is: " << search_->search_stats_->helper_eval_of_helpers_preferred_child + 20;
-	// if(search_->search_stats_->Helpers_preferred_child_node_in_Leelas_PV_ == nullptr) LOGFILE << "search_->search_stats_->Helpers_preferred_child_node_in_Leelas_PV_ is a null pointer";
-	// if(search_->search_stats_->Helpers_preferred_child_node_ == nullptr) LOGFILE << "search_->search_stats_->Helpers_preferred_child_node_ is a null pointer";
-	// if(!(search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size() > 0)) LOGFILE << "search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size() is zero";
-	// if(!(search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size() > 0))  LOGFILE << "search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size() is zero";
-	// if(search_->search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child == 0) LOGFILE << "The helper engine (thread 1) has not yet provided PV.";
-	// if(search_->search_stats_->number_of_nodes_in_support_for_helper_eval_of_helpers_preferred_child == 0) LOGFILE << "The helper engine (thread 2) has not yet provided PV.";
+	LOGFILE << "The second divergence is at depth: " << search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size() << ". Forcing " << collision_limit_two << " visits to the helpers recommended move at the second divergence from Leelas PV: " << debug_string << " that node has " << search_->search_stats_->Helpers_preferred_child_node_in_Leelas_PV_->GetN() << " visits.";
+
+	{
+	  Mutex::Lock lock(picking_tasks_mutex_);
+	  picking_tasks_.emplace_back(
+				      search_->search_stats_->Helpers_preferred_child_node_in_Leelas_PV_,
+				      search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size(),
+				      search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_,
+				      collision_limit_two, probability_of_best_path, distance_from_best_path);
+	  task_count_.fetch_add(1, std::memory_order_acq_rel);
+	  task_added_.notify_all();
+	}
+	WaitForTasks();
+
+	// Add VisitsInFlight
+	// search_->nodes_mutex_.unlock_shared();
+	// search_->nodes_mutex_.lock();
+	for(Node * n = search_->search_stats_->Helpers_preferred_child_node_in_Leelas_PV_; n != search_->root_node_; n = n->GetParent()){
+	  n->IncrementNInFlight(collision_limit_two);
+	}
+	// // The loop above stops just before root, so fix root too. // TODO fix this ugly off-by-one hack. (perhaps test for n != nullptr)
+	search_->root_node_->IncrementNInFlight(collision_limit_two);
+	// search_->nodes_mutex_.unlock();
+	// search_->nodes_mutex_.lock_shared();	    
+	search_->search_stats_->first_divergence_already_covered = false;
+	search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
+	if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Ready with second convergence. vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_ released.";
+	return true;
       }
-      // If it previously thought so, then change that now
-      if(search_->search_stats_->helper_thinks_it_is_better){
-	search_->search_stats_->helper_thinks_it_is_better = false;
-	if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "The helper engine has changed it's mind and it does not think that the root explorers continuation is better than Leelas PV.";
-      }
-      search_->search_stats_->best_move_candidates_mutex.unlock();
-      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() best_move_candidates released.";
-    } // End of Helper does not think it is better any more.
+    } // End of "no reason to enforce visits".
+    search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
+    search_->search_stats_->best_move_candidates_mutex.unlock();
   } // end of override CPUCT
-
-  if(override_cpuct_added_nodes) return true;
-
+  
   auto& vtp_buffer = workspace->vtp_buffer;
   auto& visits_to_perform = workspace->visits_to_perform;
   visits_to_perform.clear();

@@ -752,7 +752,11 @@ void Search::AuxEngineWorker() NO_THREAD_SAFETY_ANALYSIS {
 		     search_stats_->Helpers_preferred_child_node_ != divergent_node){
 		    search_stats_->Helpers_preferred_child_node_in_Leelas_PV_ = divergent_node;
 		    search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_ = {};
-		    if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE << "Thread 1 found the node which corresponds to the helper recommendation in Leelas PV: " << my_moves_from_the_white_side[i].as_string() << " at depth " << i << ". Setting Helpers_preferred_child_node_in_Leelas_PV_ and cleared vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_";
+		    Move m;
+		    bool flip = played_history_.IsBlackToMove() == (i % 2 == 0);
+		    Move::ParseMove(&m, my_moves_from_the_white_side[i].as_string(), flip);
+		    // if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Thread 1 found the second divergence, ie. node which corresponds to the helper recommendation in Leelas PV after the first divergence: " << my_moves_from_the_white_side[i].as_string() << " at depth " << i << ". Setting Helpers_preferred_child_node_in_Leelas_PV_ and vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_";		    
+		    if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Thread 1 found the second divergence, ie. node which corresponds to the helper recommendation in Leelas PV after the first divergence: " << m.as_string() << " at depth " << i << ". Setting Helpers_preferred_child_node_in_Leelas_PV_ and vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_";
 		    for(Node * n = divergent_node; n != root_node_; n = n->GetParent()){
 		      search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.push_back(n->GetOwnEdge()->GetMove());
 		    }
@@ -795,7 +799,7 @@ void Search::AuxEngineWorker() NO_THREAD_SAFETY_ANALYSIS {
     if(thread < 3 && nodes_to_support > 500000){
       // show the PV from continuous helpers
       std::string debug_string_root;
-      bool flip = ! played_history_.IsBlackToMove(); // only needed for printing moves nicely.      
+      bool flip = played_history_.IsBlackToMove(); // only needed for printing moves nicely.      
       for(int i = 0; i < (int) my_moves_from_the_white_side.size(); i++){
 	debug_string_root = debug_string_root + Move(my_moves_from_the_white_side[i].as_string(), flip).as_string() + " ";
 	flip = ! flip;
@@ -1003,7 +1007,7 @@ void Search::DoAuxEngine(Node* n, int index){
     search_stats_->auxengine_mutex_.unlock();
 
     // step 2, find the divergence.
-    if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Thread " << index << " in DoAuxEngine() about to find the divergence. Helper's PV is of length: " << helper_PV_local.size();
+    if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Thread " << index << " in DoAuxEngine() about to find the divergence. Helper's PV is of length: " << helper_PV_local.size();
     // First node which does not have an edge that can be found in helper_PV_local is the node to explore
     std::vector<Move> Leelas_PV;
     Node * divergent_node = root_node_;
@@ -1044,7 +1048,7 @@ void Search::DoAuxEngine(Node* n, int index){
 	      s = "They disagree at root";
 	    }
 	    bool flip = ! played_history_.IsBlackToMove() ^ (i % 2 == 0);
-	    if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Thread 1: Found the divergence between helper and Leela at depth " << i << ". " << s << ". The helper prefers: " << Move(helper_PV_local[i].as_string(), flip).as_string() << ", Leela prefers: " << divergent_node->GetOwnEdge()->GetMove(flip).as_string() << ". Thread 1 will start working with the move Leela prefers";
+	    if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Thread 1: Found the divergence between helper and Leela at depth " << i << ". " << s << ". After that, the helper prefers: " << Move(helper_PV_local[i].as_string(), flip).as_string() << ", while Leela prefers: " << divergent_node->GetOwnEdge()->GetMove(flip).as_string() << ". Thread 1 will start working with the move Leela prefers, to be able to show the refutation (if any).";
 	    divergence_found = true;
 	    depth = i;
 	    break;
@@ -1107,22 +1111,16 @@ void Search::DoAuxEngine(Node* n, int index){
     } else {
       // They agree completely, fill the cache with useful nodes by exploring root until they disagree again.
       // But also make sure that the 
-      if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Leela and helper is in perfect agreement. Thread 1 and 2 will explore root to have a up to date cache when Leela and Helper disagrees next time.";
+      if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Leela and helper is in perfect agreement up to depth: " << depth << ". Thread 1 and 2 will explore root to have a up to date cache when Leela and Helper disagrees next time.";
       n = root_node_;
       depth = 0;
     }
   } // end of if(index == 1 || index == 2)
 
   if(n != root_node_ && !divergence_found){  
-  // if(n != root_node_){
     if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << index << " DoAuxEngine() trying to aquire a lock on nodes_ to calculate depth.";
     nodes_mutex_.lock_shared();  
     if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Thread: " << index << " DoAuxEngine() aquired a lock on nodes_";
-    // if(stop_.load(std::memory_order_acquire)) {
-    //   if (params_.GetAuxEngineVerbosity() >= 5) LOGFILE << "Thread: " << index << " DoAuxEngine caught a stop signal before starting to calculate depth.";
-    //   nodes_mutex_.unlock_shared();
-    //   return;
-    // }
     for (Node* n2 = n; n2 != root_node_; n2 = n2->GetParent()) {
       depth++;
     }

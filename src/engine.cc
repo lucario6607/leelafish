@@ -299,16 +299,13 @@ void EngineController::Go(const GoParams& params) {
 
   auto stopper = time_manager_->GetStopper(params, *tree_.get());
   LOGFILE << "engine.cc: search_stats_ at " << &search_stats_;
+  // LOGFILE << "white time left" << params.wtime;
   search_ = std::make_unique<Search>(
       *tree_, network_.get(), std::move(responder),
       StringsToMovelist(params.searchmoves, tree_->HeadPosition().GetBoard()),
       *move_start_time_, std::move(stopper), params.infinite || params.ponder,
       options_, &cache_, syzygy_tb_.get(), &persistent_queue_of_nodes_,
       search_stats_);
-  // // AuxEngine needs the UCI string of the position.
-  // // assert(current_position_);
-  // search_->current_position_fen_ = current_position_.fen;
-  // search_->current_position_moves_ = current_position_.moves;
   if (params.ponder && !current_position_.moves.empty()) {
     search_->current_position_moves_.pop_back();
   }

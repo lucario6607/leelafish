@@ -73,6 +73,7 @@ class Search {
     bool helper_thinks_it_is_better GUARDED_BY(best_move_candidates_mutex) = false;
     bool winning_ GUARDED_BY(best_move_candidates_mutex) = false;
     bool winning_threads_adjusted GUARDED_BY(best_move_candidates_mutex) = false;
+    bool save_a_win_ GUARDED_BY(best_move_candidates_mutex) = false;
     bool stop_a_blunder_ GUARDED_BY(best_move_candidates_mutex) = false;
     int non_winning_root_threads_ GUARDED_BY(best_move_candidates_mutex) ; // only parse once, store the result in this variable so that we can reset without parsing again.
     Move winning_move_ GUARDED_BY(best_move_candidates_mutex);

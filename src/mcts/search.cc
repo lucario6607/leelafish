@@ -720,9 +720,6 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     nodes_mutex_.lock_shared();    
     search_stats_->best_move_candidates_mutex.lock(); // for reading search_stats_->winning_ and the other
     if(! search_stats_->winning_){
-      // if(search_stats_->Leelas_preferred_child_node_ != nullptr){
-      // 	if(search_stats_->Leelas_preferred_child_node_->GetOwnEdge() != nullptr &&
-      // 	   search_stats_->Leelas_preferred_child_node_->GetOwnEdge()->GetMove().as_string() != search_stats_->winning_move_.as_string()){
       if(search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child > 0){
 	if(search_stats_->Leelas_PV[0].as_string() != search_stats_->winning_move_.as_string()){	   
 	  if(params_.GetAuxEngineVerbosity() >= 2){
@@ -731,41 +728,77 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	            << "Helper evaluates its own prefered move to: " << search_stats_->helper_eval_of_helpers_preferred_child << " based on " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_helpers_preferred_child << " nodes.\n"
 		    << "Helper evaluates root to: " << search_stats_->helper_eval_of_root << " based on " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_root << " nodes.";
 	  }
-	  // if((search_stats_->helper_eval_of_root > -160 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < -170) || // saving the draw
-	  //    (search_stats_->helper_eval_of_root > -165 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < -180) || // saving the draw (from a game: -164 root vs -195 leelas move)
-	  //    (search_stats_->helper_eval_of_root > -170 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < -190) || // saving the draw 	     
-	  //    (search_stats_->helper_eval_of_root > 160 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < 130) || // saving the win
-	  //    (search_stats_->helper_eval_of_root > 145 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < 105) // saving the win
-	  //    ){
-
-	  // Perhaps one should compare helper_eval_of_leelas_preferred_child with helper_eval_of_helpers_preferred_child, but in this context the positions is only 1 ply from root, so we could as well use the root eval.
-	  if((search_stats_->helper_eval_of_root > -160 && search_stats_->helper_eval_of_leelas_preferred_child < -170) || // saving the draw
-	     (search_stats_->helper_eval_of_root > -165 && search_stats_->helper_eval_of_leelas_preferred_child < -180) || // saving the draw (from a game: -164 root vs -195 leelas move)
-	     (search_stats_->helper_eval_of_root > -170 && search_stats_->helper_eval_of_leelas_preferred_child < -190) || // saving the draw 	     
-	     (search_stats_->helper_eval_of_root > 160 && search_stats_->helper_eval_of_leelas_preferred_child < 130) || // saving the win
-	     (search_stats_->helper_eval_of_root > 145 && search_stats_->helper_eval_of_leelas_preferred_child < 105) // saving the win
-	     ){	
-	    if(search_stats_->number_of_nodes_in_support_for_helper_eval_of_root > 100000){
-	      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Large enough support for root";
-	      if(search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child > 100000){
-		if(search_stats_->helper_eval_of_root > -160 && search_stats_->helper_eval_of_leelas_preferred_child < -170){
-		  if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Trying to save a draw, helper eval of root: " << search_stats_->helper_eval_of_root << " helper recommended move " << search_stats_->winning_move_.as_string() << " (from whites perspective) Number of nodes in support for the root node eval: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_root << " helper eval of leelas preferred move: " << search_stats_->helper_eval_of_leelas_preferred_child << " Leela prefers the move: " << search_stats_->Leelas_PV[0].as_string() << " nodes in support for the eval of leelas preferred move: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child;
-		} else {
-		  if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Trying to save a win, helper eval of root: " << search_stats_->helper_eval_of_root << " helper recommended move " << search_stats_->winning_move_.as_string() << "  (from whites perspective) Number of nodes in support for the root node eval: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_root << " helper eval of leelas preferred move: " << search_stats_->helper_eval_of_leelas_preferred_child << " Leela prefers the move: " << search_stats_->Leelas_PV[0].as_string() << " nodes in support for the eval of leelas preferred move: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child;
-		}
-		search_stats_->stop_a_blunder_ = true;
+	  if(search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child > 100000){
+	    if(
+	       // save the draw/win
+	       // 120 140
+	       (search_stats_->helper_eval_of_leelas_preferred_child < -120 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 20) ||
+	       (search_stats_->helper_eval_of_root > 140 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 20) ||
+	       // 130 145
+	       (search_stats_->helper_eval_of_leelas_preferred_child < -130 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 15) ||
+	       (search_stats_->helper_eval_of_root > 145 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 15) ||
+	       // 140 152
+	       (search_stats_->helper_eval_of_leelas_preferred_child < -140 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 12) ||
+	       (search_stats_->helper_eval_of_root > 152 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 12) ||
+	       // 150 160
+	       (search_stats_->helper_eval_of_leelas_preferred_child < -150 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 10) ||
+	       (search_stats_->helper_eval_of_root > 160 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 10)
+	       ){
+	      if (params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Trying to save a draw/win, helper eval of root: " << search_stats_->helper_eval_of_root << " helper recommended move " << search_stats_->winning_move_.as_string() << " (from whites perspective) Number of nodes in support for the root node eval: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_root << " helper eval of leelas preferred move: " << search_stats_->helper_eval_of_leelas_preferred_child << " Leela prefers the move: " << search_stats_->Leelas_PV[0].as_string() << " nodes in support for the eval of leelas preferred move: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child;
+	      search_stats_->stop_a_blunder_ = true;
+	      if(search_stats_->helper_eval_of_root > 140){
+		search_stats_->save_a_win_ = true;
+	      } else {
+		search_stats_->save_a_win_ = false;
 	      }
 	    }
 	  }
 	} else {
 	  // They agree.
-	  if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Leela agree with the helper about the best move: " << search_stats_->Leelas_PV[0].as_string() << ". The root explorer evaluates root to: " << search_stats_->helper_eval_of_root << " based on " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_root << " nodes.";
+	  if(params_.GetAuxEngineVerbosity() >= 3) LOGFILE << "Leela agree with the helper about the best move: " << search_stats_->Leelas_PV[0].as_string() << ". The root explorer evaluates root to: " << search_stats_->helper_eval_of_root << " based on " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_root << " nodes.";
 	}
       }
     }
     else {
       LOGFILE << "Autopilot is on.";
     }
+	  
+	  
+    // 	  // if((search_stats_->helper_eval_of_root > -160 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < -170) || // saving the draw
+    // 	  //    (search_stats_->helper_eval_of_root > -165 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < -180) || // saving the draw (from a game: -164 root vs -195 leelas move)
+    // 	  //    (search_stats_->helper_eval_of_root > -170 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < -190) || // saving the draw 	     
+    // 	  //    (search_stats_->helper_eval_of_root > 160 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < 130) || // saving the win
+    // 	  //    (search_stats_->helper_eval_of_root > 145 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < 105) // saving the win
+    // 	  //    ){
+
+    // 	  // Perhaps one should compare helper_eval_of_leelas_preferred_child with helper_eval_of_helpers_preferred_child, but in this context the positions is only 1 ply from root, so we could as well use the root eval.
+    // 	  if((search_stats_->helper_eval_of_root > -160 && search_stats_->helper_eval_of_leelas_preferred_child < -170) || // saving the draw
+    // 	     (search_stats_->helper_eval_of_root > -165 && search_stats_->helper_eval_of_leelas_preferred_child < -180) || // saving the draw (from a game: -164 root vs -195 leelas move)
+    // 	     (search_stats_->helper_eval_of_root > -170 && search_stats_->helper_eval_of_leelas_preferred_child < -190) || // saving the draw 	     
+    // 	     (search_stats_->helper_eval_of_root > 160 && search_stats_->helper_eval_of_leelas_preferred_child < 130) || // saving the win
+    // 	     (search_stats_->helper_eval_of_root > 145 && search_stats_->helper_eval_of_leelas_preferred_child < 105) // saving the win
+    // 	     ){	
+    // 	    if(search_stats_->number_of_nodes_in_support_for_helper_eval_of_root > 100000){
+    // 	      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Large enough support for root";
+    // 	      if(search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child > 100000){
+    // 		if(search_stats_->helper_eval_of_root > -160 && search_stats_->helper_eval_of_leelas_preferred_child < -170){
+    // 		  if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Trying to save a draw, helper eval of root: " << search_stats_->helper_eval_of_root << " helper recommended move " << search_stats_->winning_move_.as_string() << " (from whites perspective) Number of nodes in support for the root node eval: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_root << " helper eval of leelas preferred move: " << search_stats_->helper_eval_of_leelas_preferred_child << " Leela prefers the move: " << search_stats_->Leelas_PV[0].as_string() << " nodes in support for the eval of leelas preferred move: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child;
+    // 		} else {
+    // 		  if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Trying to save a win, helper eval of root: " << search_stats_->helper_eval_of_root << " helper recommended move " << search_stats_->winning_move_.as_string() << "  (from whites perspective) Number of nodes in support for the root node eval: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_root << " helper eval of leelas preferred move: " << search_stats_->helper_eval_of_leelas_preferred_child << " Leela prefers the move: " << search_stats_->Leelas_PV[0].as_string() << " nodes in support for the eval of leelas preferred move: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child;
+    // 		}
+    // 		search_stats_->stop_a_blunder_ = true;
+    // 	      }
+    // 	    }
+    // 	  }
+    // 	} else {
+    // 	  // They agree.
+    // 	  if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Leela agree with the helper about the best move: " << search_stats_->Leelas_PV[0].as_string() << ". The root explorer evaluates root to: " << search_stats_->helper_eval_of_root << " based on " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_root << " nodes.";
+    // 	}
+    //   }
+    // }
+    // else {
+    //   LOGFILE << "Autopilot is on.";
+    // }
 
     search_stats_->best_move_candidates_mutex.unlock();
     nodes_mutex_.unlock_shared();    
@@ -1954,14 +1987,13 @@ void SearchWorker::GatherMinibatch2(int number_of_nodes_already_added) {
     }
 
     int new_start = static_cast<int>(minibatch_.size());
-    // long unsigned int size_before_picking = new_start;
 
-    // if(iteration_counter == 0 && number_of_nodes_already_added == 0){
     if(iteration_counter == 0){      
       // First run is a custom run which may override CPUCT and force visits into a specific line.
-      // int max_force_visits = int(floor((params_.GetMiniBatchSize() - number_of_nodes_already_added)* params_.GetAuxEngineForceVisitsRatio()));
-      int max_force_visits = int((params_.GetMiniBatchSize() - number_of_nodes_already_added)* 0.8);
-      // if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::GatherMinibatch2 About to run PickNodesToExtend() with override_cpuct = true and max_force_visits (collision_limit)=" << max_force_visits;
+      // Every other batch, this max_force_visits is used as is to force visits to the first divergence,
+      // and every other batch, another parameter is used to force visits to the second divergence.
+      // For the first divergence, we can compare two evals and reduce the number of forced visits if the helper prefers leelas line. Note, however, that the helper can still be wrong so forcing _some_ visits even to a line that the helper happens to find inferior might still be a good thing to do.
+      int max_force_visits = int((params_.GetMiniBatchSize() - number_of_nodes_already_added)* params_.GetAuxEngineForceVisitsRatio());
       PickNodesToExtend(max_force_visits, true);
     } else {
       // Normal run
@@ -2262,7 +2294,7 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
     // B: there are collisions left enough for both the PV and the refutation.
     // There is a refutation: vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size() > 0 (is this reset to empty when leela and helper start to agree?
     
-    float ratio_to_refutation = 0.2; // Tune this?
+    float ratio_to_refutation = params_.GetAuxEngineForceVisitsRatioSecondDivergence(); // Tune this?
     int collision_limit_two = std::floor(collision_limit * ratio_to_refutation);    
     int collision_limit_one = collision_limit - collision_limit_two;
 
@@ -2290,7 +2322,7 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	  } else {
 	    if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() found divergence at an odd distance from root, so maximising helper eval, and helper eval of helper preferred line is lower (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "), so Leela has found a better move for the side to move (Leela). Not forcing any visits.";
 	    act_on_first_divergence = true;
-	    collision_limit_one = collision_limit_one * 0.2;
+	    collision_limit_one = collision_limit_one * params_.GetAuxEngineForceVisitsRatioInferiorLine();
 	  }
 	} else {
 	  if(search_->search_stats_->helper_eval_of_leelas_preferred_child > search_->search_stats_->helper_eval_of_helpers_preferred_child){

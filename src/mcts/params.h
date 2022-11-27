@@ -164,6 +164,15 @@ class SearchParams {
   int GetAuxEngineInstances() const {
     return options_.Get<int>(kAuxEngineInstancesId);
   }
+  float GetAuxEngineForceVisitsRatio() const {
+    return options_.Get<float>(kAuxEngineForceVisitsRatioId);
+  }
+  float GetAuxEngineForceVisitsRatioInferiorLine() const {
+    return options_.Get<float>(kAuxEngineForceVisitsRatioInferiorLineId);
+  }
+  float GetAuxEngineForceVisitsRatioSecondDivergence() const {
+    return options_.Get<float>(kAuxEngineForceVisitsRatioSecondDivergenceId);
+  }
   int GetAuxEngineTime() const {
     return options_.Get<int>(kAuxEngineTimeId);
   }
@@ -241,7 +250,10 @@ class SearchParams {
   static const OptionId kAuxEngineOptionsOnRootId;
   static const OptionId kAuxEngineThresholdId;
   static const OptionId kAuxEngineMaxDepthId;
-  static const OptionId kAuxEngineInstancesId;  
+  static const OptionId kAuxEngineInstancesId;
+  static const OptionId kAuxEngineForceVisitsRatioId;
+  static const OptionId kAuxEngineForceVisitsRatioInferiorLineId;
+  static const OptionId kAuxEngineForceVisitsRatioSecondDivergenceId;
   static const OptionId kAuxEngineTimeId;
   static const OptionId kAuxEngineVerbosityId;
   static const OptionId kQuiescenceDeltaThresholdId;

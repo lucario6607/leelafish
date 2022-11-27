@@ -346,6 +346,24 @@ const OptionId SearchParams::kAuxEngineInstancesId{
     "This many instances of the auxiliary engine will be used. "
     "The first instance will continously explore root while any "
      "remaining instances will be used for in-tree exploration."};
+const OptionId SearchParams::kAuxEngineForceVisitsRatioId{
+    "auxengine-force-visits-ratio", "AuxEngineForceVisitsRatio",
+    "Every other batch at most this proportion of the minibatch will be "
+    "forced to pass the node recommended by the helper engine where the "
+    "PV of Leela and the PV of the helper engine diverge (first divergence). "
+    "If the helper evaluates Leelas PV as better, then only a smaller portion "
+    "of the batch will be forced, the exact proportion is governed by "
+    "AuxEngineForceVisitsRatioForInferiorLine"};
+const OptionId SearchParams::kAuxEngineForceVisitsRatioInferiorLineId{
+    "auxengine-force-visits-ratio-inferior-line", "AuxEngineForceVisitsRatioInferiorLine",
+    "If the helper prefers Leelas PV, this number will be multiplied with  "
+    "AuxEngineForceVisitsRatio to get the ratio of nodes forced to pass the "
+    "node recommended by the helper engine."};
+const OptionId SearchParams::kAuxEngineForceVisitsRatioSecondDivergenceId{
+    "auxengine-force-visits-ratio-second-divergence", "AuxEngineForceVisitsRatioSecondDivergence",
+    "Every other batch at most this proportion of the minibatch will be "
+    "forced to pass the node recommended by the helper engine where the "
+    "PV of Leela and the PV of the helper engine diverge (second divergence)."};
 const OptionId SearchParams::kAuxEngineTimeId{
     "auxengine-time", "AuxEngineTime",
     "Time (in milliseconds) for the auxiliary engine to search. "
@@ -490,9 +508,12 @@ void SearchParams::Populate(OptionsParser* options) {
   options->Add<StringOption>(kAuxEngineOptionsOnRootId) = "Threads=2;Hash=128;Ponder=off";  
   options->Add<IntOption>(kAuxEngineThresholdId, 2, 100000000) = 300;
   options->Add<IntOption>(kAuxEngineInstancesId, 1, 1024) = 3;
+  options->Add<FloatOption>(kAuxEngineForceVisitsRatioId, 0, 1) = 0.8;
+  options->Add<FloatOption>(kAuxEngineForceVisitsRatioInferiorLineId, 0, 1) = 0.8;
+  options->Add<FloatOption>(kAuxEngineForceVisitsRatioSecondDivergenceId, 0, 1) = 0.5;  
   options->Add<IntOption>(kAuxEngineTimeId, 10, 100000000) = 160;
   options->Add<IntOption>(kAuxEngineVerbosityId, 0, 10) = 2;
-  options->Add<IntOption>(kAuxEngineMaxDepthId, 1, 100) = 4;
+  options->Add<IntOption>(kAuxEngineMaxDepthId, 1, 100) = 30;
 }
 
 SearchParams::SearchParams(const OptionsDict& options)

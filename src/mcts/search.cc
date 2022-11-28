@@ -2324,21 +2324,21 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	  if(search_->search_stats_->helper_eval_of_leelas_preferred_child < search_->search_stats_->helper_eval_of_helpers_preferred_child){
 	    if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() found divergence at an odd distance from root, so maximising helper eval, and helper eval of helper preferred line is higher (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "). This means the helper has found a better move for the side to move (Leela).";
 	    act_on_first_divergence = true;
-	    collision_limit_one = std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatio());
+	    collision_limit_one = std::min(collision_limit, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatio() * 2))); // Times two because only every other batch is affected.
 	  } else {
-	    if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() found divergence at an odd distance from root, so maximising helper eval, and helper eval of helper preferred line is lower (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "), so Leela has found a better move for the side to move (Leela). Not forcing any visits.";
+	    if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() found divergence at an odd distance from root, so maximising helper eval, and helper eval of helper preferred line is lower (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "), so Leela has found a better move for the side to move (Leela). Forcing visits based on AuxEngineForceVisitsRatioInferiorLine.";
 	    act_on_first_divergence = true;
-	    collision_limit_one = std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatioInferiorLine());
+	    collision_limit_one = std::min(collision_limit, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatioInferiorLine() * 2)));
 	  }
 	} else {
 	  if(search_->search_stats_->helper_eval_of_leelas_preferred_child > search_->search_stats_->helper_eval_of_helpers_preferred_child){
 	    if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() found divergence at an even distance from root, so minimising helper eval, and helper eval of helper preferred line is lower (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "). This means the helper has found a better move the for the opponent.";
-	    collision_limit_one = std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatio());
+	    collision_limit_one = std::min(collision_limit, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatio() * 2)));
 	    act_on_first_divergence = true;
 	  } else {
-	    if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() found divergence at an even distance from root, so minimising helper eval, and helper eval of helper preferred line is higher (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "), so Leelas has found a better move for the opponent. Not forcing any visits.";
+	    if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() found divergence at an even distance from root, so minimising helper eval, and helper eval of helper preferred line is higher (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "), so Leelas has found a better move for the opponent. Forcing visits based on AuxEngineForceVisitsRatioInferiorLine.";
 	    act_on_first_divergence = true;
-	    collision_limit_one = std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatioInferiorLine());
+	    collision_limit_one = std::min(collision_limit, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatioInferiorLine() * 2)));
 	  }
 	}
 
@@ -2400,7 +2400,7 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	  flip = ! flip;
 	}
 
-	collision_limit_two = std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatioSecondDivergence());	
+	collision_limit_two = std::min(collision_limit, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatioSecondDivergence() * 2)));
 	LOGFILE << "The second divergence is at depth: " << search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size() << ". Forcing " << collision_limit_two << " visits to the helpers recommended move at the second divergence from Leelas PV: " << debug_string << " that node has " << search_->search_stats_->Helpers_preferred_child_node_in_Leelas_PV_->GetN() << " visits.";
 
 	{

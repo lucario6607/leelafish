@@ -94,7 +94,8 @@ std::unique_ptr<SearchStopper> LegacyTimeManager::GetStopper(
   const Position& position = tree.HeadPosition();
   const bool is_black = position.IsBlackToMove();
   const std::optional<int64_t>& time = (is_black ? params.btime : params.wtime);
-  // remaining_total_time_ms_ = (is_black ? params.btime : params.wtime);
+  // StoppersHints::SetRemainingTotalTimeMs(static_cast<int64_t>(time));
+  
   // If no time limit is given, don't stop on this condition.
   if (params.infinite || params.ponder || !time) return nullptr;
 

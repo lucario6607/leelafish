@@ -80,7 +80,8 @@ class StoppersHints {
   int64_t GetIndexOfBestEdge() const;
   void UpdateEstimatedRemainingTimeMs(int64_t v);
   int64_t GetEstimatedRemainingTimeMs() const;
-  int64_t GetRemainingTotalTimeMs() const;  
+  int64_t GetRemainingTotalTimeMs() const;
+  void SetRemainingTotalTimeMs(int64_t v);    
   void UpdateEstimatedRemainingPlayouts(int64_t v);
   int64_t GetEstimatedRemainingPlayouts() const;
   void UpdateEstimatedNps(float v);

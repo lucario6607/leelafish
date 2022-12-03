@@ -744,7 +744,13 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	       (search_stats_->helper_eval_of_leelas_preferred_child < -150 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 10) ||
 	       (search_stats_->helper_eval_of_root > 160 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 10)
 	       ){
-	      if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Trying to save a draw/win, helper eval of root: " << search_stats_->helper_eval_of_root << " helper recommended move " << search_stats_->winning_move_.as_string() << " (from whites perspective) Number of nodes in support for the root node eval: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_root << " helper eval of leelas preferred move: " << search_stats_->helper_eval_of_leelas_preferred_child << " Leela prefers the move: " << search_stats_->Leelas_PV[0].as_string() << " nodes in support for the eval of leelas preferred move: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child << "helper eval of helpers preferred move: " << search_stats_->helper_eval_of_helpers_preferred_child << " centipawn diff between helpers and leelas line, according to the helper: " << search_stats_->helper_eval_of_helpers_preferred_child;
+	      // print the move in rotated mode
+	      flip = played_history_.IsBlackToMove();
+	      Move m_helper;
+	      Move m_leela;	      
+	      Move::ParseMove(&m_helper, search_stats_->winning_move_.as_string(), flip);
+	      Move::ParseMove(&m_leela, search_stats_->Leelas_PV[0].as_string(), flip);
+	      if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Trying to save a draw/win, helper eval of root: " << search_stats_->helper_eval_of_root << " helper recommended move " << m_helper.as_string() << ". Number of nodes in support for the root node eval: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_root << " The helper eval of leelas preferred move: " << search_stats_->helper_eval_of_leelas_preferred_child << " Leela prefers the move: " << m_leela.as_string() << ", nodes in support for the eval of leelas preferred move: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child << " helper eval of helpers preferred move: " << search_stats_->helper_eval_of_helpers_preferred_child << " centipawn diff between helpers and leelas line, according to the helper: " << search_stats_->helper_eval_of_helpers_preferred_child << ".";
 	      search_stats_->stop_a_blunder_ = true;
 	      if(search_stats_->helper_eval_of_root > 140){
 		search_stats_->save_a_win_ = true;

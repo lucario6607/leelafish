@@ -1020,7 +1020,7 @@ void Search::DoAuxEngine(Node* n, int index){
 	if(!maybe_a_node.HasNode()){
 	  LOGFILE << "No node here yet. Nothing to do";
 	  nodes_mutex_.unlock_shared();	
-	  std::this_thread::sleep_for(std::chrono::milliseconds(30));
+	  std::this_thread::sleep_for(std::chrono::milliseconds(100));
 	  return;
 	}
 	divergent_node = maybe_a_node.node(); // What if the best edge is not yet extended?
@@ -1060,7 +1060,7 @@ void Search::DoAuxEngine(Node* n, int index){
 		if(!edge_and_node.HasNode()){
 		  LOGFILE << "The helper recommendation does not have a node yet. Nothing to do";
 		  nodes_mutex_.unlock_shared();		
-		  std::this_thread::sleep_for(std::chrono::milliseconds(30));
+		  std::this_thread::sleep_for(std::chrono::milliseconds(100));
 		  return;
 		}
 		divergent_node = edge_and_node.node();

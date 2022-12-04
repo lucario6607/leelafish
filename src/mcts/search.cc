@@ -745,7 +745,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	       (search_stats_->helper_eval_of_root > 160 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 10)
 	       ){
 	      // print the move in rotated mode
-	      flip = played_history_.IsBlackToMove();
+	      bool flip = played_history_.IsBlackToMove();
 	      Move m_helper;
 	      Move m_leela;	      
 	      Move::ParseMove(&m_helper, search_stats_->winning_move_.as_string(), flip);

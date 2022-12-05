@@ -2347,7 +2347,7 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
       // alternate forcing visits to the first and the second divergence.
       if(!search_->search_stats_->first_divergence_already_covered){
 	// B is easiest, since it does not care for side to move.
-	if(centipawn_diff < 0.05){
+	if(centipawn_diff < 5){
 	  // helper is about equal, case B
 	  if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Case B helper eval of helper preferred line is about equal (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") to helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "). Only forcing visits based on AuxEngineForceVisitsRatioInferiorLine.";
 	  collision_limit_one = std::min(collision_limit, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatioInferiorLine() * 2)));

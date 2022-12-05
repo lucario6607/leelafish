@@ -2347,14 +2347,14 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
       // alternate forcing visits to the first and the second divergence.
       if(!search_->search_stats_->first_divergence_already_covered){
 	if((search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size() % 2) != 0){ // an odd size implies an even distance!
-	  if(search_->search_stats_->helper_eval_of_leelas_preferred_child + 0.05 < search_->search_stats_->helper_eval_of_helpers_preferred_child){
-	    // helper is better than leela + 0.05
+	  if(search_->search_stats_->helper_eval_of_leelas_preferred_child < search_->search_stats_->helper_eval_of_helpers_preferred_child && centipawn_diff > 0.05 ){
+	    // helper is 'clearly' better 
 	    if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Case A1 found divergence at an even distance from root, so maximising helper eval, and helper eval of helper preferred line is higher (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "). This means the helper has found a better move for the side to move (Leela).";
 	    collision_limit_one = std::min(collision_limit, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatio() * 2))); // Times two because only every other batch is affected.
 	  } else {
-	    // helper is not better than leela + 0.05, is it even worse than leela -0.05?
-	    if(search_->search_stats_->helper_eval_of_leelas_preferred_child -0.05 > search_->search_stats_->helper_eval_of_helpers_preferred_child){
-	      // Helper is worse, case C
+	    // helper is not clearly better than leela, is it even worse than leela -0.05?
+	    if(search_->search_stats_->helper_eval_of_leelas_preferred_child > search_->search_stats_->helper_eval_of_helpers_preferred_child && centipawn_diff > 0.05){
+	      // Helper is 'clearly' worse, case C
 	      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Case C1 found divergence at an even distance from root, so maximising helper eval, and helper eval of helper preferred line is lower (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "), so Leela has found a better move for the side to move (Leela). Forcing visits to the parent of the divergence instead.";
 	      donate_visits = true;
 	      collision_limit_one = std::min(collision_limit, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatio() * 2))); // Times two because only every other batch is affected.
@@ -2365,12 +2365,12 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	    }
 	  }
 	} else {
-	  if(search_->search_stats_->helper_eval_of_leelas_preferred_child -0.05 > search_->search_stats_->helper_eval_of_helpers_preferred_child){
+	  if(search_->search_stats_->helper_eval_of_leelas_preferred_child > search_->search_stats_->helper_eval_of_helpers_preferred_child && centipawn_diff > 0.05){
 	    if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Case A2 found divergence at an odd distance from root, so minimising helper eval, and helper eval of helper preferred line is lower (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "). This means the helper has found a better move the for the opponent.";
 	    collision_limit_one = std::min(collision_limit, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatio() * 2)));
 	  } else {
 	    // Case B or C?
-	    if(search_->search_stats_->helper_eval_of_leelas_preferred_child +0.05 < search_->search_stats_->helper_eval_of_helpers_preferred_child){
+	    if(search_->search_stats_->helper_eval_of_leelas_preferred_child < search_->search_stats_->helper_eval_of_helpers_preferred_child && centipawn_diff > 0.05){
 	      // Case C, helper even worse than Leela +0.05 when minimising
 	      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Case C2 found divergence at an odd distance from root, so minimising helper eval, and helper eval of helper preferred line is higher (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "), so Leelas has found a better move for the opponent. Forcing visits to the parent of the divergence instead.";
 	      donate_visits = true;

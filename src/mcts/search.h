@@ -79,6 +79,7 @@ class Search {
     Move winning_move_ GUARDED_BY(best_move_candidates_mutex);
     std::vector<Move> helper_PV GUARDED_BY(best_move_candidates_mutex); // Full PV from the helper, used to find where Leela and helper diverge.
     std::vector<Move> Leelas_PV GUARDED_BY(best_move_candidates_mutex); // Full PV from PV.
+
     int PVs_diverge_at_depth GUARDED_BY(best_move_candidates_mutex) = 0;
     bool thread_one_and_two_have_started GUARDED_BY(best_move_candidates_mutex) = false;
     float helper_eval_of_root GUARDED_BY(best_move_candidates_mutex);
@@ -88,7 +89,7 @@ class Search {
     int number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child GUARDED_BY(best_move_candidates_mutex) = 0;
     int number_of_nodes_in_support_for_helper_eval_of_helpers_preferred_child GUARDED_BY(best_move_candidates_mutex) = 0;    
     Node* Leelas_preferred_child_node_ GUARDED_BY(best_move_candidates_mutex);
-    SharedMutex best_move_candidates_mutex; // For some reason this leads to a deadlock very early on. // is that comment obsolete by now?
+    SharedMutex best_move_candidates_mutex; // For some reason this leads to a deadlock very early on. // is that comment obsolete by now? // add AQUIRED_AFTER (nodes_mutex ?
 
     std::vector<std::shared_ptr<boost::process::ipstream>> vector_of_ipstreams;
     std::vector<std::shared_ptr<boost::process::opstream>> vector_of_opstreams;
@@ -130,9 +131,11 @@ class Search {
     // Node* Leelas_preferred_child_node_; // Not used currently, was used in stoppers.cc
     Node* Helpers_preferred_child_node_ GUARDED_BY(vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_); // protected by search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_
     Node* Helpers_preferred_child_node_in_Leelas_PV_ GUARDED_BY(vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_);
+    Node* Leelas_minimax_PV_first_divergence_node GUARDED_BY(best_move_candidates_mutex);
     std::vector<Move> vector_of_moves_from_root_to_Helpers_preferred_child_node_ GUARDED_BY(vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_);
     std::vector<Move> vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_ GUARDED_BY(vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_); // This is guaranteed to be of length zero unless there exists both a first and a second divergence.
-
+    std::vector<Move> vector_of_moves_from_root_to_first_minimax_divergence GUARDED_BY(best_move_candidates_mutex); // PV From root to, and including, the first node unique for the minimax PV, ie. the point which needs more exploration/visits
+    
   };
 
   Search(const NodeTree& tree, Network* network,

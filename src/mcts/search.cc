@@ -182,6 +182,7 @@ Search::Search(const NodeTree& tree, Network* network,
   search_stats_->best_move_candidates_mutex.lock();
   search_stats_->Leelas_PV = {};
   search_stats_->helper_PV = {};
+  search_stats_->vector_of_moves_from_root_to_first_minimax_divergence = {};
   search_stats_->PVs_diverge_at_depth = 0;
   search_stats_->number_of_nodes_in_support_for_helper_eval_of_root = 0;
   search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child = 0;
@@ -694,6 +695,73 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     LOGFILE << "MaybeTriggerStop() not calling stopper_->ShouldStop(), because search is stopped already.";
   }
 
+  // Record the minimax PV to the global variable
+  // find where Leelas PV diverge from a minimax based PV. store this path so that we can force visits to first node where the minimax based PV diverge.
+  std::vector<Move> minimax_pv;
+  // Print the MiniMaxQ and the MiniMaxPV to the log
+  std::string common_s;
+  bool flip = false;
+  long unsigned int depth = 1; // needed for drawscore, not sure if it should be 1 or 0 here (for child of root) though.
+  Node* n = root_node_;
+  bool minimax_divergence_found = false;
+  long unsigned int visits;
+  float minimax_q;
+  nodes_mutex_.lock_shared();
+  if(root_node_->GetBestMiniMaxChild() != nullptr){
+    minimax_q = -root_node_->GetBestMiniMaxQ();    
+  }
+  while(n != nullptr &&
+	n->GetBestMiniMaxChild() != nullptr &&
+	! minimax_divergence_found
+	){
+    if(n->GetBestMiniMaxChild()->GetOwnEdge()->GetMove(flip).as_string() == GetBestChildNoTemperature(n, depth).edge()->GetMove(flip).as_string()){
+      common_s = common_s + n->GetBestMiniMaxChild()->GetOwnEdge()->GetMove(flip).as_string() + " ";
+    } else {
+      minimax_divergence_found = true;
+      
+    }
+    minimax_pv.push_back(n->GetBestMiniMaxChild()->GetOwnEdge()->GetMove());
+    flip = !flip;
+    depth++;
+    visits = n->GetN();
+    n = n->GetBestMiniMaxChild();
+  }
+  nodes_mutex_.unlock_shared();
+  
+  // If a minimax divergence where found, record it.
+  search_stats_->best_move_candidates_mutex.lock(); // for reading search_stats_->winning_ and the other    
+  if(minimax_divergence_found){
+    // only write if it has changed
+    if(search_stats_->Leelas_minimax_PV_first_divergence_node != n){
+      LOGFILE << "Q based on MiniMax: " << minimax_q << ". Divergence found at depth " << minimax_pv.size()-1
+	      << " common PV is " << common_s << " first move to explore more since is on the minimax path is (from whites perspective) " << minimax_pv[minimax_pv.size()-1].as_string()
+	      << " the node here has " << visits << " visits.";
+      search_stats_->vector_of_moves_from_root_to_first_minimax_divergence = minimax_pv;
+      search_stats_->Leelas_minimax_PV_first_divergence_node = n;
+      // Also query the helper about this node, if not already done.
+      if(n->GetAuxEngineMove() == 0xffff &&
+	 !n->IsTerminal() &&
+	 n->HasChildren() &&
+	 // These last two conditions are rather expensive to evaluate, which is why they must come last
+	 params_.GetAuxEngineFile() != ""
+	 ){
+	LOGFILE << "Querying the helper about the first divergence in the minimax PV";
+	// note nested lock best_move_candidates and auxengine_mutex
+	search_stats_->auxengine_mutex_.lock();
+	search_stats_->persistent_queue_of_nodes.push(n);
+	auxengine_cv_.notify_one(); // unnecessary?
+	search_stats_->auxengine_mutex_.unlock();
+      }
+    }
+  } else {
+    if(search_stats_->vector_of_moves_from_root_to_first_minimax_divergence.size() > 0){
+      // There was a divergence, but it is gone now, remove the obsolete PV.
+      LOGFILE << "There was a divergence, but it is gone now, removing the obsolete PV.";
+      search_stats_->vector_of_moves_from_root_to_first_minimax_divergence = {};
+    }
+  }
+  search_stats_->best_move_candidates_mutex.unlock();
+
   bool this_tread_triggered_stop = false;
   // If we are the first to see that stop is needed.
   if (stop_.load(std::memory_order_acquire) && ok_to_respond_bestmove_ &&
@@ -716,9 +784,10 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     }
     search_stats_->auxengine_stopped_mutex_.unlock();
 
+    nodes_mutex_.lock_shared();
     // veto if the move Leela prefers is a blunder
-    nodes_mutex_.lock_shared();    
     search_stats_->best_move_candidates_mutex.lock(); // for reading search_stats_->winning_ and the other
+    
     if(! search_stats_->winning_){
       if(search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child > 0){
 	if(search_stats_->Leelas_PV[0].as_string() != search_stats_->winning_move_.as_string()){	   
@@ -2389,11 +2458,17 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	  std::vector<Move> vector_of_moves_from_root_to_boosted_node = search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_;
 	  Node* boosted_node;
 	  if(donate_visits){
-	    vector_of_moves_from_root_to_boosted_node.pop_back();
-	    if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Helper likes Leelas PV more than its own, boosting visits to it's parent, and let Leela do her thing.";
-	    boosted_node = search_->search_stats_->Helpers_preferred_child_node_->GetParent();
-	    LOGFILE << "Since the helper thinks leelas PV is better than its own, boost the parent of the divergence by forcing " << collision_limit_one << " visits to that node which currently has " << boosted_node->GetN() << " visits.";
-	      
+	    // If there is a minimax divergence, prioritise exploring that
+	    if(search_->search_stats_->vector_of_moves_from_root_to_first_minimax_divergence.size() > 0){
+	      vector_of_moves_from_root_to_boosted_node = search_->search_stats_->vector_of_moves_from_root_to_first_minimax_divergence;
+	      boosted_node = search_->search_stats_->Leelas_minimax_PV_first_divergence_node;
+	      LOGFILE << "Since the helper thinks leelas PV is better than its own, boost something else: now boosting the first diverging node in the minimax PV with " << collision_limit_one << " visits to that node which currently has " << boosted_node->GetN() << " visits.";	      
+	    } else {
+	      vector_of_moves_from_root_to_boosted_node.pop_back();
+	      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Helper likes Leelas PV more than its own, boosting visits to it's parent, and let Leela do her thing.";
+	      boosted_node = search_->search_stats_->Helpers_preferred_child_node_->GetParent();
+	      LOGFILE << "Since the helper thinks leelas PV is better than its own, boost the parent of the divergence by forcing " << collision_limit_one << " visits to that node which currently has " << boosted_node->GetN() << " visits.";
+	    }
 	  } else {
 	    boosted_node = search_->search_stats_->Helpers_preferred_child_node_;	      
 	    std::string debug_string;
@@ -3245,17 +3320,20 @@ void SearchWorker::DoBackupUpdateSingleNode(
 
   float probability_of_best_path = node_to_process.best_path_probability;
   // LOGFILE << "BackupUpdate: probability_of_best_path: " << probability_of_best_path;
+  // LOGFILE << "BackupUpdate: depth of node to process: " << node_to_process.depth;
 
   // no longer used
   std::vector<Move> my_moves;
   int depth = 0;
+
+  // LOGFILE << "Updating node: " << node->DebugString() << " root_node_ is " << search_->root_node_->DebugString() << " and root has MiniMaxQ of " << search_->root_node_->GetBestMiniMaxQ();
   
   for (Node *n = node, *p; n != search_->root_node_->GetParent(); n = p) {
     p = n->GetParent();
 
     // In order to be able to construct the board store the moves from
     // root to this node. Don't store the move leading to root.
-    if(n != search_->root_node_ && depth > 0) { // skip the last move, we want to extend siblings to the current node.    
+    if(n != search_->root_node_ && depth > 0) { // skip the last move, we want to extend siblings to the last node.
       my_moves.push_back(n->GetOwnEdge()->GetMove());
       depth++;
     } else {
@@ -3269,8 +3347,7 @@ void SearchWorker::DoBackupUpdateSingleNode(
       d = n->GetD();
       m = n->GetM();
     }
-    n->FinalizeScoreUpdate(v, d, m, node_to_process.multivisit);
-    // n->CustomScoreUpdate(depth, v, d, m, node_to_process.multivisit);    
+    n->FinalizeScoreUpdate(v, d, m, node_to_process.multivisit, node_to_process.depth - depth);
     if (n_to_fix > 0 && !n->IsTerminal()) {
       n->AdjustForTerminal(v_delta, d_delta, m_delta, n_to_fix);
     }

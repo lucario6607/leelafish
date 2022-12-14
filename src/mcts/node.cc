@@ -356,7 +356,7 @@ void Node::CancelScoreUpdate(int multivisit) {
   n_in_flight_ -= multivisit;
 }
 
-void Node::FinalizeScoreUpdate(float v, float d, float m, int multivisit) {
+void Node::FinalizeScoreUpdate(float v, float d, float m, int multivisit, int depth) {
   // Recompute Q.
   wl_ += multivisit * (v - wl_) / (n_ + multivisit);
   d_ += multivisit * (d - d_) / (n_ + multivisit);
@@ -366,52 +366,57 @@ void Node::FinalizeScoreUpdate(float v, float d, float m, int multivisit) {
   n_ += multivisit;
   // Decrement virtual loss.
   n_in_flight_ -= multivisit;
-}
 
-void Node::CustomScoreUpdate(int depth, float v, float d, float m, int multivisit){
-  if(GetN() < 30){
-    wl_ += multivisit * (v - wl_) / (n_ + multivisit);
-    d_ += multivisit * (d - d_) / (n_ + multivisit);
-    m_ += multivisit * (m - m_) / (n_ + multivisit);
-  } else {
-    // Minimax
-    float best_wl;
-    float best_d;
-    if(depth == 0 || depth % 2 == 0){
-      // maximizing the Q of the children
-      best_wl = -1.0f;
-      for (const auto& child : Edges()) {
-	if (child.HasNode()) {
-	  float this_wl = child.node()->GetWL();
-	  if(this_wl > best_wl){
-	    best_wl = -this_wl;
-	    best_d = child.node()->GetD();
-	  }
-	}
+  // Store v_ if this has no extended children
+  if(child_ == nullptr){
+    v_ = v;
+  }
+  
+  // if best_child_ of the parent is a null pointer, then the current node is the first and best child and the parent shall be updated.
+  // don't set bestminimaxchild for parent of root
+  if(parent_ != nullptr &&
+     parent_->GetBestMiniMaxChild() == nullptr &&
+     depth > 0){
+    parent_->SetBestMiniMaxChild(this);
+    // Also set the value (for now)
+    // LOGFILE << "Case A. Depth: " << depth << " at first child: " << DebugString()
+    // 	    << " setting minimax Q of the parent (" << parent_->DebugString()
+    // 	    << " to " << -1.0f * v_;
+    parent_->SetBestMiniMaxQ(-v_);
+  }
+
+  // Compare minimax v of this node to -v of the value stored in the parent.
+  
+  if(parent_ != nullptr &&
+     parent_->GetBestMiniMaxChild() != nullptr){
+    // parent already has a bestchild, update it or not?
+
+    // update if this is the old best child and value stored in the parent is not the same as as the value stored in this.
+
+    // is this node old best child?
+    if(parent_->GetBestMiniMaxChild() == this){
+      // yes, are the values the same?
+      if(parent_->GetBestMiniMaxQ() != -v_){
+	// no, update!
+	parent_->SetBestMiniMaxQ(-v_);
+	// LOGFILE << "Case B, depth: " << depth << " Updating the minimax Q of the parent (" << parent_->DebugString()
+	// 	<< " to " << -v_ << " based on node reachable via: " << this->GetOwnEdge()->GetMove().as_string();
       }
     } else {
-      // minimizing
-      best_wl = 1.0f;
-      for (const auto& child : Edges()) {
-	if (child.HasNode()) {
-	  float this_wl = child.node()->GetWL();
-	  if(this_wl < best_wl){
-	    best_wl = -this_wl;
-	    best_d = child.node()->GetD();
-	  }
-	}
+      // this was not the best child
+      // compare to the value of best child and update if this is now the best child.
+      if((-parent_->GetBestMiniMaxQ()) < v_){
+	// New best minimax child found!
+	// LOGFILE << "Case C, depth: "<< depth << " New best minimax child found for node: " << parent_->DebugString()
+	// 	<< " old best minimax Q was " << parent_->GetBestMiniMaxQ()
+	// 	<< " new best minimax Q is " << -v_;
+	parent_->SetBestMiniMaxQ(-v_);
+	parent_->SetBestMiniMaxChild(this);	
+      // } else {
+      // 	LOGFILE << "Not backpropagating v: " << -v_ << " at depth " << depth << " since it is worse than " << parent_->GetBestMiniMaxQ();
       }
     }
-    wl_ = best_wl;
-    d_ = best_d;
   }
-  // Don't really care about MovesLeft, so just do ordinary backup on that.
-  m_ += multivisit * (m - m_) / (n_ + multivisit);
-
-  // Increment N.
-  n_ += multivisit;
-  // Decrement virtual loss.
-  n_in_flight_ -= multivisit;
 }
 
 void Node::AdjustForTerminal(float v, float d, float m, int multivisit) {

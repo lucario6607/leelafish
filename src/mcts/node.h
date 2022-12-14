@@ -164,11 +164,18 @@ class Node {
   // Returns n = n_if_flight.
   int GetNStarted() const { return n_ + n_in_flight_; }
   float GetQ(float draw_score) const { return wl_ + draw_score * d_; }
+
   // Returns node eval, i.e. average subtree V for non-terminal node and -1/0/1
   // for terminal nodes.
   float GetWL() const { return wl_; }
   float GetD() const { return d_; }
   float GetM() const { return m_; }
+
+  // Temporary minimax-stuff
+  float GetBestMiniMaxQ() const { return v_; }
+  void SetBestMiniMaxQ(float v) { v_ = v; }  
+  Node* GetBestMiniMaxChild() const { return best_child_; }
+  void SetBestMiniMaxChild(Node* node) { best_child_ = node; }
 
   // Returns whether the node is known to be draw/lose/win.
   bool IsTerminal() const { return terminal_type_ != Terminal::NonTerminal; }
@@ -206,8 +213,7 @@ class Node {
   // * Q (weighted average of all V in a subtree)
   // * N (+=1)
   // * N-in-flight (-=1)
-  void FinalizeScoreUpdate(float v, float d, float m, int multivisit);
-  void CustomScoreUpdate(int depth, float v, float d, float m, int multivisit);
+  void FinalizeScoreUpdate(float v, float d, float m, int multivisit, int depth);
   // Like FinalizeScoreUpdate, but it updates n existing visits by delta amount.
   void AdjustForTerminal(float v, float d, float m, int multivisit);
   // Revert visits to a node which ended in a now reverted terminal.
@@ -302,6 +308,10 @@ class Node {
   // Pointer to a first child. nullptr for a leaf node.
   // As a 'hack' actually a unique_ptr to Node[] if solid_children.
   std::unique_ptr<Node> child_;
+  // To make mini-max backpropagation efficient, store a pointer to the current best child.
+  Node* best_child_ = nullptr; // child with the best minimax value.
+  float v_; // minimax Q.
+  
   // Pointer to a next sibling. nullptr if there are no further siblings.
   // Also null in the solid case.
   std::unique_ptr<Node> sibling_;
@@ -360,7 +370,7 @@ class Node {
 #if defined(__i386__) || (defined(__arm__) && !defined(__aarch64__))
 static_assert(sizeof(Node) == 48, "Unexpected size of Node for 32bit compile");
 #else
-static_assert(sizeof(Node) == 64, "Unexpected size of Node");
+static_assert(sizeof(Node) == 80, "Unexpected size of Node");
 #endif
 
 // Contains Edge and Node pair and set of proxy functions to simplify access

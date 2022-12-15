@@ -2395,7 +2395,17 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 
     // if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() About to aquire a lock on best_move_candidates.";
     search_->search_stats_->best_move_candidates_mutex.lock(); // for reading search_stats_->winning_ and the other
-    // if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Lock on best_move_candidates aquired.";    
+    // if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Lock on best_move_candidates aquired.";
+
+    // // Just focus on the minimax PV
+    // // If there is a minimax divergence, prioritise exploring that
+    // if(search_->search_stats_->vector_of_moves_from_root_to_first_minimax_divergence.size() > 0){
+    //   vector_of_moves_from_root_to_boosted_node = search_->search_stats_->vector_of_moves_from_root_to_first_minimax_divergence;
+    //   boosted_node = search_->search_stats_->Leelas_minimax_PV_first_divergence_node;
+    //   LOGFILE << "Since the helper thinks leelas PV is better than its own, boost something else: now boosting the first diverging node in the minimax PV with " << collision_limit_one << " visits to that node which currently has " << boosted_node->GetN() << " visits.";
+      
+    // }
+    
     int centipawn_diff = std::abs(search_->search_stats_->helper_eval_of_leelas_preferred_child - search_->search_stats_->helper_eval_of_helpers_preferred_child);
     search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.lock(); // for reading Helpers_preferred_child_node_ and vector_of_moves_from_root_to_Helpers_preferred_child_node_ and the other two.
     if(search_->search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child > 0 &&
@@ -2454,9 +2464,9 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	search_->search_stats_->best_move_candidates_mutex.unlock();
 	search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.lock();
 
+	Node* boosted_node;
 	{
 	  std::vector<Move> vector_of_moves_from_root_to_boosted_node = search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_;
-	  Node* boosted_node;
 	  if(donate_visits){
 	    // If there is a minimax divergence, prioritise exploring that
 	    if(search_->search_stats_->vector_of_moves_from_root_to_first_minimax_divergence.size() > 0){
@@ -2497,7 +2507,8 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	// Add a VisitInFlight for every non_collision
 	// search_->nodes_mutex_.unlock_shared();
 	// search_->nodes_mutex_.lock();
-	for(Node * n = search_->search_stats_->Helpers_preferred_child_node_; n != search_->root_node_; n = n->GetParent()){
+	// for(Node * n = search_->search_stats_->Helpers_preferred_child_node_; n != search_->root_node_; n = n->GetParent()){
+	for(Node * n = boosted_node; n != search_->root_node_; n = n->GetParent()){
 	  n->IncrementNInFlight(collision_limit_one);
 	}
 	// // The loop above stops just before root, so fix root too. // TODO fix this ugly off-by-one hack. (perhaps test for n != nullptr)

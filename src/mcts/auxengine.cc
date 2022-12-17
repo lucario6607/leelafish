@@ -708,16 +708,13 @@ void Search::AuxEngineWorker() NO_THREAD_SAFETY_ANALYSIS {
 
     // force visit stuff START
     // If thread 1, then find the divergent node compared to Leelas PV, and record a vector of moves up to that node.
-    // This seems to be a sensitive place, log entry and exit, to help spot more instances of crashes here.
     
     if(thread == 1 && nodes_to_support > 5000){
       std::vector<Move> Leelas_PV;
       Node * divergent_node = root_node_;
-      if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE << "Thread 1 entering sensitive part of the program, wish me luck!";
       nodes_mutex_.lock_shared();
       for(long unsigned int i = 0; i < my_moves_from_the_white_side.size(); i++){
 	if(divergent_node->GetN() > 0){
-	  if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE << "Debug 1";
 	  if(divergent_node->IsTerminal()){
 	    LOGFILE << "Found terminal node in helpers PV, it will probably not have edges, breaking the for loop now";
 	    break;
@@ -734,10 +731,8 @@ void Search::AuxEngineWorker() NO_THREAD_SAFETY_ANALYSIS {
 	    LOGFILE << "No node here yet. Nothing to do";
 	    break;
 	  }
-	  if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE << "Debug 3";
 	  divergent_node = maybe_a_node.node();
 	  if(Leelas_PV[i].as_string() != my_moves_from_the_white_side[i].as_string()){
-	  if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE << "Debug 4";
 	    // find the node corresponding the helper recommended move
 	    for (auto& edge_and_node : divergent_node->GetParent()->Edges()){
 	      if(edge_and_node.GetMove().as_string() == my_moves_from_the_white_side[i].as_string()){
@@ -775,7 +770,37 @@ void Search::AuxEngineWorker() NO_THREAD_SAFETY_ANALYSIS {
 	// Leela agrees until a leaf
       }
       nodes_mutex_.unlock_shared();
-      if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE << "Thread 1 survived sensitive part of the program.";      
+    }
+
+    if(thread == 2){
+      // find the deepest node in Leelas tree on the path defined the by the helpers PV, starting at the first divergence (ie thread 2, not thread 0).
+      nodes_mutex_.lock_shared();
+      std::vector<Move> helper_PV_last_node_moves;
+      Node * end_node = root_node_;
+      long unsigned int node_found_at_depth = 0;
+      for(long unsigned int i = 0; i < my_moves_from_the_white_side.size(); i++){
+	if(i > node_found_at_depth){
+	  break; // last iteration failed, break the outer loop
+	}
+	for (auto& edge : end_node->Edges()) {
+	  if(edge.GetMove() == my_moves_from_the_white_side[i]){
+	    if(edge.HasNode()){	  
+	      end_node = edge.node();
+	      helper_PV_last_node_moves.push_back(edge.GetMove());
+	      node_found_at_depth++;
+	      break; // break the inner for loop
+	    }
+	  }
+	}
+      }
+      LOGFILE << "thread 2 Found a node at depth: " << node_found_at_depth << " when traversing a PV of length " << my_moves_from_the_white_side.size() << " this node has "
+	      << end_node->GetN() << " visits.";
+      nodes_mutex_.unlock_shared();      
+	
+      search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.lock();
+      search_stats_->helper_PV_last_node_ = end_node;
+      search_stats_->helper_PV_last_node_moves = helper_PV_last_node_moves;
+      search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();      
     }
     
     // force visit stuff STOP    
@@ -1008,11 +1033,12 @@ void Search::DoAuxEngine(Node* n, int index){
 
     // step 2, find the divergence.
     if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Thread " << index << " in DoAuxEngine() about to find the divergence. Helper's PV is of length: " << helper_PV_local.size();
-    // First node which does not have an edge that can be found in helper_PV_local is the node to explore
+    // First node which does not have an edge that can be found in helper_PV_local is the node to explore, this is the divergent_node
     std::vector<Move> Leelas_PV;
     Node * divergent_node = root_node_;
 
     nodes_mutex_.lock_shared();
+  
     for(long unsigned int i = 0; i < helper_PV_local.size(); i++){
       if(divergent_node->GetN() > 0){
 	Leelas_PV.push_back(GetBestChildNoTemperature(divergent_node, 0).edge()->GetMove());
@@ -1024,16 +1050,8 @@ void Search::DoAuxEngine(Node* n, int index){
 	  return;
 	}
 	divergent_node = maybe_a_node.node(); // What if the best edge is not yet extended?
-	// if(!divergent_node){
-	//   LOGFILE << "No node here yet 2. Nothing to do";
-	//   nodes_mutex_.unlock_shared();	
-	//   std::this_thread::sleep_for(std::chrono::milliseconds(30));
-	//   return;
-	// }
-	// LOGFILE << "Leela: " << Leelas_PV[i].as_string() << " helper: " << helper_PV_local[i].as_string();
 	if(Leelas_PV[i].as_string() != helper_PV_local[i].as_string()){
 	  if(index == 1){
-	    // if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Found the divergence between helper and Leela at depth: " << i << " node: " << divergent_node->DebugString() << " Thread 1 working with the line Leela prefers: " << divergent_node->GetOwnEdge()->GetMove().as_string();
 	    // Construct the line from root to here.
 	    std::string s = "";
 	    if(i > 0){

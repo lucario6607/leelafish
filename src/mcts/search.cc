@@ -182,6 +182,7 @@ Search::Search(const NodeTree& tree, Network* network,
   search_stats_->best_move_candidates_mutex.lock();
   search_stats_->Leelas_PV = {};
   search_stats_->helper_PV = {};
+  search_stats_->helper_PV_last_node_moves = {};
   search_stats_->vector_of_moves_from_root_to_first_minimax_divergence = {};
   search_stats_->PVs_diverge_at_depth = 0;
   search_stats_->number_of_nodes_in_support_for_helper_eval_of_root = 0;
@@ -370,7 +371,7 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
 	  }
 	  // Change in Leelas PV at the same node as the previous divergence , necessarily restart thread one, but only restart thread two if there is still a divergence.
 	  // if(int(local_copy_of_vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size()) == depth){ // Why not use the same terms in the condition as in the test above?
-	  if(depth == local_copy_of_PVs_diverge_at_depth && local_copy_of_helper_PV.size() > 0){ // The last condition is needed if there is not helper PV yet.
+	  if(depth == local_copy_of_PVs_diverge_at_depth && local_copy_of_helper_PV.size() > 0){ // The last condition is needed if there is no helper PV yet.
 	    need_to_restart_thread_one = true;
 	    // local_copy_of_PVs_diverge_at_new_depth = local_copy_of_PVs_diverge_at_depth;
 	    if(iter.GetMove().as_string() == local_copy_of_helper_PV[depth].as_string()){
@@ -2436,14 +2437,14 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	    if(search_->search_stats_->helper_eval_of_leelas_preferred_child < search_->search_stats_->helper_eval_of_helpers_preferred_child){
 	    // helper is 'clearly' better 
 	      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Case A1 found divergence at an even distance from root, so maximising helper eval, and helper eval of helper preferred line is higher (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "). This means the helper has found a better move for the side to move (Leela).";
-	    collision_limit_one = std::min(collision_limit, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatio()))); // Times two because only every other batch is affected.
+	    collision_limit_one = std::min(collision_limit, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatio())));
 	    } else {
 	      // helper is not clearly better than leela, is it even worse than leela -0.05?
 	      // if(search_->search_stats_->helper_eval_of_leelas_preferred_child > search_->search_stats_->helper_eval_of_helpers_preferred_child && centipawn_diff > 0.05){
 	      // Helper is 'clearly' worse, case C
 	      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Case C1 found divergence at an even distance from root, so maximising helper eval, and helper eval of helper preferred line is lower (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "), so Leela has found a better move for the side to move (Leela). Forcing visits to the parent of the divergence instead.";
 	      donate_visits = true;
-	      collision_limit_one = std::min(collision_limit, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatio()))); // Times two because only every other batch is affected.
+	      collision_limit_one = std::min(collision_limit, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatio())));
 	    }
 	  } else {
 	    if(search_->search_stats_->helper_eval_of_leelas_preferred_child > search_->search_stats_->helper_eval_of_helpers_preferred_child){
@@ -2455,7 +2456,7 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	      //   // Case C, helper even worse than Leela +0.05 when minimising
 	      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Case C2 found divergence at an odd distance from root, so minimising helper eval, and helper eval of helper preferred line is higher (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "), so Leelas has found a better move for the opponent. Forcing visits to the parent of the divergence instead.";
 	      donate_visits = true;
-	      collision_limit_one = std::min(collision_limit, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatio()))); // Times two because only every other batch is affected.
+	      collision_limit_one = std::min(collision_limit, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatio())));
 	    }
 	  }
 	}
@@ -2466,7 +2467,20 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 
 	Node* boosted_node;
 	{
-	  std::vector<Move> vector_of_moves_from_root_to_boosted_node = search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_;
+	  // std::vector<Move> vector_of_moves_from_root_to_boosted_node = search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_;
+	  // Go deeper, force visits to the DEEPEST existing node in the PV instead of the point of the divergence
+	  std::vector<Move> vector_of_moves_from_root_to_boosted_node;
+	  if(search_->search_stats_->helper_PV_last_node_moves.size() > 0){
+	    vector_of_moves_from_root_to_boosted_node = search_->search_stats_->helper_PV_last_node_moves;
+	    // This node can have very few visits, so reduce the number of forced visits to something sane, given the number of current visits.
+	    boosted_node = search_->search_stats_->helper_PV_last_node_;
+	    collision_limit_one = std::min(boosted_node->GetN() + 1, static_cast<uint32_t>(collision_limit_one));
+	    LOGFILE << "Forcing " << collision_limit_one << " visits to a node with " << boosted_node->GetN() << " visits at depth " << vector_of_moves_from_root_to_boosted_node.size();
+	  } else {
+	   vector_of_moves_from_root_to_boosted_node = search_->search_stats_->helper_PV;
+	   boosted_node = search_->search_stats_->Helpers_preferred_child_node_;	      
+	  }
+	  
 	  if(donate_visits){
 	    // If there is a minimax divergence, prioritise exploring that
 	    if(search_->search_stats_->vector_of_moves_from_root_to_first_minimax_divergence.size() > 0){
@@ -2480,7 +2494,6 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	      LOGFILE << "Since the helper thinks leelas PV is better than its own, boost the parent of the divergence by forcing " << collision_limit_one << " visits to that node which currently has " << boosted_node->GetN() << " visits.";
 	    }
 	  } else {
-	    boosted_node = search_->search_stats_->Helpers_preferred_child_node_;	      
 	    std::string debug_string;
 	    bool flip = search_->played_history_.IsBlackToMove(); // only needed for printing moves nicely.      
 	    for(int i = 0; i < (int) search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size(); i++){

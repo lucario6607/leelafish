@@ -78,6 +78,8 @@ class Search {
     int non_winning_root_threads_ GUARDED_BY(best_move_candidates_mutex) ; // only parse once, store the result in this variable so that we can reset without parsing again.
     Move winning_move_ GUARDED_BY(best_move_candidates_mutex);
     std::vector<Move> helper_PV GUARDED_BY(best_move_candidates_mutex); // Full PV from the helper, used to find where Leela and helper diverge.
+    std::vector<Move> helper_PV_last_node_moves GUARDED_BY(best_move_candidates_mutex); // PV from the helper up to the point where Leela has a tree.
+    Node* helper_PV_last_node_ GUARDED_BY(best_move_candidates_mutex);    
     std::vector<Move> Leelas_PV GUARDED_BY(best_move_candidates_mutex); // Full PV from PV.
 
     int PVs_diverge_at_depth GUARDED_BY(best_move_candidates_mutex) = 0;

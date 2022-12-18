@@ -784,7 +784,7 @@ void Search::AuxEngineWorker() NO_THREAD_SAFETY_ANALYSIS {
 	}
 	for (auto& edge : end_node->Edges()) {
 	  if(edge.GetMove() == my_moves_from_the_white_side[i]){
-	    if(edge.HasNode()){	  
+	    if(edge.HasNode() && edge.node()->GetN() > 0){	  
 	      end_node = edge.node();
 	      helper_PV_last_node_moves.push_back(edge.GetMove());
 	      node_found_at_depth++;

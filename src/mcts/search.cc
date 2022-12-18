@@ -2498,7 +2498,7 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	      boosted_node = minimax_node;
 	      LOGFILE << "Since the helper thinks leelas PV is better than its own, boost something else: now boosting the first diverging node in the minimax PV with " << collision_limit_one << " visits to that node which currently has " << boosted_node->GetN() << " visits.";	      
 	    } else {
-	      
+	      vector_of_moves_from_root_to_boosted_node = search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_;
 	      vector_of_moves_from_root_to_boosted_node.pop_back();
 	      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Helper likes Leelas PV more than its own, boosting visits to it's parent, and let Leela do her thing.";
 	      boosted_node = search_->search_stats_->Helpers_preferred_child_node_->GetParent();

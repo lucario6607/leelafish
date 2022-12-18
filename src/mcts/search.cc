@@ -2470,18 +2470,25 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	  // std::vector<Move> vector_of_moves_from_root_to_boosted_node = search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_;
 	  // Go deeper, force visits to the DEEPEST existing node in the PV instead of the point of the divergence
 	  std::vector<Move> vector_of_moves_from_root_to_boosted_node;
-	  if(search_->search_stats_->helper_PV_last_node_moves.size() > 0){
-	    vector_of_moves_from_root_to_boosted_node = search_->search_stats_->helper_PV_last_node_moves;
-	    // This node can have very few visits, so reduce the number of forced visits to something sane, given the number of current visits.
-	    boosted_node = search_->search_stats_->helper_PV_last_node_;
-	    collision_limit_one = std::min(boosted_node->GetN() + 1, static_cast<uint32_t>(collision_limit_one));
-	    LOGFILE << "Forcing " << collision_limit_one << " visits to a node with " << boosted_node->GetN() << " visits at depth " << vector_of_moves_from_root_to_boosted_node.size();
+	  if(!donate_visits){
+	    if(search_->search_stats_->helper_PV_last_node_moves.size() > 0){
+	      vector_of_moves_from_root_to_boosted_node = search_->search_stats_->helper_PV_last_node_moves;
+	      // This node can have very few visits, so reduce the number of forced visits to something sane, given the number of current visits.
+	      boosted_node = search_->search_stats_->helper_PV_last_node_;
+	      collision_limit_one = std::min(boosted_node->GetN() + 1, static_cast<uint32_t>(collision_limit_one));
+	      LOGFILE << "Forcing " << collision_limit_one << " visits to a node with " << boosted_node->GetN() << " visits at depth " << vector_of_moves_from_root_to_boosted_node.size();
+	    } else {
+	      vector_of_moves_from_root_to_boosted_node = search_->search_stats_->helper_PV;
+	      boosted_node = search_->search_stats_->Helpers_preferred_child_node_;
+	      std::string debug_string;
+	      bool flip = search_->played_history_.IsBlackToMove(); // only needed for printing moves nicely.      
+	      for(int i = 0; i < (int) search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size(); i++){
+		debug_string = debug_string + Move(search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_[i].as_string(), flip).as_string() + " ";
+		flip = ! flip;
+	      }
+	      LOGFILE << "The first divergence is at depth: " << search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size() << ". Forcing " << collision_limit_one << " visits to the helpers recommended move at the first divergence from Leelas PV: " << debug_string << " that node has " << search_->search_stats_->Helpers_preferred_child_node_->GetN() << " visits.";
+	    }
 	  } else {
-	   vector_of_moves_from_root_to_boosted_node = search_->search_stats_->helper_PV;
-	   boosted_node = search_->search_stats_->Helpers_preferred_child_node_;	      
-	  }
-	  
-	  if(donate_visits){
 	    // If there is a minimax divergence, prioritise exploring that
 	    if(search_->search_stats_->vector_of_moves_from_root_to_first_minimax_divergence.size() > 0){
 	      vector_of_moves_from_root_to_boosted_node = search_->search_stats_->vector_of_moves_from_root_to_first_minimax_divergence;
@@ -2493,14 +2500,6 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	      boosted_node = search_->search_stats_->Helpers_preferred_child_node_->GetParent();
 	      LOGFILE << "Since the helper thinks leelas PV is better than its own, boost the parent of the divergence by forcing " << collision_limit_one << " visits to that node which currently has " << boosted_node->GetN() << " visits.";
 	    }
-	  } else {
-	    std::string debug_string;
-	    bool flip = search_->played_history_.IsBlackToMove(); // only needed for printing moves nicely.      
-	    for(int i = 0; i < (int) search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size(); i++){
-	      debug_string = debug_string + Move(search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_[i].as_string(), flip).as_string() + " ";
-	      flip = ! flip;
-	    }
-	    LOGFILE << "The first divergence is at depth: " << search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size() << ". Forcing " << collision_limit_one << " visits to the helpers recommended move at the first divergence from Leelas PV: " << debug_string << " that node has " << search_->search_stats_->Helpers_preferred_child_node_->GetN() << " visits.";
 	  }
 	  
 	  Mutex::Lock lock(picking_tasks_mutex_);

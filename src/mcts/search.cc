@@ -372,7 +372,7 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
 	  }
 	  // Change in Leelas PV at the same node as the previous divergence , necessarily restart thread one, but only restart thread two if there is still a divergence.
 	  // if(int(local_copy_of_vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size()) == depth){ // Why not use the same terms in the condition as in the test above?
-	  if(depth == local_copy_of_PVs_diverge_at_depth && local_copy_of_helper_PV.size() > 0){ // The last condition is needed if there is not helper PV yet.
+	  if(depth == local_copy_of_PVs_diverge_at_depth && local_copy_of_helper_PV.size() > 0){ // The last condition is needed if there is no helper PV yet.
 	    need_to_restart_thread_one = true;
 	    // local_copy_of_PVs_diverge_at_new_depth = local_copy_of_PVs_diverge_at_depth;
 	    if(iter.GetMove().as_string() == local_copy_of_helper_PV[depth].as_string()){

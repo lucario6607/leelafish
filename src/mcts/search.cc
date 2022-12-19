@@ -2580,6 +2580,8 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	// fetch the helper_PV_from_instance_two_explore_moves and helper_PV_from_instance_two_explore_node before changing locks
 	std::vector<Move> helper_PV_from_instance_two_explore_moves = search_->search_stats_->helper_PV_from_instance_two_explore_moves;
 	Node* helper_PV_from_instance_two_explore_node = search_->search_stats_->helper_PV_from_instance_two_explore_node;
+	std::vector<Move> helper_PV_from_instance_one_explore_moves = search_->search_stats_->helper_PV_from_instance_one_explore_moves;
+	Node* helper_PV_from_instance_one_explore_node = search_->search_stats_->helper_PV_from_instance_one_explore_node;
 	search_->search_stats_->best_move_candidates_mutex.unlock();
 	search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.lock();
 
@@ -2587,19 +2589,36 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	{
 	  std::vector<Move> vector_of_moves_from_root_to_boosted_node = search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_;
 	  if(donate_visits){
-	    // If there is a minimax divergence, prioritise exploring that
-	    if(search_->search_stats_->vector_of_moves_from_root_to_first_minimax_divergence.size() > 0){
-	      vector_of_moves_from_root_to_boosted_node = search_->search_stats_->vector_of_moves_from_root_to_first_minimax_divergence;
-	      boosted_node = search_->search_stats_->Leelas_minimax_PV_first_divergence_node;
-	      LOGFILE << "Since the helper thinks leelas PV is better than its own, boost something else: now boosting the first diverging node in the minimax PV with " << collision_limit_one << " visits to that node which currently has " << boosted_node->GetN() << " visits.";	      
+	    // At the first divergence, the helper prefers Leelas choice, how to use that information?
+	    // There are at least three things we can do here:
+	    // 1. Boost exploration deeper in the helpers PV (the helper that started from Leelas preferred PV). The helper might have found other good moves in this line than the ones Leela prefers.
+	    // 2. Boost exploration just above the first divergence
+	    // 3. If there is a minimax divergence, boost the first node in the PV where minimax diverge from CPUCT.
+	    // We could also do a little of everything or randomly select what to do each time.
+	    // For now, try (1)
+
+	    // This is (1)
+	    if(helper_PV_from_instance_one_explore_moves.size() > 0 && helper_PV_from_instance_one_explore_node->GetNInFlight() == 0){
+	      boosted_node = helper_PV_from_instance_one_explore_node;
+	      vector_of_moves_from_root_to_boosted_node = helper_PV_from_instance_one_explore_moves;
+	      LOGFILE << "Since the helper thinks leelas PV is better than its own at the first divergence, boost the interesting node in the helpers PV that started at Leelas preferred move at the first divergence at depth " << helper_PV_from_instance_one_explore_moves.size() - 1 << " with " << collision_limit_one << " visits to that node which currently has " << boosted_node->GetN() << " visits, and " << boosted_node->GetNInFlight() << " visits in flight (must be zero).";
+	      
 	    } else {
-	      vector_of_moves_from_root_to_boosted_node.pop_back();
-	      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Helper likes Leelas PV more than its own, boosting visits to it's parent, and let Leela do her thing.";
-	      boosted_node = search_->search_stats_->Helpers_preferred_child_node_->GetParent();
-	      LOGFILE << "Since the helper thinks leelas PV is better than its own, boost the parent of the divergence by forcing " << collision_limit_one << " visits to that node which currently has " << boosted_node->GetN() << " visits.";
+	      // // This is (3)
+	      // if(search_->search_stats_->vector_of_moves_from_root_to_first_minimax_divergence.size() > 0){
+	      // 	vector_of_moves_from_root_to_boosted_node = search_->search_stats_->vector_of_moves_from_root_to_first_minimax_divergence;
+	      // 	boosted_node = search_->search_stats_->Leelas_minimax_PV_first_divergence_node;
+	      // 	LOGFILE << "Since the helper thinks leelas PV is better than its own, boost something else: now boosting the first diverging node in the minimax PV with " << collision_limit_one << " visits to that node which currently has " << boosted_node->GetN() << " visits.";	      
+	      // } else {
+	      // 	// This is (2)
+		vector_of_moves_from_root_to_boosted_node.pop_back();
+		if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Helper likes Leelas PV more than its own, boosting visits to it's parent, and let Leela do her thing.";
+		boosted_node = search_->search_stats_->Helpers_preferred_child_node_->GetParent();
+		LOGFILE << "Since the helper thinks leelas PV is better than its own, boost the parent of the divergence by forcing " << collision_limit_one << " visits to that node which currently has " << boosted_node->GetN() << " visits.";
+	      // }
 	    }
 	  } else {
-	    if(helper_PV_from_instance_two_explore_moves.size() > 0){
+	    if(helper_PV_from_instance_two_explore_moves.size() > 0 && helper_PV_from_instance_two_explore_node->GetNInFlight() == 0){
 	      boosted_node = helper_PV_from_instance_two_explore_node;
 	      vector_of_moves_from_root_to_boosted_node = helper_PV_from_instance_two_explore_moves;
 	    } else {
@@ -2611,8 +2630,8 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	      debug_string = debug_string + Move(vector_of_moves_from_root_to_boosted_node[i].as_string(), flip).as_string() + " ";
 	      flip = ! flip;
 	    }
-	    if(helper_PV_from_instance_two_explore_moves.size() > 0){
-	      LOGFILE << "The first interesting node to explore more in the helper's PV (second instance) is at depth: " << vector_of_moves_from_root_to_boosted_node.size() << ". Forcing " << collision_limit_one << " visits to the interesting node in the helper's PV: " << debug_string << " that node has " << boosted_node->GetN() << " visits. and here is its debug info: " << boosted_node->DebugString() << " end the debug info of the edge " << boosted_node->GetOwnEdge()->DebugString();
+	    if(helper_PV_from_instance_two_explore_moves.size() > 0 && boosted_node->GetNInFlight() == 0){
+	      LOGFILE << "The first interesting node to explore more in the helper's PV (second instance) is at depth: " << vector_of_moves_from_root_to_boosted_node.size() -1 << ". Forcing " << collision_limit_one << " visits to the interesting node in the helper's PV: " << debug_string << " that node has " << boosted_node->GetN() << " visits, and " << boosted_node->GetNInFlight() << " visits in flight (max is 0).";
 	    } else {
 	      LOGFILE << "The first divergence is at depth: " << vector_of_moves_from_root_to_boosted_node.size() << ". Forcing " << collision_limit_one << " visits to the helpers recommended move at the first divergence from Leelas PV: " << debug_string << " that node has " << boosted_node->GetN() << " visits.";
 	    }

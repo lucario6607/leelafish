@@ -182,6 +182,7 @@ Search::Search(const NodeTree& tree, Network* network,
   search_stats_->best_move_candidates_mutex.lock();
   search_stats_->Leelas_PV = {};
   search_stats_->helper_PV = {};
+  search_stats_->helper_PV_from_instance_two_explore_moves = {};  
   search_stats_->vector_of_moves_from_root_to_first_minimax_divergence = {};
   search_stats_->PVs_diverge_at_depth = 0;
   search_stats_->number_of_nodes_in_support_for_helper_eval_of_root = 0;
@@ -700,13 +701,30 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
   std::vector<Move> minimax_pv;
   // Print the MiniMaxQ and the MiniMaxPV to the log
   std::string common_s;
-  bool flip = false;
+  bool flip = played_history_.IsBlackToMove();
   long unsigned int depth = 1; // needed for drawscore, not sure if it should be 1 or 0 here (for child of root) though.
   Node* n = root_node_;
   bool minimax_divergence_found = false;
   long unsigned int visits;
   float minimax_q;
+
+  // Create a vector of moves to use for forcing visits to the helper's PV beyond the divergent node.
+  // First, just find out the visit distribution over this line in Leelas tree.
+  // Secondly, find a suitable point where it would be good to force visits. Currently this is the last node in the PV which has at least 10 more visits than its successor in the PV.
+
+  search_stats_->best_move_candidates_mutex.lock_shared();
+  std::vector<Move> helper_PV_from_instance_two = search_stats_->helper_PV_from_instance_two;
+  std::vector<Move> helper_PV_from_instance_one = search_stats_->helper_PV_from_instance_one;  
+  search_stats_->best_move_candidates_mutex.unlock_shared();
+  std::vector<Move> helper_PV_from_instance_two_explore_moves;
+  std::string debug_helper_instance_two;
+  Node * instance_two_end_node = root_node_;
+  std::vector<Move> helper_PV_from_instance_one_explore_moves;
+  std::string debug_helper_instance_one;
+  Node * instance_one_end_node = root_node_;
+  
   nodes_mutex_.lock_shared();
+  // MiniMax stuff START
   if(root_node_->GetBestMiniMaxChild() != nullptr){
     minimax_q = -root_node_->GetBestMiniMaxQ();    
   }
@@ -726,10 +744,112 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     visits = n->GetN();
     n = n->GetBestMiniMaxChild();
   }
-  nodes_mutex_.unlock_shared();
+  // MiniMax stuff STOP
   
-  // If a minimax divergence where found, record it.
-  search_stats_->best_move_candidates_mutex.lock(); // for reading search_stats_->winning_ and the other    
+  // instance two stuff START
+  // find the deepest node in Leelas tree on the path defined the by the helpers PV, starting at the first divergence (ie thread 2, not thread 0).
+
+  long unsigned int node_two_found_at_depth = 0;
+  flip = played_history_.IsBlackToMove();
+  bool interesting_node_two_found = false;
+  Node * the_interesting_node_two = root_node_;
+  bool unextended_node_two_found = false;
+  for(long unsigned int i = 0; i < helper_PV_from_instance_two.size(); i++){
+    if(unextended_node_two_found){
+      break;
+    }
+    for (auto& edge : instance_two_end_node->Edges()) {
+      if(edge.GetMove() == helper_PV_from_instance_two[i]){
+	if(edge.HasNode() && edge.node()->GetN() > 0){	  
+	  instance_two_end_node = edge.node();
+	  // Where in the PV should we inject visits? Try at the last point where the parent has clearly more visits than the child
+	  if(instance_two_end_node->GetN() + 10 < instance_two_end_node->GetParent()->GetN() &&
+	     !interesting_node_two_found){
+	    // Not yet at an interesting node
+	    helper_PV_from_instance_two_explore_moves.push_back(edge.GetMove());
+	    the_interesting_node_two = instance_two_end_node;
+	    node_two_found_at_depth++;
+	  } else {
+	    interesting_node_two_found = true;
+	  }
+	  // regardless if the interesting node was found or not, collect debygging info
+	  debug_helper_instance_two = debug_helper_instance_two + " at depth " + std::to_string(i) + " move: " + edge.GetMove(flip).as_string() + " has " +
+	    std::to_string(instance_two_end_node->GetN()) + " visits." ;
+	} else {
+	  unextended_node_two_found = true;
+	  debug_helper_instance_two = debug_helper_instance_two + " Unextended node_two found at depth: " + std::to_string(i);
+	}
+      }
+    }
+    flip = !flip;
+  }
+  // instance two stuff STOP
+
+  // instance one stuff START
+  // find the deepest node in Leelas tree on the path defined the by the helpers PV, starting at the first divergence (ie thread 2, not thread 0).
+
+  long unsigned int node_one_found_at_depth = 0;
+  flip = played_history_.IsBlackToMove();
+  bool interesting_node_one_found = false;
+  Node * the_interesting_node_one = root_node_;
+  bool unextended_node_one_found = false;
+  for(long unsigned int i = 0; i < helper_PV_from_instance_one.size(); i++){
+    if(unextended_node_one_found){
+      break;
+    }
+    for (auto& edge : instance_one_end_node->Edges()) {
+      if(edge.GetMove() == helper_PV_from_instance_one[i]){
+	if(edge.HasNode() && edge.node()->GetN() > 0){	  
+	  instance_one_end_node = edge.node();
+	  // Where in the PV should we inject visits? Try at the last point where the parent has clearly more visits than the child
+	  if(instance_one_end_node->GetN() + 10 < instance_one_end_node->GetParent()->GetN() &&
+	     !interesting_node_one_found){
+	    // Not yet at an interesting node
+	    helper_PV_from_instance_one_explore_moves.push_back(edge.GetMove());
+	    the_interesting_node_one = instance_one_end_node;
+	    node_one_found_at_depth++;
+	  } else {
+	    interesting_node_one_found = true;
+	  }
+	  // regardless if the interesting node was found or not, collect debygging info
+	  debug_helper_instance_one = debug_helper_instance_one + " at depth " + std::to_string(i) + " move: " + edge.GetMove(flip).as_string() + " has " +
+	    std::to_string(instance_one_end_node->GetN()) + " visits." ;
+	} else {
+	  unextended_node_one_found = true;
+	  debug_helper_instance_one = debug_helper_instance_one + " Unextended node_one found at depth: " + std::to_string(i);
+	}
+      }
+    }
+    flip = !flip;
+  }
+  // instance one stuff STOP
+  
+  nodes_mutex_.unlock_shared();  
+
+  search_stats_->best_move_candidates_mutex.lock(); // for reading search_stats_->winning_ and the other
+  // Record the interesting node in the PV of thread two.
+  if(helper_PV_from_instance_two_explore_moves.size() > 0 &&
+     search_stats_->helper_PV_from_instance_two_explore_moves != helper_PV_from_instance_two_explore_moves
+     ){
+    search_stats_->helper_PV_from_instance_two_explore_moves = helper_PV_from_instance_two_explore_moves;
+    search_stats_->helper_PV_from_instance_two_explore_node = the_interesting_node_two;
+    LOGFILE << "Summary status of the PV from thread two after finishing a batch. The PV is of length " << helper_PV_from_instance_two.size()
+	    << " and the selected node_two found at depth " << node_two_found_at_depth << " with " << instance_two_end_node->GetN()
+	    << " visits. " << debug_helper_instance_two << " Debugging info on the selected node_two: " << the_interesting_node_two->DebugString()
+	    << " and the edge leading to it: " << the_interesting_node_two->GetOwnEdge()->DebugString();
+  }
+  // Record the interesting node in the PV of thread one.
+  if(helper_PV_from_instance_one_explore_moves.size() > 0 &&
+     search_stats_->helper_PV_from_instance_one_explore_moves != helper_PV_from_instance_one_explore_moves
+     ){
+    search_stats_->helper_PV_from_instance_one_explore_moves = helper_PV_from_instance_one_explore_moves;
+    search_stats_->helper_PV_from_instance_one_explore_node = the_interesting_node_one;
+    LOGFILE << "Summary status of the PV from thread one after finishing a batch. The PV is of length " << helper_PV_from_instance_one.size()
+	    << " and the selected node_one found at depth " << node_one_found_at_depth << " with " << instance_one_end_node->GetN()
+	    << " visits. " << debug_helper_instance_one << " Debugging info on the selected node_one: " << the_interesting_node_one->DebugString()
+	    << " and the edge leading to it: " << the_interesting_node_one->GetOwnEdge()->DebugString();
+  }
+  // If a minimax divergence were found, record it.
   if(minimax_divergence_found){
     // only write if it has changed
     if(search_stats_->Leelas_minimax_PV_first_divergence_node != n){
@@ -2436,31 +2556,30 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	    if(search_->search_stats_->helper_eval_of_leelas_preferred_child < search_->search_stats_->helper_eval_of_helpers_preferred_child){
 	    // helper is 'clearly' better 
 	      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Case A1 found divergence at an even distance from root, so maximising helper eval, and helper eval of helper preferred line is higher (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "). This means the helper has found a better move for the side to move (Leela).";
-	    collision_limit_one = std::min(collision_limit, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatio()))); // Times two because only every other batch is affected.
+	    collision_limit_one = std::min(collision_limit, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatio()))); 
 	    } else {
-	      // helper is not clearly better than leela, is it even worse than leela -0.05?
-	      // if(search_->search_stats_->helper_eval_of_leelas_preferred_child > search_->search_stats_->helper_eval_of_helpers_preferred_child && centipawn_diff > 0.05){
 	      // Helper is 'clearly' worse, case C
 	      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Case C1 found divergence at an even distance from root, so maximising helper eval, and helper eval of helper preferred line is lower (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "), so Leela has found a better move for the side to move (Leela). Forcing visits to the parent of the divergence instead.";
 	      donate_visits = true;
-	      collision_limit_one = std::min(collision_limit, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatio()))); // Times two because only every other batch is affected.
+	      collision_limit_one = std::min(collision_limit, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatio())));
 	    }
 	  } else {
 	    if(search_->search_stats_->helper_eval_of_leelas_preferred_child > search_->search_stats_->helper_eval_of_helpers_preferred_child){
 	      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Case A2 found divergence at an odd distance from root, so minimising helper eval, and helper eval of helper preferred line is lower (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "). This means the helper has found a better move the for the opponent.";
 	    collision_limit_one = std::min(collision_limit, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatio())));
 	    } else {
-	      // // Case B or C?
-	      // if(search_->search_stats_->helper_eval_of_leelas_preferred_child < search_->search_stats_->helper_eval_of_helpers_preferred_child && centipawn_diff > 0.05){
-	      //   // Case C, helper even worse than Leela +0.05 when minimising
+	      // Case C, helper even worse than Leela +0.05 when minimising
 	      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Case C2 found divergence at an odd distance from root, so minimising helper eval, and helper eval of helper preferred line is higher (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "), so Leelas has found a better move for the opponent. Forcing visits to the parent of the divergence instead.";
 	      donate_visits = true;
-	      collision_limit_one = std::min(collision_limit, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatio()))); // Times two because only every other batch is affected.
+	      collision_limit_one = std::min(collision_limit, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatio())));
 	    }
 	  }
 	}
 
 	search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
+	// fetch the helper_PV_from_instance_two_explore_moves and helper_PV_from_instance_two_explore_node before changing locks
+	std::vector<Move> helper_PV_from_instance_two_explore_moves = search_->search_stats_->helper_PV_from_instance_two_explore_moves;
+	Node* helper_PV_from_instance_two_explore_node = search_->search_stats_->helper_PV_from_instance_two_explore_node;
 	search_->search_stats_->best_move_candidates_mutex.unlock();
 	search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.lock();
 
@@ -2480,14 +2599,23 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	      LOGFILE << "Since the helper thinks leelas PV is better than its own, boost the parent of the divergence by forcing " << collision_limit_one << " visits to that node which currently has " << boosted_node->GetN() << " visits.";
 	    }
 	  } else {
-	    boosted_node = search_->search_stats_->Helpers_preferred_child_node_;	      
+	    if(helper_PV_from_instance_two_explore_moves.size() > 0){
+	      boosted_node = helper_PV_from_instance_two_explore_node;
+	      vector_of_moves_from_root_to_boosted_node = helper_PV_from_instance_two_explore_moves;
+	    } else {
+	      boosted_node = search_->search_stats_->Helpers_preferred_child_node_;
+	    }
 	    std::string debug_string;
 	    bool flip = search_->played_history_.IsBlackToMove(); // only needed for printing moves nicely.      
-	    for(int i = 0; i < (int) search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size(); i++){
-	      debug_string = debug_string + Move(search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_[i].as_string(), flip).as_string() + " ";
+	    for(int i = 0; i < (int) vector_of_moves_from_root_to_boosted_node.size(); i++){
+	      debug_string = debug_string + Move(vector_of_moves_from_root_to_boosted_node[i].as_string(), flip).as_string() + " ";
 	      flip = ! flip;
 	    }
-	    LOGFILE << "The first divergence is at depth: " << search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size() << ". Forcing " << collision_limit_one << " visits to the helpers recommended move at the first divergence from Leelas PV: " << debug_string << " that node has " << search_->search_stats_->Helpers_preferred_child_node_->GetN() << " visits.";
+	    if(helper_PV_from_instance_two_explore_moves.size() > 0){
+	      LOGFILE << "The first interesting node to explore more in the helper's PV (second instance) is at depth: " << vector_of_moves_from_root_to_boosted_node.size() << ". Forcing " << collision_limit_one << " visits to the interesting node in the helper's PV: " << debug_string << " that node has " << boosted_node->GetN() << " visits. and here is its debug info: " << boosted_node->DebugString() << " end the debug info of the edge " << boosted_node->GetOwnEdge()->DebugString();
+	    } else {
+	      LOGFILE << "The first divergence is at depth: " << vector_of_moves_from_root_to_boosted_node.size() << ". Forcing " << collision_limit_one << " visits to the helpers recommended move at the first divergence from Leelas PV: " << debug_string << " that node has " << boosted_node->GetN() << " visits.";
+	    }
 	  }
 	  
 	  Mutex::Lock lock(picking_tasks_mutex_);

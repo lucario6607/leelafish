@@ -920,6 +920,14 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	  }
 	  if(search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child > 100000){
 	    if(
+	       // improve play
+	       // improve play in worse positions
+	       (search_stats_->helper_eval_of_leelas_preferred_child < -30 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 10) ||
+	       // improve play in better positions
+	       (search_stats_->helper_eval_of_leelas_preferred_child > 30 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 10) ||
+	       // save the win
+	       (search_stats_->helper_eval_of_root > 110 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 20) ||
+	       
 	       // save the draw
 	       // 90 110
 	       (search_stats_->helper_eval_of_leelas_preferred_child < -90 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 20) ||

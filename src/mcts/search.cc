@@ -764,7 +764,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	if(edge.HasNode() && edge.node()->GetN() > 0){	  
 	  instance_two_end_node = edge.node();
 	  // Where in the PV should we inject visits? Try at the last point where the parent has clearly more visits than the child
-	  if(instance_two_end_node->GetN() + 100 < instance_two_end_node->GetParent()->GetN() &&
+	  if(instance_two_end_node->GetN() + 30 < instance_two_end_node->GetParent()->GetN() &&
 	     !interesting_node_two_found){
 	    // Not yet at an interesting node
 	    helper_PV_from_instance_two_explore_moves.push_back(edge.GetMove());

@@ -803,7 +803,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	if(edge.HasNode() && edge.node()->GetN() > 0){	  
 	  instance_one_end_node = edge.node();
 	  // Where in the PV should we inject visits? Try at the last point where the parent has clearly more visits than the child (was 10, now at 100)
-	  if(instance_one_end_node->GetN() + 100 < instance_one_end_node->GetParent()->GetN() &&
+	  if(instance_one_end_node->GetN() + 30 < instance_one_end_node->GetParent()->GetN() &&
 	     !interesting_node_one_found){
 	    // Not yet at an interesting node
 	    helper_PV_from_instance_one_explore_moves.push_back(edge.GetMove());
@@ -920,13 +920,16 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	  }
 	  if(search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child > 100000){
 	    if(
+	       // save the draw
+	       // 90 110
+	       (search_stats_->helper_eval_of_leelas_preferred_child < -90 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 20) ||
 	       // save the win
-	       // 120 140
-	       (search_stats_->helper_eval_of_leelas_preferred_child < -120 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 20) ||
-	       (search_stats_->helper_eval_of_root > 140 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 20) ||
-	       // 130 145
-	       (search_stats_->helper_eval_of_leelas_preferred_child < -130 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 15) ||
-	       (search_stats_->helper_eval_of_root > 145 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 15) ||
+	       (search_stats_->helper_eval_of_root > 110 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 20) ||
+	       // 120 135
+	       // save the draw	       
+	       (search_stats_->helper_eval_of_leelas_preferred_child < -120 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 15) ||
+	       // save the win	       
+	       (search_stats_->helper_eval_of_root > 135 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 15) ||
 	       // 140 152
 	       (search_stats_->helper_eval_of_leelas_preferred_child < -140 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 12) ||
 	       (search_stats_->helper_eval_of_root > 152 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 12) ||

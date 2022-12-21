@@ -748,8 +748,6 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
   // MiniMax stuff STOP
   
   // instance two stuff START
-  // find the deepest node in Leelas tree on the path defined the by the helpers PV, starting at the first divergence (ie thread 2, not thread 0).
-
   long unsigned int node_two_found_at_depth = 0;
   flip = played_history_.IsBlackToMove();
   bool interesting_node_two_found = false;
@@ -770,12 +768,21 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	    helper_PV_from_instance_two_explore_moves.push_back(edge.GetMove());
 	    the_interesting_node_two = instance_two_end_node;
 	    node_two_found_at_depth++;
+	    debug_helper_instance_two = debug_helper_instance_two + " at depth " + std::to_string(i) + " move: " + edge.GetMove(flip).as_string() + " has " +
+	      std::to_string(instance_two_end_node->GetN()) + " visits." ;
 	  } else {
-	    interesting_node_two_found = true;
-	  }
-	  // regardless if the interesting node was found or not, collect debygging info
-	  debug_helper_instance_two = debug_helper_instance_two + " at depth " + std::to_string(i) + " move: " + edge.GetMove(flip).as_string() + " has " +
+	    if(!interesting_node_two_found){
+	      // By the next two lines we actually implement an off-by-one error which might be good?
+	      interesting_node_two_found = true;
+	      the_interesting_node_two = instance_two_end_node;
+	      helper_PV_from_instance_two_explore_moves.push_back(edge.GetMove());	      
+	      debug_helper_instance_two = debug_helper_instance_two + " Found the interesting node_two at depth " + std::to_string(node_two_found_at_depth) + " move: " + edge.GetMove(flip).as_string() + " has " +
 	    std::to_string(instance_two_end_node->GetN()) + " visits." ;
+	    } else {
+	      // node_two already find in earlier iteration
+	      debug_helper_instance_two = debug_helper_instance_two + " at depth " + std::to_string(i) + " move: " + edge.GetMove(flip).as_string() + " has " + std::to_string(instance_two_end_node->GetN()) + " visits." ;
+	    }
+	  }
 	} else {
 	  unextended_node_two_found = true;
 	  debug_helper_instance_two = debug_helper_instance_two + " Unextended node_two found at depth: " + std::to_string(i);
@@ -806,15 +813,24 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	  if(instance_one_end_node->GetN() + 30 < instance_one_end_node->GetParent()->GetN() &&
 	     !interesting_node_one_found){
 	    // Not yet at an interesting node
+	    the_interesting_node_one = instance_one_end_node;	    
 	    helper_PV_from_instance_one_explore_moves.push_back(edge.GetMove());
-	    the_interesting_node_one = instance_one_end_node;
 	    node_one_found_at_depth++;
+	    debug_helper_instance_one = debug_helper_instance_one + " at depth " + std::to_string(i) + " move: " + edge.GetMove(flip).as_string() + " has " +
+	      std::to_string(instance_one_end_node->GetN()) + " visits." ;
 	  } else {
-	    interesting_node_one_found = true;
+	    if(!interesting_node_one_found){
+	      // By the next two lines we actually implement an off-by-one error which might be good?
+	      interesting_node_one_found = true;
+	      the_interesting_node_one = instance_one_end_node;
+	      helper_PV_from_instance_one_explore_moves.push_back(edge.GetMove());
+	      debug_helper_instance_one = debug_helper_instance_one + " Found the interesting node_one at depth " + std::to_string(node_one_found_at_depth) + " move: " + edge.GetMove(flip).as_string() + " has " +
+		std::to_string(the_interesting_node_one->GetN()) + " visits." ;
+	    } else {
+	      // node_one already find in earlier iteration
+	      debug_helper_instance_one = debug_helper_instance_one + " at depth " + std::to_string(i) + " move: " + edge.GetMove(flip).as_string() + " has " + std::to_string(instance_one_end_node->GetN()) + " visits." ;
+	    }
 	  }
-	  // regardless if the interesting node was found or not, collect debygging info
-	  debug_helper_instance_one = debug_helper_instance_one + " at depth " + std::to_string(i) + " move: " + edge.GetMove(flip).as_string() + " has " +
-	    std::to_string(instance_one_end_node->GetN()) + " visits." ;
 	} else {
 	  unextended_node_one_found = true;
 	  debug_helper_instance_one = debug_helper_instance_one + " Unextended node_one found at depth: " + std::to_string(i);
@@ -835,7 +851,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     search_stats_->helper_PV_from_instance_two_explore_moves = helper_PV_from_instance_two_explore_moves;
     search_stats_->helper_PV_from_instance_two_explore_node = the_interesting_node_two;
     LOGFILE << "Summary status of the PV from thread two after finishing a batch. The PV is of length " << helper_PV_from_instance_two.size()
-	    << " and the selected node_two found at depth " << node_two_found_at_depth << " with " << instance_two_end_node->GetN()
+	    << " and the selected node_two found at depth " << node_two_found_at_depth << " with " << the_interesting_node_two->GetN()
 	    << " visits. " << debug_helper_instance_two << " Debugging info on the selected node_two: " << the_interesting_node_two->DebugString()
 	    << " and the edge leading to it: " << the_interesting_node_two->GetOwnEdge()->DebugString();
   }
@@ -846,7 +862,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     search_stats_->helper_PV_from_instance_one_explore_moves = helper_PV_from_instance_one_explore_moves;
     search_stats_->helper_PV_from_instance_one_explore_node = the_interesting_node_one;
     LOGFILE << "Summary status of the PV from thread one after finishing a batch. The PV is of length " << helper_PV_from_instance_one.size()
-	    << " and the selected node_one found at depth " << node_one_found_at_depth << " with " << instance_one_end_node->GetN()
+	    << " and the selected node_one found at depth " << node_one_found_at_depth << " with " << the_interesting_node_one->GetN()
 	    << " visits. " << debug_helper_instance_one << " Debugging info on the selected node_one: " << the_interesting_node_one->DebugString()
 	    << " and the edge leading to it: " << the_interesting_node_one->GetOwnEdge()->DebugString();
   }
@@ -2616,18 +2632,19 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	      LOGFILE << "Since the helper thinks leelas PV is better than its own at the first divergence, boost the interesting node in the helpers PV that started at Leelas preferred move at the first divergence at depth " << helper_PV_from_instance_one_explore_moves.size() - 1 << " with " << collision_limit_one << " visits to that node which currently has " << boosted_node->GetN() << " visits, and " << boosted_node->GetNInFlight() << " visits in flight (must be zero).";
 	      
 	    } else {
-	      // // This is (3)
-	      // if(search_->search_stats_->vector_of_moves_from_root_to_first_minimax_divergence.size() > 0){
-	      // 	vector_of_moves_from_root_to_boosted_node = search_->search_stats_->vector_of_moves_from_root_to_first_minimax_divergence;
-	      // 	boosted_node = search_->search_stats_->Leelas_minimax_PV_first_divergence_node;
-	      // 	LOGFILE << "Since the helper thinks leelas PV is better than its own, boost something else: now boosting the first diverging node in the minimax PV with " << collision_limit_one << " visits to that node which currently has " << boosted_node->GetN() << " visits.";	      
-	      // } else {
-	      // 	// This is (2)
+	      // This is (3)
+	      if(search_->search_stats_->vector_of_moves_from_root_to_first_minimax_divergence.size() > 0){
+		vector_of_moves_from_root_to_boosted_node = search_->search_stats_->vector_of_moves_from_root_to_first_minimax_divergence;
+		boosted_node = search_->search_stats_->Leelas_minimax_PV_first_divergence_node;
+		collision_limit_one = std::floor(collision_limit/2);
+		LOGFILE << "Since the helper thinks leelas PV is better than its own, boost something else: now boosting the first diverging node in the minimax PV at depth " << vector_of_moves_from_root_to_boosted_node.size() - 1 << " with " << collision_limit_one << " visits to that node which currently has " << boosted_node->GetN() << " visits.";
+	      } else {
+		// This is (2)
 		vector_of_moves_from_root_to_boosted_node.pop_back();
 		if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Helper likes Leelas PV more than its own, boosting visits to it's parent, and let Leela do her thing.";
 		boosted_node = search_->search_stats_->Helpers_preferred_child_node_->GetParent();
 		LOGFILE << "Since the helper thinks leelas PV is better than its own, boost the parent of the divergence by forcing " << collision_limit_one << " visits to that node which currently has " << boosted_node->GetN() << " visits.";
-	      // }
+	      }
 	    }
 	  } else {
 	    if(helper_PV_from_instance_two_explore_moves.size() > 0 && helper_PV_from_instance_two_explore_node->GetNInFlight() == 0){

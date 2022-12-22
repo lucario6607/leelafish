@@ -762,7 +762,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	if(edge.HasNode() && edge.node()->GetN() > 0){	  
 	  instance_two_end_node = edge.node();
 	  // Where in the PV should we inject visits? Try at the last point where the parent has clearly more visits than the child
-	  if(instance_two_end_node->GetN() + 30 < instance_two_end_node->GetParent()->GetN() &&
+	  if(instance_two_end_node->GetN() + 10 < instance_two_end_node->GetParent()->GetN() &&
 	     !interesting_node_two_found){
 	    // Not yet at an interesting node
 	    helper_PV_from_instance_two_explore_moves.push_back(edge.GetMove());
@@ -774,8 +774,9 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	    if(!interesting_node_two_found){
 	      // By the next two lines we actually implement an off-by-one error which might be good?
 	      interesting_node_two_found = true;
-	      the_interesting_node_two = instance_two_end_node;
-	      helper_PV_from_instance_two_explore_moves.push_back(edge.GetMove());	      
+	      // the_interesting_node_two = instance_two_end_node;
+	      // helper_PV_from_instance_two_explore_moves.push_back(edge.GetMove());
+	      node_two_found_at_depth--;
 	      debug_helper_instance_two = debug_helper_instance_two + " Found the interesting node_two at depth " + std::to_string(node_two_found_at_depth) + " move: " + edge.GetMove(flip).as_string() + " has " +
 	    std::to_string(instance_two_end_node->GetN()) + " visits." ;
 	    } else {
@@ -810,7 +811,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	if(edge.HasNode() && edge.node()->GetN() > 0){	  
 	  instance_one_end_node = edge.node();
 	  // Where in the PV should we inject visits? Try at the last point where the parent has clearly more visits than the child (was 10, now at 100)
-	  if(instance_one_end_node->GetN() + 30 < instance_one_end_node->GetParent()->GetN() &&
+	  if(instance_one_end_node->GetN() + 10 < instance_one_end_node->GetParent()->GetN() &&
 	     !interesting_node_one_found){
 	    // Not yet at an interesting node
 	    the_interesting_node_one = instance_one_end_node;	    
@@ -822,8 +823,9 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	    if(!interesting_node_one_found){
 	      // By the next two lines we actually implement an off-by-one error which might be good?
 	      interesting_node_one_found = true;
-	      the_interesting_node_one = instance_one_end_node;
-	      helper_PV_from_instance_one_explore_moves.push_back(edge.GetMove());
+	      // the_interesting_node_one = instance_one_end_node;
+	      // helper_PV_from_instance_one_explore_moves.push_back(edge.GetMove());
+	      node_one_found_at_depth--;
 	      debug_helper_instance_one = debug_helper_instance_one + " Found the interesting node_one at depth " + std::to_string(node_one_found_at_depth) + " move: " + edge.GetMove(flip).as_string() + " has " +
 		std::to_string(the_interesting_node_one->GetN()) + " visits." ;
 	    } else {

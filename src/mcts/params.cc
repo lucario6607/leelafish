@@ -346,6 +346,12 @@ const OptionId SearchParams::kAuxEngineInstancesId{
     "This many instances of the auxiliary engine will be used. "
     "The first instance will continously explore root while any "
      "remaining instances will be used for in-tree exploration."};
+const OptionId SearchParams::kAuxEngineExplorationThresholdId{
+    "auxengine-instances", "EngineExplorationThreshold",
+    "This many more visits required in the parent than the child "
+    "before the child will get forced visits. "
+    "If this is too low, Leela will not even try to find refutations  "
+    "of the helpers PV (or whatever PV the visits are forced into."};
 const OptionId SearchParams::kAuxEngineForceVisitsRatioId{
     "auxengine-force-visits-ratio", "AuxEngineForceVisitsRatio",
     "Every other batch at most this proportion of the minibatch will be "
@@ -508,6 +514,7 @@ void SearchParams::Populate(OptionsParser* options) {
   options->Add<StringOption>(kAuxEngineOptionsOnRootId) = "Threads=2;Hash=128;Ponder=off";  
   options->Add<IntOption>(kAuxEngineThresholdId, 2, 100000000) = 300;
   options->Add<IntOption>(kAuxEngineInstancesId, 1, 1024) = 3;
+  options->Add<IntOption>(kAuxEngineExplorationThresholdId, 2, 1000) = 10;  
   options->Add<FloatOption>(kAuxEngineForceVisitsRatioId, 0, 1) = 0.3;
   options->Add<FloatOption>(kAuxEngineForceVisitsRatioInferiorLineId, 0, 1) = 0.1;
   options->Add<FloatOption>(kAuxEngineForceVisitsRatioSecondDivergenceId, 0, 1) = 0.05;

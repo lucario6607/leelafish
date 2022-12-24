@@ -940,7 +940,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	    if(
 	       // improve play
 	       // improve play in worse positions
-	       (search_stats_->helper_eval_of_leelas_preferred_child < -30 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 21) ||
+	       (search_stats_->helper_eval_of_leelas_preferred_child < -30 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 10) ||
 	       // improve play in better positions
 	       (search_stats_->helper_eval_of_leelas_preferred_child > 30 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 21) ||
 	       // save the win

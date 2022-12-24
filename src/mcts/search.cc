@@ -936,13 +936,13 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	            << "Helper evaluates its own prefered move to: " << search_stats_->helper_eval_of_helpers_preferred_child << " based on " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_helpers_preferred_child << " nodes.\n"
 		    << "Helper evaluates root to: " << search_stats_->helper_eval_of_root << " based on " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_root << " nodes.";
 	  }
-	  if(search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child > 100000){
+	  if(search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child > 10000000){
 	    if(
 	       // improve play
 	       // improve play in worse positions
-	       (search_stats_->helper_eval_of_leelas_preferred_child < -30 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 10) ||
+	       (search_stats_->helper_eval_of_leelas_preferred_child < -30 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 21) ||
 	       // improve play in better positions
-	       (search_stats_->helper_eval_of_leelas_preferred_child > 30 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 10) ||
+	       (search_stats_->helper_eval_of_leelas_preferred_child > 30 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 21) ||
 	       // save the win
 	       (search_stats_->helper_eval_of_root > 110 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 20) ||
 	       

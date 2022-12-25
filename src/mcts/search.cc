@@ -994,7 +994,13 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	  if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Leela agree with the helper about the best move: " << search_stats_->Leelas_PV[0].as_string() << ". The root explorer evaluates root to: " << search_stats_->helper_eval_of_root << " based on " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_root << " nodes.";
 	}
       } else {
-	LOGFILE << "number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child is zero";
+	if(search_stats_->number_of_nodes_in_support_for_helper_eval_of_helpers_preferred_child > 0){
+	  LOGFILE << "number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child is not enough for vetoing. nodes: "
+		  << search_stats_->number_of_nodes_in_support_for_helper_eval_of_helpers_preferred_child << " eval for helpers PV "
+		  << search_stats_->helper_eval_of_helpers_preferred_child << " Helper evaluates Leelas preferred move to: "
+		  << search_stats_->helper_eval_of_leelas_preferred_child << " based on " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child << " nodes.\n"
+		  << "Helper evaluates its own prefered move to: " << search_stats_->helper_eval_of_helpers_preferred_child << " based on " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_helpers_preferred_child;
+	} 
       }
     } else {
       LOGFILE << "Autopilot is on.";
@@ -2577,7 +2583,7 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
       if(true){
       // if(!search_->search_stats_->first_divergence_already_covered){
 	// B is easiest, since it does not care for side to move.
-	if(centipawn_diff < 5){
+	if(centipawn_diff < 10){
 	  // helper is about equal, case B
 	  if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Case B helper eval of helper preferred line is about equal (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") to helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "). Only forcing visits based on AuxEngineForceVisitsRatioInferiorLine.";
 	  collision_limit_one = std::min(collision_limit, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatioInferiorLine())));
@@ -2598,7 +2604,7 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Case A2 found divergence at an odd distance from root, so minimising helper eval, and helper eval of helper preferred line is lower (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "). This means the helper has found a better move the for the opponent.";
 	    collision_limit_one = std::min(collision_limit, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatio())));
 	    } else {
-	      // Case C, helper even worse than Leela +0.05 when minimising
+	      // Case C, helper even worse than Leela +0.10 when minimising
 	      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Case C2 found divergence at an odd distance from root, so minimising helper eval, and helper eval of helper preferred line is higher (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "), so Leelas has found a better move for the opponent. Forcing visits to the parent of the divergence instead.";
 	      donate_visits = true;
 	      collision_limit_one = std::min(collision_limit, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatio())));
@@ -2635,18 +2641,18 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	      
 	    } else {
 	      // This is (3)
-	      if(search_->search_stats_->vector_of_moves_from_root_to_first_minimax_divergence.size() > 0){
-		vector_of_moves_from_root_to_boosted_node = search_->search_stats_->vector_of_moves_from_root_to_first_minimax_divergence;
-		boosted_node = search_->search_stats_->Leelas_minimax_PV_first_divergence_node;
-		collision_limit_one = std::floor(collision_limit/2);
-		LOGFILE << "Since the helper thinks leelas PV is better than its own, boost something else: now boosting the first diverging node in the minimax PV at depth " << vector_of_moves_from_root_to_boosted_node.size() - 1 << " with " << collision_limit_one << " visits to that node which currently has " << boosted_node->GetN() << " visits.";
-	      } else {
+	      // if(search_->search_stats_->vector_of_moves_from_root_to_first_minimax_divergence.size() > 0){
+	      // 	vector_of_moves_from_root_to_boosted_node = search_->search_stats_->vector_of_moves_from_root_to_first_minimax_divergence;
+	      // 	boosted_node = search_->search_stats_->Leelas_minimax_PV_first_divergence_node;
+	      // 	collision_limit_one = std::floor(collision_limit/2);
+	      // 	LOGFILE << "Since the helper thinks leelas PV is better than its own, boost something else: now boosting the first diverging node in the minimax PV at depth " << vector_of_moves_from_root_to_boosted_node.size() - 1 << " with " << collision_limit_one << " visits to that node which currently has " << boosted_node->GetN() << " visits.";
+	      // } else {
 		// This is (2)
 		vector_of_moves_from_root_to_boosted_node.pop_back();
 		if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Helper likes Leelas PV more than its own, boosting visits to it's parent, and let Leela do her thing.";
 		boosted_node = search_->search_stats_->Helpers_preferred_child_node_->GetParent();
 		LOGFILE << "Since the helper thinks leelas PV is better than its own, boost the parent of the divergence by forcing " << collision_limit_one << " visits to that node which currently has " << boosted_node->GetN() << " visits.";
-	      }
+	      // }
 	    }
 	  } else {
 	    if(helper_PV_from_instance_two_explore_moves.size() > 0 && helper_PV_from_instance_two_explore_node->GetNInFlight() == 0){

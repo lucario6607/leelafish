@@ -672,6 +672,10 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
                               StoppersHints* hints) {
   hints->Reset();
 
+  // if (params_.GetNpsLimit() > 0) {
+  //   hints->UpdateEstimatedNps(params_.GetNpsLimit());
+  // }
+
   Mutex::Lock lock(counters_mutex_);
   // Return early if some other thread already has responded bestmove,
   // or if the root node is not yet expanded.
@@ -1352,9 +1356,6 @@ EdgeAndNode Search::GetBestRootChildWithTemperature(float temperature) const {
     }
   }
 
-  // No move had enough visits for temperature, so use default child criteria
-  if (max_n <= 0.0f) return GetBestChildNoTemperature(root_node_, 0);
-
   // TODO(crem) Simplify this code when samplers.h is merged.
   const float min_eval =
       max_eval - params_.GetTemperatureWinpctCutoff() / 50.0f;
@@ -1366,7 +1367,10 @@ EdgeAndNode Search::GetBestRootChildWithTemperature(float temperature) const {
     }
     if (edge.GetQ(fpu, draw_score) < min_eval) continue;
     sum += std::pow(
-        std::max(0.0f, (static_cast<float>(edge.GetN()) + offset) / max_n),
+        std::max(0.0f,
+                 (max_n <= 0.0f
+                      ? edge.GetP()
+                      : ((static_cast<float>(edge.GetN()) + offset) / max_n))),
         1 / temperature);
     cumulative_sums.push_back(sum);
   }
@@ -1439,6 +1443,7 @@ void Search::PopulateCommonIterationStats(IterationStats* stats) {
   stats->edge_n.clear();
   stats->q.clear();
   stats->win_found = false;
+  stats->may_resign = true;
   stats->num_losing_edges = 0;
   stats->move_selection_visits_scaling_power = params_.GetMoveSelectionVisitsScalingPower();
   stats->override_PUCT_node_budget_threshold = params_.GetOverridePUCTNodeBudgetThreshold();
@@ -1510,6 +1515,12 @@ void Search::PopulateCommonIterationStats(IterationStats* stats) {
       if (n > 0 && edge.IsTerminal() && edge.GetWL(0.0f) < 0.0f) {
         stats->num_losing_edges += 1;
       }
+      // If game is resignable, no need for moving quicker. This allows
+      // proving mate when losing anyway for better score output.
+      // Hardcoded resign threshold, because there is no available parameter.
+      if (n > 0 && q > -0.98f) {
+        stats->may_resign = false;
+      }
       if (max_n < n) {
         max_n = n;
         max_n_has_max_q_plus_m = false;
@@ -1526,12 +1537,10 @@ void Search::PopulateCommonIterationStats(IterationStats* stats) {
 }
 
 void Search::WatchdogThread() {
-  Numa::BindThread(0);
   LOGFILE << "Start a watchdog thread.";
   StoppersHints hints;
   IterationStats stats;
   while (true) {
-    hints.Reset();
     PopulateCommonIterationStats(&stats);
     MaybeTriggerStop(stats, &hints);
     MaybeOutputInfo();
@@ -1731,6 +1740,7 @@ void SearchWorker::ExecuteOneIteration() {
 
   if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << std::this_thread::get_id() << " PreExtendTreeAndFastTrackForNNEvaluation() finished in ExecuteOneIteration().";
   // 2. Gather minibatch.
+
   int number_of_nodes_already_added = minibatch_.size();
   GatherMinibatch2(number_of_nodes_already_added);
 
@@ -1921,7 +1931,7 @@ void SearchWorker::InitializeIteration(
 	
 	search_->nodes_mutex_.lock();
 	// GetOrSpawnNode() does work with the lock on since it does not modify the tree.
-	Node* child_node = edge.GetOrSpawnNode(my_node, nullptr);
+	Node* child_node = edge.GetOrSpawnNode(my_node);
 	if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Node spawned";
 	search_->nodes_mutex_.unlock();
 	ExtendNode(child_node, ply+1, moves_to_this_node, &history); // This will modify history which will be re-used later here.
@@ -2983,7 +2993,7 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
         }
         (*visits_to_perform.back())[best_idx] += new_visits;
         cur_limit -= new_visits;
-        Node* child_node = best_edge.GetOrSpawnNode(/* parent */ node, nullptr);
+        Node* child_node = best_edge.GetOrSpawnNode(/* parent */ node);
 
         // Probably best place to check for two-fold draws consistently.
         // Depth starts with 1 at root, so real depth is depth - 1.
@@ -3087,7 +3097,7 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
           }
           current_path.back() = idx;
           current_path.push_back(-1);
-          node = child.GetOrSpawnNode(/* parent */ node, nullptr);
+          node = child.GetOrSpawnNode(/* parent */ node);
           found_child = true;
           break;
         }
@@ -3204,48 +3214,11 @@ void SearchWorker::ExtendNode(Node* node, int depth,
   node->CreateEdges(legal_moves);
 }
 
-void SearchWorker::ExtendNode(Node* node, int depth) {
-  std::vector<Move> to_add;
-  // Could instead reserve one more than the difference between history_.size()
-  // and history_.capacity().
-  to_add.reserve(60);
-  // Need a lock to walk parents of leaf in case MakeSolid is concurrently
-  // adjusting parent chain.
-  {
-    SharedMutex::SharedLock lock(search_->nodes_mutex_);
-    Node* cur = node;
-    while (cur != search_->root_node_) {
-      Node* prev = cur->GetParent();
-      to_add.push_back(prev->GetEdgeToNode(cur)->GetMove());
-      cur = prev;
-    }
-  }
-  std::reverse(to_add.begin(), to_add.end());
-
-  ExtendNode(node, depth, to_add, &history_);
-}
-
 // Returns whether node was already in cache.
-bool SearchWorker::AddNodeToComputation(Node* node, bool add_if_cached,
-                                        int* transform_out) {
+bool SearchWorker::AddNodeToComputation(Node* node) {
   const auto hash = history_.HashLast(params_.GetCacheHistoryLength() + 1);
-  // If already in cache, no need to do anything.
-  if (add_if_cached) {
-    if (computation_->AddInputByHash(hash)) {
-      if (transform_out) {
-        *transform_out = TransformForPosition(
-            search_->network_->GetCapabilities().input_format, history_);
-      }
-      return true;
-    }
-  } else {
-    if (search_->cache_->ContainsKey(hash)) {
-      if (transform_out) {
-        *transform_out = TransformForPosition(
-            search_->network_->GetCapabilities().input_format, history_);
-      }
-      return true;
-    }
+  if (search_->cache_->ContainsKey(hash)) {
+    return true;
   }
   int transform;
   auto planes =
@@ -3272,7 +3245,6 @@ bool SearchWorker::AddNodeToComputation(Node* node, bool add_if_cached,
   }
 
   computation_->AddInput(hash, std::move(planes), std::move(moves));
-  if (transform_out) *transform_out = transform;
   return false;
 }
 
@@ -3313,7 +3285,7 @@ int SearchWorker::PrefetchIntoCache(Node* node, int budget, bool is_odd_depth) {
 
   // We are in a leaf, which is not yet being processed.
   if (!node || node->GetNStarted() == 0) {
-    if (AddNodeToComputation(node, false, nullptr)) {
+    if (AddNodeToComputation(node)) {
       // Make it return 0 to make it not use the slot, so that the function
       // tries hard to find something to cache even among unpopular moves.
       // In practice that slows things down a lot though, as it's not always

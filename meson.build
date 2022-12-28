@@ -1,5 +1,5 @@
 # This file is part of Leela Chess Zero.
-# Copyright (C) 2018-2020 The LCZero Authors
+# Copyright (C) 2018-2022 The LCZero Authors
 #
 # Leela Chess is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -171,6 +171,7 @@ files += [
   'src/mcts/stoppers/common.cc',
   'src/mcts/stoppers/factory.cc',
   'src/mcts/stoppers/legacy.cc',
+  'src/mcts/stoppers/simple.cc',
   'src/mcts/stoppers/smooth.cc',
   'src/mcts/stoppers/stoppers.cc',
   'src/mcts/stoppers/timemgr.cc',
@@ -311,7 +312,7 @@ if get_option('build_backends')
 
     endif
 
-    deps += dependency('eigen3', fallback: ['eigen', 'eigen_dep'])
+    deps += dependency('eigen3', fallback: ['eigen', 'eigen_dep']).as_system()
 
     ispc = find_program('ispc', required: false)
     ispc_arch = 'x86-64'
@@ -381,6 +382,7 @@ if get_option('build_backends')
 
     if get_option('ispc') and ispc.found()
       files += iscp_gen.process('src/neural/blas/winograd_transform.ispc')
+      files += iscp_gen.process('src/neural/shared/activation.ispc')
       add_project_arguments('-DUSE_ISPC', language : 'cpp')
     endif
 
@@ -583,6 +585,31 @@ if get_option('build_backends')
     has_backends = true
   endif
 
+  ## ~~~~~~~~
+  ## Metal
+  ## ~~~~~~~~
+  # Metal backend only available on MacOS.
+  # Check for required frameworks - Foundation, Metal and MPS.
+  metal_frameworks = dependency('appleframeworks',
+                                modules : ['Foundation', 'Metal', 'MetalPerformanceShaders', 'MetalPerformanceShadersGraph'],
+                                required: get_option('metal'))
+
+  if (metal_frameworks.found() and add_languages('objc', 'objcpp'))
+    deps += metal_frameworks
+
+    files += [
+      'src/neural/metal/network_metal.cc',
+      'src/neural/metal/mps/NetworkGraph.mm',
+      'src/neural/metal/mps/MetalNetworkBuilder.mm',
+    ]
+
+    has_backends = true
+    add_project_arguments('-fobjc-arc', language : 'objc')
+    add_project_arguments('-fobjc-arc', language : 'objcpp')
+  endif
+
+
+
 endif # if get_option('build_backends')
 
 if not has_backends and get_option('build_backends')
@@ -687,7 +714,7 @@ endif
 if get_option('python_bindings')
   pymod = import('python')
   python = pymod.find_installation('python3')
-  if python.language_version() < '3.7'
+  if not python.language_version().version_compare('>3.7')
     error('You need python 3.7 or newer')
   endif
   py_bindings_generator = find_program('scripts/gen_py_bindings.py')

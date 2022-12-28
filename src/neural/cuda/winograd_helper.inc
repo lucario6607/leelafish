@@ -44,6 +44,10 @@ __device__ __forceinline__ float activate(float cVal,
     case RELU:
       if (cVal < 0) cVal = 0;
       break;
+    case RELU_2:
+      if (cVal < 0) cVal = 0;
+      cVal *= cVal;
+      break;
     case TANH:
       cVal = tanh(cVal);
       break;
@@ -60,6 +64,9 @@ __device__ __forceinline__ float activate(float cVal,
     }
     case MISH:
       cVal = mishActivate(cVal);
+      break;
+    case SWISH:
+      cVal /= (1.0f + __expf(-cVal));
       break;
   }
   return cVal;
@@ -417,6 +424,24 @@ __device__ __forceinline__ float warpReduce(float x) {
     x += __shfl_xor_sync(0xFFFFFFFF, x, mask);
 
   return x;
+}
+
+// fast max reduction for the warp
+__device__ __forceinline__ float warpMax(float x) {
+#pragma unroll
+  for (int mask = 16; mask > 0; mask >>= 1)
+    x = max(x, __shfl_xor_sync(0xFFFFFFFF, x, mask));
+
+  return x;
+}
+
+// atomic max implementation for floats
+__device__ __forceinline__ float atomicMaxFloat(float* addr, float val) {
+    float max;
+    max = !signbit(val) ? __int_as_float(atomicMax((int*)addr, __float_as_int(val))) :
+         __uint_as_float(atomicMin((unsigned int*)addr, __float_as_uint(val)));
+
+    return max;
 }
 
 // Helper fuction to do vector loads/stores

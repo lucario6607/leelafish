@@ -1,6 +1,6 @@
 /*
  This file is part of Leela Chess Zero.
- Copyright (C) 2018 The LCZero Authors
+ Copyright (C) 2018-2022 The LCZero Authors
 
  Leela Chess is free software: you can redistribute it and/or modify
  it under the terms of the GNU General Public License as published by
@@ -22,7 +22,7 @@
 #include <vector>
 
 namespace lczero {
-enum ActivationFunction { NONE, RELU, TANH, SIGMOID, SELU, MISH };
+enum ActivationFunction { NONE, RELU, TANH, SIGMOID, SELU, MISH, SWISH, RELU_2 };
 
 // Softmax activation
 void SoftmaxActivation(const size_t size, const float* input, float* output);

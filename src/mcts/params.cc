@@ -416,7 +416,7 @@ void SearchParams::Populate(OptionsParser* options) {
   options->Add<FloatOption>(kCpuctFactorId, 0.0f, 1000.0f) = 3.894f;
   options->Add<FloatOption>(kCpuctFactorAtRootId, 0.0f, 1000.0f) = 3.894f;
   options->Add<BoolOption>(kRootHasOwnCpuctParamsId) = false;
-  options->Add<BoolOption>(kTwoFoldDrawsId) = true;
+  options->Add<BoolOption>(kTwoFoldDrawsId) = false;
   options->Add<FloatOption>(kTemperatureId, 0.0f, 100.0f) = 0.0f;
   options->Add<IntOption>(kTempDecayMovesId, 0, 640) = 0;
   options->Add<IntOption>(kTempDecayDelayMovesId, 0, 100) = 0;
@@ -437,9 +437,9 @@ void SearchParams::Populate(OptionsParser* options) {
   options->Add<FloatOption>(kFpuValueAtRootId, -100.0f, 100.0f) = 1.0f;
   options->Add<IntOption>(kCacheHistoryLengthId, 0, 7) = 0;
   options->Add<FloatOption>(kPolicySoftmaxTempId, 0.1f, 10.0f) = 1.359f;
-  options->Add<BoolOption>(kQBasedMoveSelectionId) = false;
+  options->Add<BoolOption>(kQBasedMoveSelectionId) = true;
   options->Add<FloatOption>(kOverridePUCTNodeBudgetThresholdId, 0.0f, 1.0f) =
-      1.0;
+      0.3;
   options->Add<FloatOption>(kMoveSelectionVisitsScalingPowerId, 0.01, 100) =
       0.4;
   options->Add<IntOption>(kMaxCollisionEventsId, 1, 65536) = 917;
@@ -447,7 +447,7 @@ void SearchParams::Populate(OptionsParser* options) {
   options->Add<IntOption>(kMaxCollisionVisitsScalingStartId, 1, 100000) = 28;
   options->Add<IntOption>(kMaxCollisionVisitsScalingEndId, 0, 100000000) =
       145000;
-  options->Add<FloatOption>(kQuiescenceDeltaThresholdId, 0.0f, 2.0f) = 2.0f;
+  options->Add<FloatOption>(kQuiescenceDeltaThresholdId, 0.0f, 2.0f) = 0.2f;
   options->Add<FloatOption>(kQuiescencePolicyThresholdId, 1.0f, 10.0f) = 1.0f;
   options->Add<FloatOption>(kMaxCollisionVisitsScalingPowerId, 0.01, 100) =
       1.25;
@@ -481,7 +481,7 @@ void SearchParams::Populate(OptionsParser* options) {
   options->Add<IntOption>(kDrawScoreWhiteId, -100, 100) = 0;
   options->Add<IntOption>(kDrawScoreBlackId, -100, 100) = 0;
   options->Add<FloatOption>(kNpsLimitId, 0.0f, 1e6f) = 0.0f;
-  options->Add<IntOption>(kSolidTreeThresholdId, 1, 2000000000) = 100;
+  options->Add<IntOption>(kSolidTreeThresholdId, 1, 2000000000) = 2000000000;
   options->Add<IntOption>(kTaskWorkersPerSearchWorkerId, 0, 128) =
       DEFAULT_TASK_WORKERS;
   options->Add<IntOption>(kMinimumWorkSizeForProcessingId, 2, 100000) = 20;
@@ -510,15 +510,15 @@ void SearchParams::Populate(OptionsParser* options) {
   options->HideOption(kTemperatureWinpctCutoffId);
   options->HideOption(kTemperatureVisitOffsetId);
   options->Add<StringOption>(kAuxEngineFileId);
-  options->Add<StringOption>(kAuxEngineOptionsId) = "Threads=1;Hash=32;Ponder=off";
-  options->Add<StringOption>(kAuxEngineOptionsOnRootId) = "Threads=2;Hash=128;Ponder=off";  
-  options->Add<IntOption>(kAuxEngineThresholdId, 2, 100000000) = 300;
-  options->Add<IntOption>(kAuxEngineInstancesId, 1, 1024) = 3;
-  options->Add<IntOption>(kAuxEngineExplorationThresholdId, 2, 1000) = 5;
-  options->Add<FloatOption>(kAuxEngineForceVisitsRatioId, 0, 1) = 0.3;
-  options->Add<FloatOption>(kAuxEngineForceVisitsRatioInferiorLineId, 0, 1) = 0.1;
-  options->Add<FloatOption>(kAuxEngineForceVisitsRatioSecondDivergenceId, 0, 1) = 0.05;
-  options->Add<IntOption>(kAuxEngineTimeId, 10, 100000000) = 160;
+  options->Add<StringOption>(kAuxEngineOptionsId) = "Threads=1;Hash=256;Ponder=off";
+  options->Add<StringOption>(kAuxEngineOptionsOnRootId) = "Threads=2;Hash=512;Ponder=off";
+  options->Add<IntOption>(kAuxEngineThresholdId, 2, 100000000) = 5000000;
+  options->Add<IntOption>(kAuxEngineInstancesId, 1, 1024) = 4;
+  options->Add<IntOption>(kAuxEngineExplorationThresholdId, 2, 1000) = 2;
+  options->Add<FloatOption>(kAuxEngineForceVisitsRatioId, 0, 1) = 0.025;
+  options->Add<FloatOption>(kAuxEngineForceVisitsRatioInferiorLineId, 0, 1) = 0.025;
+  options->Add<FloatOption>(kAuxEngineForceVisitsRatioSecondDivergenceId, 0, 1) = 0.025;
+  options->Add<IntOption>(kAuxEngineTimeId, 10, 100000000) = 100;
   options->Add<IntOption>(kAuxEngineVerbosityId, 0, 10) = 2;
   options->Add<IntOption>(kAuxEngineMaxDepthId, 1, 100) = 30;
 }

@@ -2644,7 +2644,7 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	      if(search_->search_stats_->vector_of_moves_from_root_to_first_minimax_divergence.size() > 0){
 		vector_of_moves_from_root_to_boosted_node = search_->search_stats_->vector_of_moves_from_root_to_first_minimax_divergence;
 		boosted_node = search_->search_stats_->Leelas_minimax_PV_first_divergence_node;
-		collision_limit_one = std::floor(collision_limit/2);
+		collision_limit_one = std::floor(collision_limit/4); // half seems to be abit blind (the root problem could be elsewhere though, but try 1/4 for now).
 		LOGFILE << "Since the helper thinks leelas PV is better than its own, boost something else: now boosting the first diverging node in the minimax PV at depth " << vector_of_moves_from_root_to_boosted_node.size() - 1 << " with " << collision_limit_one << " visits to that node which currently has " << boosted_node->GetN() << " visits.";
 	      } else {
 		// This is (2)

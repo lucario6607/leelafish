@@ -578,7 +578,7 @@ class SearchWorker {
   // Returns whether a node's bounds were set based on its children.
   bool MaybeSetBounds(Node* p, float m, int* n_to_fix, float* v_delta,
                       float* d_delta, float* m_delta) const;
-  void PickNodesToExtend(int collision_limit, bool override_cpuct);
+  void PickNodesToExtend(int collision_limit, int override_cpuct);
   bool PickNodesToExtendTask(Node* starting_point, int collision_limit,
                              int base_depth,
                              const std::vector<Move>& moves_to_base,
@@ -586,7 +586,7 @@ class SearchWorker {
                              TaskWorkspace* workspace,
 			     float probability_of_best_path,
 			     int distance_from_best_path,
-			     bool override_cpuct);
+			     int override_cpuct);
   void EnsureNodeTwoFoldCorrectForDepth(Node* node, int depth);
   void ProcessPickedTask(int batch_start, int batch_end,
                          TaskWorkspace* workspace);

@@ -137,10 +137,11 @@ class Search {
     Node* Helpers_preferred_child_node_ GUARDED_BY(vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_); // protected by search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_
     Node* Helpers_preferred_child_node_in_Leelas_PV_ GUARDED_BY(vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_);
     Node* Leelas_minimax_PV_first_divergence_node GUARDED_BY(best_move_candidates_mutex);
+    Node* Leelas_minimax_PV_some_interesting_node GUARDED_BY(best_move_candidates_mutex);    
     std::vector<Move> vector_of_moves_from_root_to_Helpers_preferred_child_node_ GUARDED_BY(vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_);
     std::vector<Move> vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_ GUARDED_BY(vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_); // This is guaranteed to be of length zero unless there exists both a first and a second divergence.
     std::vector<Move> vector_of_moves_from_root_to_first_minimax_divergence GUARDED_BY(best_move_candidates_mutex); // PV From root to, and including, the first node unique for the minimax PV, ie. the point which needs more exploration/visits
-    
+    std::vector<Move> vector_of_moves_from_root_to_some_interesting_minimax_node GUARDED_BY(best_move_candidates_mutex); // PV From root to, and including, some interesting node in the minimax PV.
   };
 
   Search(const NodeTree& tree, Network* network,

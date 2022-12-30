@@ -2676,14 +2676,6 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
     search_->search_stats_->best_move_candidates_mutex.lock(); // for reading search_stats_->winning_ and the other
     // if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Lock on best_move_candidates aquired.";
 
-    // // Just focus on the minimax PV
-    // // If there is a minimax divergence, prioritise exploring that
-    // if(search_->search_stats_->vector_of_moves_from_root_to_first_minimax_divergence.size() > 0){
-    //   vector_of_moves_from_root_to_boosted_node = search_->search_stats_->vector_of_moves_from_root_to_first_minimax_divergence;
-    //   boosted_node = search_->search_stats_->Leelas_minimax_PV_first_divergence_node;
-    //   LOGFILE << "Since the helper thinks leelas PV is better than its own, boost something else: now boosting the first diverging node in the minimax PV with " << collision_limit_one << " visits to that node which currently has " << boosted_node->GetN() << " visits.";      
-    // }
-    
     int centipawn_diff = std::abs(search_->search_stats_->helper_eval_of_leelas_preferred_child - search_->search_stats_->helper_eval_of_helpers_preferred_child);
     search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.lock(); // for reading Helpers_preferred_child_node_ and vector_of_moves_from_root_to_Helpers_preferred_child_node_ and the other two.
     if(search_->search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child > 0 &&
@@ -2759,7 +2751,7 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	  } else {
 	    if(!roughly_equal){
 	      // Helper's line at first divergence is 'clearly better' boost more
-	      collision_limit_one = static_cast<int>(std::floor(collision_limit/4));
+	      collision_limit_one = static_cast<int>(std::floor(collision_limit/3));
 	    }
 	  }
 	}
@@ -2784,7 +2776,7 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	  if(search_->search_stats_->vector_of_moves_from_root_to_first_minimax_divergence.size() > 0){
 	    boosted_node = search_->search_stats_->Leelas_minimax_PV_first_divergence_node;
 	    vector_of_moves_from_root_to_boosted_node = search_->search_stats_->vector_of_moves_from_root_to_first_minimax_divergence;
-	    collision_limit_one = std::floor(collision_limit * 0.1f);
+	    collision_limit_one = std::floor(collision_limit * 0.05f);
 	  } else {
 	    search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();	      
 	    return false;
@@ -2810,7 +2802,7 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	    return false;
 	  }
 	}
-	if(override_cpuct == 6){ // 2C An interesting node somewhere in Leela's preferred line
+	if(override_cpuct == 6){ // 2C An interesting node somewhere in Leela's MiniMaxPV
 	  if(vector_of_moves_from_root_to_some_interesting_minimax_node.size() > 0){
 	    boosted_node = Leelas_minimax_PV_some_interesting_node;
 	    vector_of_moves_from_root_to_boosted_node = vector_of_moves_from_root_to_some_interesting_minimax_node;

@@ -2811,8 +2811,9 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	  if(search_->search_stats_->vector_of_moves_from_root_to_first_minimax_divergence.size() > 0 && search_->search_stats_->Leelas_minimax_PV_first_divergence_node->GetNInFlight() == 0){
 	    boosted_node = search_->search_stats_->Leelas_minimax_PV_first_divergence_node;
 	    vector_of_moves_from_root_to_boosted_node = search_->search_stats_->vector_of_moves_from_root_to_first_minimax_divergence;
-	    collision_limit_one = std::min(2, collision_limit); // This could be higher, but when working with small minibatch-sizes, better keep the fixed nodes low.
-	    // collision_limit_one = collision_limit * 1 / 5;
+	    // collision_limit_one = std::min(2, collision_limit); // This could be higher, but when working with small minibatch-sizes, better keep the fixed nodes low.
+	    // collision_limit_one = collision_limit * 1 / 2; // be greedy.
+	    collision_limit_one = collision_limit * params_.GetAuxEngineForceVisitsRatioMiniMax();
 	  } else {
 	    search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
 	    return false;

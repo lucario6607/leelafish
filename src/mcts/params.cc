@@ -354,12 +354,18 @@ const OptionId SearchParams::kAuxEngineExplorationThresholdId{
     "of the helpers PV (or whatever PV the visits are forced into."};
 const OptionId SearchParams::kAuxEngineForceVisitsRatioId{
     "auxengine-force-visits-ratio", "AuxEngineForceVisitsRatio",
-    "Every other batch at most this proportion of the minibatch will be "
-    "forced to pass the node recommended by the helper engine where the "
+    "Every batch at most this proportion of the minibatch will be "
+    "forced to the node recommended by the helper engine where the "
     "PV of Leela and the PV of the helper engine diverge (first divergence). "
     "If the helper evaluates Leelas PV as better, then only a smaller portion "
     "of the batch will be forced, the exact proportion is governed by "
     "AuxEngineForceVisitsRatioForInferiorLine"};
+const OptionId SearchParams::kAuxEngineForceVisitsRatioMiniMaxId{
+    "auxengine-force-visits-ratio", "AuxEngineForceVisitsRatioMiniMax",
+    "Every batch at most this proportion of the minibatch will be "
+    "forced to the node that maximises Q at the first divergence from "
+    "Leelas ordinary PV. The higher this number, the more risky Leela "
+    "will play."};
 const OptionId SearchParams::kAuxEngineForceVisitsRatioInferiorLineId{
     "auxengine-force-visits-ratio-inferior-line", "AuxEngineForceVisitsRatioInferiorLine",
     "If the helper prefers Leelas PV, this number will be multiplied with  "
@@ -367,8 +373,8 @@ const OptionId SearchParams::kAuxEngineForceVisitsRatioInferiorLineId{
     "node recommended by the helper engine."};
 const OptionId SearchParams::kAuxEngineForceVisitsRatioSecondDivergenceId{
     "auxengine-force-visits-ratio-second-divergence", "AuxEngineForceVisitsRatioSecondDivergence",
-    "Every other batch at most this proportion of the minibatch will be "
-    "forced to pass the node recommended by the helper engine where the "
+    "Every batch at most this proportion of the minibatch will be "
+    "forced to the node recommended by the helper engine where the "
     "PV of Leela and the PV of the helper engine diverge (second divergence)."};
 const OptionId SearchParams::kAuxEngineTimeId{
     "auxengine-time", "AuxEngineTime",
@@ -514,10 +520,11 @@ void SearchParams::Populate(OptionsParser* options) {
   options->Add<StringOption>(kAuxEngineOptionsOnRootId) = "Threads=2;Hash=512;Ponder=off";
   options->Add<IntOption>(kAuxEngineThresholdId, 2, 100000000) = 5000000;
   options->Add<IntOption>(kAuxEngineInstancesId, 1, 1024) = 4;
-  options->Add<IntOption>(kAuxEngineExplorationThresholdId, 2, 1000) = 2;
-  options->Add<FloatOption>(kAuxEngineForceVisitsRatioId, 0, 1) = 0.025;
-  options->Add<FloatOption>(kAuxEngineForceVisitsRatioInferiorLineId, 0, 1) = 0.025;
-  options->Add<FloatOption>(kAuxEngineForceVisitsRatioSecondDivergenceId, 0, 1) = 0.025;
+  options->Add<IntOption>(kAuxEngineExplorationThresholdId, 2, 1000) = 5;
+  options->Add<FloatOption>(kAuxEngineForceVisitsRatioId, 0, 1) = 0.30;
+  options->Add<FloatOption>(kAuxEngineForceVisitsRatioMiniMaxId, 0, 1) = 0.2;
+  options->Add<FloatOption>(kAuxEngineForceVisitsRatioInferiorLineId, 0, 1) = 0.04;
+  options->Add<FloatOption>(kAuxEngineForceVisitsRatioSecondDivergenceId, 0, 1) = 0.10;
   options->Add<IntOption>(kAuxEngineTimeId, 10, 100000000) = 100;
   options->Add<IntOption>(kAuxEngineVerbosityId, 0, 10) = 2;
   options->Add<IntOption>(kAuxEngineMaxDepthId, 1, 100) = 30;

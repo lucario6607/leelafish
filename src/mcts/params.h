@@ -170,6 +170,9 @@ class SearchParams {
   float GetAuxEngineForceVisitsRatio() const {
     return options_.Get<float>(kAuxEngineForceVisitsRatioId);
   }
+  float GetAuxEngineForceVisitsRatioMiniMax() const {
+    return options_.Get<float>(kAuxEngineForceVisitsRatioMiniMaxId);
+  }
   float GetAuxEngineForceVisitsRatioInferiorLine() const {
     return options_.Get<float>(kAuxEngineForceVisitsRatioInferiorLineId);
   }
@@ -256,6 +259,7 @@ class SearchParams {
   static const OptionId kAuxEngineInstancesId;
   static const OptionId kAuxEngineExplorationThresholdId;
   static const OptionId kAuxEngineForceVisitsRatioId;
+  static const OptionId kAuxEngineForceVisitsRatioMiniMaxId;
   static const OptionId kAuxEngineForceVisitsRatioInferiorLineId;
   static const OptionId kAuxEngineForceVisitsRatioSecondDivergenceId;
   static const OptionId kAuxEngineTimeId;

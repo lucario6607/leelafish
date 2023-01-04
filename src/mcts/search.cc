@@ -2732,15 +2732,17 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	  Node* best_child = search_->GetBestChildNoTemperature(boosted_node->GetParent(), vector_of_moves_from_root_to_boosted_node.size()).node();
 	  LOGFILE << "Depth: " << vector_of_moves_from_root_to_boosted_node.size() << " Visits for best child (cpuct=1): " << best_child->GetN() << " visits for boosted_node: " << boosted_node->GetN();
 	  if(roughly_equal || donate_visits){
-	    if(boosted_node != best_child && boosted_node->GetN() + collision_limit_one > best_child->GetN()){
+	    // don't boost if node is already best child
+	    if(boosted_node == best_child){
+		LOGFILE << "Case 1: not clearly better, already best child, boosting not needed";
+		search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
+		return false;
+	    }
+	    if(boosted_node->GetN() + collision_limit_one > best_child->GetN()){
 	      // Equal number of visits is OK, but not more
 	      if(boosted_node->GetN() < best_child->GetN()){
 		collision_limit_one = best_child->GetN() - boosted_node->GetN();
 		LOGFILE << "Case 1: Limiting the number of forced visits to match best child.";
-	      } else {
-		LOGFILE << "override_cpuct=1, not clearly better, Enough visits for node, boosting not needed";
-		search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
-		return false;
 	      }
 	    }
 	  } else {
@@ -2756,20 +2758,39 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	  boosted_node = search_->search_stats_->Helpers_preferred_child_node_in_Leelas_PV_;
 	  vector_of_moves_from_root_to_boosted_node = search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_;
 	  Node* best_child = search_->GetBestChildNoTemperature(boosted_node->GetParent(), vector_of_moves_from_root_to_boosted_node.size()).node();
-	  if(boosted_node != best_child && boosted_node->GetN() + collision_limit_one > best_child->GetN()){
-	    // Equal number of visits is OK, but not more
-	    if(boosted_node->GetN() < best_child->GetN()){
-	      collision_limit_one = best_child->GetN() - boosted_node->GetN();
-	      LOGFILE << "Case 2: Limiting the number of forced visits to match best child.";
-	    } else {
-	      LOGFILE << "Depth: " << vector_of_moves_from_root_to_boosted_node.size() << " Visits for best child (cpuct=2): " << best_child->GetN() << " visits for boosted_node: " << boosted_node->GetN()
-		      << "Enough visits for node, boosting not needed";
-	      search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
-	      return false;
+
+	  if(roughly_equal || !donate_visits){
+	    // don't boost if node is already best child
+	    if(boosted_node == best_child){
+		LOGFILE << "Case 2: not clearly better, already best child, boosting not needed";
+		search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
+		return false;
 	    }
-	  } else {
-	    LOGFILE << "Depth: " << vector_of_moves_from_root_to_boosted_node.size() << " Visits for best child (cpuct=2): " << best_child->GetN() << " visits for boosted_node: " << boosted_node->GetN();
+	    if(boosted_node->GetN() + collision_limit_one > best_child->GetN()){
+	      // Equal number of visits is OK, but not more
+	      if(boosted_node->GetN() < best_child->GetN()){
+		collision_limit_one = best_child->GetN() - boosted_node->GetN();
+		LOGFILE << "Case 2: Limiting the number of forced visits to match best child.";
+	      }
+	    }
 	  }
+
+	  // below should be functionally equal to above, but the above is more reader friendly.
+	  // if(boosted_node != best_child && boosted_node->GetN() + collision_limit_one > best_child->GetN()){
+	  //   // Equal number of visits is OK, but not more
+	  //   if(boosted_node->GetN() < best_child->GetN()){
+	  //     collision_limit_one = best_child->GetN() - boosted_node->GetN();
+	  //     LOGFILE << "Case 2: Limiting the number of forced visits to match best child.";
+	  //   } else {
+	  //     LOGFILE << "Depth: " << vector_of_moves_from_root_to_boosted_node.size() << " Visits for best child (cpuct=2): " << best_child->GetN() << " visits for boosted_node: " << boosted_node->GetN()
+	  // 	      << "Enough visits for node, boosting not needed";
+	  //     search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
+	  //     return false;
+	  //   }
+	  // } else {
+	  //   LOGFILE << "Depth: " << vector_of_moves_from_root_to_boosted_node.size() << " Visits for best child (cpuct=2): " << best_child->GetN() << " visits for boosted_node: " << boosted_node->GetN();
+	  // }
+	  
 	  if(donate_visits){
 	    // This line is "clearly better" than the helpers main line, so OK to boost this. Note, however, that this is the entry point in that line. It might be the case that the helper has found another line than Leelas PV,
 	    // Never give more than number of visits - visits in flight.

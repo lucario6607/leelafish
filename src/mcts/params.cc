@@ -518,16 +518,16 @@ void SearchParams::Populate(OptionsParser* options) {
   options->Add<StringOption>(kAuxEngineFileId);
   options->Add<StringOption>(kAuxEngineOptionsId) = "Threads=1;Hash=256;Ponder=off";
   options->Add<StringOption>(kAuxEngineOptionsOnRootId) = "Threads=2;Hash=512;Ponder=off";
-  options->Add<IntOption>(kAuxEngineThresholdId, 2, 100000000) = 5000000;
+  options->Add<IntOption>(kAuxEngineThresholdId, 2, 100000000) = 100000000;
   options->Add<IntOption>(kAuxEngineInstancesId, 1, 1024) = 4;
   options->Add<IntOption>(kAuxEngineExplorationThresholdId, 2, 1000) = 5;
-  options->Add<FloatOption>(kAuxEngineForceVisitsRatioId, 0, 1) = 0.30;
-  options->Add<FloatOption>(kAuxEngineForceVisitsRatioMiniMaxId, 0, 1) = 0.2;
+  options->Add<FloatOption>(kAuxEngineForceVisitsRatioId, 0, 1) = 0.25;
+  options->Add<FloatOption>(kAuxEngineForceVisitsRatioMiniMaxId, 0, 1) = 0.10;
   options->Add<FloatOption>(kAuxEngineForceVisitsRatioInferiorLineId, 0, 1) = 0.04;
   options->Add<FloatOption>(kAuxEngineForceVisitsRatioSecondDivergenceId, 0, 1) = 0.10;
   options->Add<IntOption>(kAuxEngineTimeId, 10, 100000000) = 100;
   options->Add<IntOption>(kAuxEngineVerbosityId, 0, 10) = 2;
-  options->Add<IntOption>(kAuxEngineMaxDepthId, 1, 100) = 30;
+  options->Add<IntOption>(kAuxEngineMaxDepthId, 1, 100) = 99;
 }
 
 SearchParams::SearchParams(const OptionsDict& options)

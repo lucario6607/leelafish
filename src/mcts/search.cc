@@ -669,12 +669,8 @@ NNCacheLock Search::GetCachedNNEval(const Node* node) const {
 }
 
 void Search::MaybeTriggerStop(const IterationStats& stats,
-                              StoppersHints* hints) {
+                              StoppersHints* hints, bool update_helper_stuff) {
   hints->Reset();
-
-  // if (params_.GetNpsLimit() > 0) {
-  //   hints->UpdateEstimatedNps(params_.GetNpsLimit());
-  // }
 
   Mutex::Lock lock(counters_mutex_);
   // Return early if some other thread already has responded bestmove,
@@ -682,9 +678,6 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
   if (bestmove_is_sent_ || total_playouts_ + initial_visits_ == 0) {
     return;
   }
-
-  // auto remaining_time = hints->GetEstimatedRemainingTimeMs();
-  // LOGFILE << "Remaining time: " << remaining_time;
 
   hints->UpdateIndexOfBestEdge(-1);
   if (!stop_.load(std::memory_order_acquire)) {
@@ -701,6 +694,8 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
     LOGFILE << "MaybeTriggerStop() not calling stopper_->ShouldStop(), because search is stopped already.";
   }
 
+  if(update_helper_stuff){
+    
   // Record the two minimax PVs to their global variables (one to the first divergence, and one to an interesting node in the full length PV.
   // For the first divergence use
   // search_stats_->vector_of_moves_from_root_to_first_minimax_divergence
@@ -743,26 +738,6 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
   if(root_node_->GetBestMiniMaxChild() != nullptr){
     minimax_q = -root_node_->GetBestMiniMaxQ();    
   }
-  // while(n != nullptr &&
-  // 	n->GetBestMiniMaxChild() != nullptr &&
-  // 	! minimax_divergence_found
-  // 	){
-  //   if(n->GetBestMiniMaxChild()->GetOwnEdge()->GetMove(flip).as_string() == GetBestChildNoTemperature(n, depth).edge()->GetMove(flip).as_string()){
-  //     common_s = common_s + n->GetBestMiniMaxChild()->GetOwnEdge()->GetMove(flip).as_string() + " ";
-  //   } else {
-  //     minimax_divergence_found = true;
-      
-  //   }
-  //   minimax_pv.push_back(n->GetBestMiniMaxChild()->GetOwnEdge()->GetMove());
-  //   flip = !flip;
-  //   depth++;
-  //   visits = n->GetN();
-  //   n = n->GetBestMiniMaxChild();
-  // }
-
-  // traverse the minimax PV and (a) find the divergence, and (b) find an interesting node to explore
-  // minimax_pv, n, visits and depth is for the divergence
-  // some_interesting_node minimax_pv_explore_moves for the interesting node
 
   while(some_interesting_node != nullptr &&
 	some_interesting_node->GetBestMiniMaxChild() != nullptr &&
@@ -992,6 +967,8 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
   
   search_stats_->best_move_candidates_mutex.unlock();
 
+  } // end of if update_helper_stuff
+
   bool this_tread_triggered_stop = false;
   // If we are the first to see that stop is needed.
   if (stop_.load(std::memory_order_acquire) && ok_to_respond_bestmove_ &&
@@ -1106,43 +1083,6 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
       LOGFILE << "Autopilot is on.";
     }
 	  
-	  
-    // 	  // if((search_stats_->helper_eval_of_root > -160 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < -170) || // saving the draw
-    // 	  //    (search_stats_->helper_eval_of_root > -165 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < -180) || // saving the draw (from a game: -164 root vs -195 leelas move)
-    // 	  //    (search_stats_->helper_eval_of_root > -170 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < -190) || // saving the draw 	     
-    // 	  //    (search_stats_->helper_eval_of_root > 160 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < 130) || // saving the win
-    // 	  //    (search_stats_->helper_eval_of_root > 145 && search_stats_->helper_eval_of_leelas_preferred_child_of_root < 105) // saving the win
-    // 	  //    ){
-
-    // 	  // Perhaps one should compare helper_eval_of_leelas_preferred_child with helper_eval_of_helpers_preferred_child, but in this context the positions is only 1 ply from root, so we could as well use the root eval.
-    // 	  if((search_stats_->helper_eval_of_root > -160 && search_stats_->helper_eval_of_leelas_preferred_child < -170) || // saving the draw
-    // 	     (search_stats_->helper_eval_of_root > -165 && search_stats_->helper_eval_of_leelas_preferred_child < -180) || // saving the draw (from a game: -164 root vs -195 leelas move)
-    // 	     (search_stats_->helper_eval_of_root > -170 && search_stats_->helper_eval_of_leelas_preferred_child < -190) || // saving the draw 	     
-    // 	     (search_stats_->helper_eval_of_root > 160 && search_stats_->helper_eval_of_leelas_preferred_child < 130) || // saving the win
-    // 	     (search_stats_->helper_eval_of_root > 145 && search_stats_->helper_eval_of_leelas_preferred_child < 105) // saving the win
-    // 	     ){	
-    // 	    if(search_stats_->number_of_nodes_in_support_for_helper_eval_of_root > 100000){
-    // 	      if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Large enough support for root";
-    // 	      if(search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child > 100000){
-    // 		if(search_stats_->helper_eval_of_root > -160 && search_stats_->helper_eval_of_leelas_preferred_child < -170){
-    // 		  if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Trying to save a draw, helper eval of root: " << search_stats_->helper_eval_of_root << " helper recommended move " << search_stats_->winning_move_.as_string() << " (from whites perspective) Number of nodes in support for the root node eval: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_root << " helper eval of leelas preferred move: " << search_stats_->helper_eval_of_leelas_preferred_child << " Leela prefers the move: " << search_stats_->Leelas_PV[0].as_string() << " nodes in support for the eval of leelas preferred move: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child;
-    // 		} else {
-    // 		  if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Trying to save a win, helper eval of root: " << search_stats_->helper_eval_of_root << " helper recommended move " << search_stats_->winning_move_.as_string() << "  (from whites perspective) Number of nodes in support for the root node eval: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_root << " helper eval of leelas preferred move: " << search_stats_->helper_eval_of_leelas_preferred_child << " Leela prefers the move: " << search_stats_->Leelas_PV[0].as_string() << " nodes in support for the eval of leelas preferred move: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child;
-    // 		}
-    // 		search_stats_->stop_a_blunder_ = true;
-    // 	      }
-    // 	    }
-    // 	  }
-    // 	} else {
-    // 	  // They agree.
-    // 	  if(params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Leela agree with the helper about the best move: " << search_stats_->Leelas_PV[0].as_string() << ". The root explorer evaluates root to: " << search_stats_->helper_eval_of_root << " based on " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_root << " nodes.";
-    // 	}
-    //   }
-    // }
-    // else {
-    //   LOGFILE << "Autopilot is on.";
-    // }
-
     search_stats_->best_move_candidates_mutex.unlock();
     nodes_mutex_.unlock_shared();    
 
@@ -1179,7 +1119,6 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
   } else {
     if (params_.GetAuxEngineVerbosity() >= 9) LOGFILE << "Finished MaybeTriggerStop() finished, not stopping search yet.";
   }
-  // nodes_mutex_.unlock_shared();
 }
 
 // Return the evaluation of the actual best child, regardless of temperature
@@ -1638,7 +1577,7 @@ void Search::WatchdogThread() {
   IterationStats stats;
   while (true) {
     PopulateCommonIterationStats(&stats);
-    MaybeTriggerStop(stats, &hints);
+    MaybeTriggerStop(stats, &hints, false);
     MaybeOutputInfo();
 
     constexpr auto kMaxWaitTimeMs = 100;
@@ -2829,8 +2768,14 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	      collision_limit_one = std::min(2, collision_limit);
 	    } else {
 	      if(!roughly_equal){
-		// Clearly better, boost more
-		collision_limit_one = collision_limit * 1 / 5;
+		// Clearly better, boost more,
+		if(centipawn_diff > 20){
+		  // Emerging blunder!
+		  collision_limit_one = collision_limit * 1 / 2;
+		  LOGFILE << "Case 4: Emerging blunder warning";
+		} else {
+		  collision_limit_one = collision_limit * 1 / 6;
+		}
 	      } else {
 		// Clearly worse, do not force anything
 		search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
@@ -4196,7 +4141,7 @@ void SearchWorker::MaybeAdjustPolicyForHelperAddedNodes(const std::shared_ptr<Se
 //~~~~~~~~~~~~~~~~~~~~
 void SearchWorker::UpdateCounters() {
   search_->PopulateCommonIterationStats(&iteration_stats_);
-  search_->MaybeTriggerStop(iteration_stats_, &latest_time_manager_hints_);
+  search_->MaybeTriggerStop(iteration_stats_, &latest_time_manager_hints_, true);
   search_->MaybeOutputInfo();
 
   // If this thread had no work, not even out of order, then sleep for some

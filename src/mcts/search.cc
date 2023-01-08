@@ -2721,7 +2721,12 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	    // Boosting this a lot is an interesting way to let the helper influence Leela when Leelas PV is better than the root-exploring helper.
 	    // But since this is about the double the depth of the first divergence, don't overboost it.
 	    // Never give more than number of visits - visits in flight.
-	    collision_limit_one = std::min(static_cast<int32_t>(collision_limit * 1 / 3), static_cast<int32_t>(boosted_node->GetN() - boosted_node->GetNInFlight()));
+	    if(centipawn_diff > 10){
+	      collision_limit_one = std::min(static_cast<int32_t>(collision_limit * 1 / 3), static_cast<int32_t>(boosted_node->GetN() - boosted_node->GetNInFlight()));
+	    } else {
+	      // Centipawn diff is between 5 and 10, for now just treat this as roughly equal.
+	      collision_limit_one = std::max(0, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatioSecondDivergence())));	      
+	    }
 	    // This can be a negative if the node has more visits in flight than visits. If that is the case, do nothing.
 	    if(collision_limit_one < 0){
 	      LOGFILE << "Not boosting a promising node, because it already has more visits in flight than visits.";
@@ -2767,14 +2772,15 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	      collision_limit_one = std::min(2, collision_limit);
 	    } else {
 	      // Clearly better, boost more,
-	      collision_limit_one = collision_limit * (1.0f/4.0f + (10.0f/20.0f) * (std::min(20, centipawn_diff) - 5)/15.0f);
-	      // if(centipawn_diff > 20){
-	      // 	LOGFILE << "Case 4: Emerging blunder warning, but don't force more than half the number of visits.";
-	      // 	// Emerging blunder!
-	      // 	  collision_limit_one = std::min(static_cast<int32_t>(collision_limit * 3 / 4), static_cast<int32_t>(boosted_node->GetN() - boosted_node->GetNInFlight() * 0.5));
-	      // } else {
-	      // 	collision_limit_one = std::min(static_cast<int32_t>(collision_limit * 1 / 6), static_cast<int32_t>(boosted_node->GetN() - boosted_node->GetNInFlight() * 0.5));		
-	      // }
+	      // collision_limit_one = collision_limit * (1.0f/4.0f + (10.0f/20.0f) * (std::min(20, centipawn_diff) - 5)/15.0f);
+	      if(centipawn_diff > 20){
+		LOGFILE << "Case 4: Emerging blunder warning, but don't force more than half the number of visits.";
+		// Emerging blunder!
+		  collision_limit_one = std::min(static_cast<int32_t>(collision_limit * 3 / 4), static_cast<int32_t>(boosted_node->GetN() - boosted_node->GetNInFlight() * 0.5));
+	      } else {
+		LOGFILE << "Case 4: Centipawn diff in the range 5-20, in favor of helpers PV, spend 1/6 of visits deeper.";		
+		collision_limit_one = std::min(static_cast<int32_t>(collision_limit * 1 / 6), static_cast<int32_t>(boosted_node->GetN() - boosted_node->GetNInFlight() * 0.5));		
+	      }
 	    }
 	  } else {
 	    // Nothing to do (yet)

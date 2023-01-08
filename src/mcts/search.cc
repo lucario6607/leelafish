@@ -2619,7 +2619,7 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
       bool donate_visits = false; // if the helper thinks leelas line is better, donate the visits to the parent which will boost visits to the point in the tree where they agree.
       bool roughly_equal = false; // if false then the helper's recommendation is either clearly worse or clearly better.
 
-      if(centipawn_diff < 5){
+      if(centipawn_diff < 10){
 	// helper is about equal, case B
 	if(override_cpuct == 1 && params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Case B helper eval of helper preferred line is about equal (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") to helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << ").";
 	collision_limit_one = std::max(0, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatio())));
@@ -2627,9 +2627,9 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
       } else {
 	if((search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size() % 2) != 0){ // an odd size implies an even distance!
 	  if(search_->search_stats_->helper_eval_of_leelas_preferred_child < search_->search_stats_->helper_eval_of_helpers_preferred_child){
-	    // helper is 'clearly' better 
+	    // helper is 'clearly' better
+	    collision_limit_one = std::max(0, static_cast<int>(std::floor(collision_limit * 1 / 3.0f)));	    
 	    if(override_cpuct == 1 && params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Case A1 found divergence at an even distance from root, so maximising helper eval, and helper eval of helper preferred line is higher (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "). This means the helper has found a better move for the side to move (Leela).";
-	    collision_limit_one = std::max(0, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatio())));	    
 	  } else {
 	    // Helper is 'clearly' worse, case C
 	    if(override_cpuct == 1 && params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Case C1 found divergence at an even distance from root, so maximising helper eval, and helper eval of helper preferred line is lower (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "), so Leela has found a better move for the side to move (Leela).";
@@ -2639,8 +2639,8 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	} else {
 	  // helper is 'clearly' better 
 	  if(search_->search_stats_->helper_eval_of_leelas_preferred_child > search_->search_stats_->helper_eval_of_helpers_preferred_child){
-	    // Actually, might be better to save visits for the override_cpuct == 5 case, which goes deeper.
-	    collision_limit_one = std::max(0, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatio())));
+	    collision_limit_one = std::max(0, static_cast<int>(std::floor(collision_limit * 1 / 3.0f)));
+	    // collision_limit_one = std::max(0, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatio())));
 	    if(override_cpuct == 1 && params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Case A2 found divergence at an odd distance from root, so minimising helper eval, and helper eval of helper preferred line is lower (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "). This means the helper has found a better move the for the opponent.";
 	  } else {
 	    // Case C, helper even worse than Leela +0.05 when minimising
@@ -2689,8 +2689,9 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	    // Clearly better,
 	    if(boosted_node->GetN() > best_child->GetN() + collision_limit_one){
 	      // Continue to boost even when the node has more visits, but decrease the boost to let Leela have the final say.
-	      LOGFILE << "Case 1: Clearly better, even best child now (should not last for long, since best child means that the divergence will be detected further down the line).";	      
-	      collision_limit_one = std::max(collision_limit * 1 / 3, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatio())));
+	      LOGFILE << "Case 1: Clearly better, even best child now (should not last for long, since best child means that the divergence will be detected further down the line).";
+	      // collision_limit_one = std::max(collision_limit * 1 / 3, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatio())));	      	      
+	      collision_limit_one = collision_limit * params_.GetAuxEngineForceVisitsRatio();
 	    }
 	  }
 	}
@@ -2721,12 +2722,15 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	    // Boosting this a lot is an interesting way to let the helper influence Leela when Leelas PV is better than the root-exploring helper.
 	    // But since this is about the double the depth of the first divergence, don't overboost it.
 	    // Never give more than number of visits - visits in flight.
-	    if(centipawn_diff > 10){
-	      collision_limit_one = std::min(static_cast<int32_t>(collision_limit * 1 / 3), static_cast<int32_t>(boosted_node->GetN() - boosted_node->GetNInFlight()));
-	    } else {
-	      // Centipawn diff is between 5 and 10, for now just treat this as roughly equal.
-	      collision_limit_one = std::max(0, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatioSecondDivergence())));	      
-	    }
+
+	    collision_limit_one = std::min(static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatioSecondDivergence() * 1.2f)), static_cast<int32_t>(boosted_node->GetN() - boosted_node->GetNInFlight()));	      
+	    
+	    // if(centipawn_diff > 10){
+	    //   collision_limit_one = std::min(static_cast<int32_t>(collision_limit * 1 / 3), static_cast<int32_t>(boosted_node->GetN() - boosted_node->GetNInFlight()));
+	    // } else {
+	    //   // Centipawn diff is between 5 and 10, for now just treat this as roughly equal.
+	    //   collision_limit_one = std::max(0, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatioSecondDivergence())));	      
+	    // }
 	    // This can be a negative if the node has more visits in flight than visits. If that is the case, do nothing.
 	    if(collision_limit_one < 0){
 	      LOGFILE << "Not boosting a promising node, because it already has more visits in flight than visits.";
@@ -2778,7 +2782,7 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 		// Emerging blunder!
 		  collision_limit_one = std::min(static_cast<int32_t>(collision_limit * 3 / 4), static_cast<int32_t>(boosted_node->GetN() - boosted_node->GetNInFlight() * 0.5));
 	      } else {
-		LOGFILE << "Case 4: Centipawn diff in the range 5-20, in favor of helpers PV, spend 1/6 of visits deeper.";		
+		LOGFILE << "Case 4: Centipawn diff in the range 10-20, in favor of helpers PV, spend 1/6 of visits deeper.";		
 		collision_limit_one = std::min(static_cast<int32_t>(collision_limit * 1 / 6), static_cast<int32_t>(boosted_node->GetN() - boosted_node->GetNInFlight() * 0.5));		
 	      }
 	    }

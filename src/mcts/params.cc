@@ -347,7 +347,7 @@ const OptionId SearchParams::kAuxEngineInstancesId{
     "The first instance will continously explore root while any "
      "remaining instances will be used for in-tree exploration."};
 const OptionId SearchParams::kAuxEngineExplorationThresholdId{
-    "auxengine-instances", "EngineExplorationThreshold",
+    "auxengine-exploration-threshold", "AuxEngineExplorationThreshold",
     "This many more visits required in the parent than the child "
     "before the child will get forced visits. "
     "If this is too low, Leela will not even try to find refutations  "
@@ -361,7 +361,7 @@ const OptionId SearchParams::kAuxEngineForceVisitsRatioId{
     "of the batch will be forced, the exact proportion is governed by "
     "AuxEngineForceVisitsRatioForInferiorLine"};
 const OptionId SearchParams::kAuxEngineForceVisitsRatioMiniMaxId{
-    "auxengine-force-visits-ratio", "AuxEngineForceVisitsRatioMiniMax",
+    "auxengine-force-visits-ratio-minimax", "AuxEngineForceVisitsRatioMiniMax",
     "Every batch at most this proportion of the minibatch will be "
     "forced to the node that maximises Q at the first divergence from "
     "Leelas ordinary PV. The higher this number, the more risky Leela "

@@ -2713,12 +2713,23 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	      // collision_limit_one = std::max(collision_limit * 1 / 3, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatio())));
 	      collision_limit_one = collision_limit * params_.GetAuxEngineForceVisitsRatio();
 	    } else {
-	      // we can give as much as we want here, but save some visits for the deeper entry
-	      collision_limit_one = std::floor(collision_limit * 3.0f/4.0f);		
+
+	      // Try boosting more
+	      if(boosted_node->GetN() + collision_limit_one < best_child->GetN() && boosted_node->GetNInFlight() < 1000){
+		collision_limit_one = std::min(static_cast<uint32_t>(1024), std::min(best_child->GetN() - boosted_node->GetN(), boosted_node->GetN()));
+	      }
+	      
+	      // // we can give as much as we want here, but save some visits for the deeper entry
+	      // collision_limit_one = std::floor(collision_limit * 3.0f/4.0f);		
 	    }
 	  }
 	}
       }
+
+      if(override_cpuct == 2 || override_cpuct == 3){
+	collision_limit_one = 0;
+      }
+      
       // if(override_cpuct == 2){
       //       search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
       //       return false;

@@ -2703,7 +2703,7 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	      // about equal, boost a lot
 	      // does collision_limit have to be less than the batch size?
 	      // collision_limit_one = std::floor(collision_limit * 4.0f/5.0f);
-	      collision_limit_one = boosted_node->GetN();
+	      collision_limit_one = std::min(static_cast<uint32_t>(1024), boosted_node->GetN());
 	    }
 	  } else {
 	    // Clearly better,

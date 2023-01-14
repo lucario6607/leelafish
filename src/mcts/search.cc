@@ -772,9 +772,13 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	minimax_pv_explore_moves.pop_back();
 	// backup one generation, it is actually the parent that is the suitable entry point
 	some_interesting_node = some_interesting_node->GetParent();
-	LOGFILE << "Found the second node to explore in the minimax PV at depth " << minimax_pv_explore_moves.size() - 1
-		<< " The node currently has " << some_interesting_node->GetN() << " visits, while its parent has "
-		<< some_interesting_node->GetParent()->GetN() << " visits.";
+	if(some_interesting_node == root_node_){ // Root is not some interesting node to explore.
+	  minimax_pv_explore_moves = {};
+	} else {
+	  LOGFILE << "Found the second node to explore in the minimax PV at depth " << minimax_pv_explore_moves.size() - 1
+		  << " The node currently has " << some_interesting_node->GetN() << " visits, while its parent has "
+		  << some_interesting_node->GetParent()->GetN() << " visits.";
+	}
       }
     }
     // go deeper
@@ -2610,9 +2614,9 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
        search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size() > 0 &&
        search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size() > 0 
        ){
-	  if(override_cpuct == 1){
-	    LOGFILE << "Centipawn diff: " << centipawn_diff << " leelas_preferred_child: " << search_->search_stats_->helper_eval_of_leelas_preferred_child << " helpers_preferred_child: " << search_->search_stats_->helper_eval_of_helpers_preferred_child << " divergence at depth: " << search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size() - 1 ;
-	  }
+      if(override_cpuct == 1){
+	LOGFILE << "Centipawn diff: " << centipawn_diff << " leelas_preferred_child: " << search_->search_stats_->helper_eval_of_leelas_preferred_child << " helpers_preferred_child: " << search_->search_stats_->helper_eval_of_helpers_preferred_child << " divergence at depth: " << search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size() - 1 ;
+      }
 
       bool donate_visits = false; // if the helper thinks leelas line is better, donate the visits to the parent which will boost visits to the point in the tree where they agree.
       bool roughly_equal = false; // if false then the helper's recommendation is either clearly worse or clearly better.
@@ -2889,11 +2893,11 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
       // Don't spam the log when autopilot is on.
       if(override_cpuct == 1 && !search_->search_stats_->winning_){
 	std::string why = "";
-	if(search_->search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child > 0) why = why + " too few nodes in support of instance one " ;
-	if(search_->search_stats_->Helpers_preferred_child_node_in_Leelas_PV_ != nullptr) why = why + " no second divergence node yet " ;
-	if(search_->search_stats_->Helpers_preferred_child_node_ != nullptr) why = why + " no first divergence node yet " ;
-	if(search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size() > 0) why = why + "  zero sized vector to helper's preferred child " ;
-	if(search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size() > 0) why = why + "  zero sized vector to helper's preferred child in leelas pv " ;
+	if(! (search_->search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child > 0)) why = why + " too few nodes in support of instance one " ;
+	if(! (search_->search_stats_->Helpers_preferred_child_node_in_Leelas_PV_ != nullptr)) why = why + " no second divergence node yet " ;
+	if(! (search_->search_stats_->Helpers_preferred_child_node_ != nullptr)) why = why + " no first divergence node yet " ;
+	if(! (search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size() > 0)) why = why + " zero sized vector to helper's preferred child " ;
+	if(! (search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size() > 0)) why = why + " zero sized vector to helper's preferred child in leelas pv " ;
 	LOGFILE << " Not forcing visits this batch because: " << why;
       }
     }

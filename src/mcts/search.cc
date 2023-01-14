@@ -2692,6 +2692,10 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 		  LOGFILE << "Case 1: not celarly better Limiting the number of forced visits to match best child.";
 		}
 	      }
+	      if(boosted_node->GetN() + collision_limit_one < best_child->GetN()){
+		// about equal, boost a lot
+		collision_limit_one = std::floor(collision_limit * 3.0f/4.0f);		
+	      }
 	    } else {
 	      // Clearly better,
 	      if(boosted_node->GetN() > best_child->GetN() + collision_limit_one){

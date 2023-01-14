@@ -2668,7 +2668,7 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
       std::vector<Move> vector_of_moves_from_root_to_boosted_node;
       {
 	// Need to define three things: (1) boosted_node, (2) vector_of_moves_from_root_to_boosted_node (3) collision_limit_one (i.e. the number of visits to force)
-	if(override_cpuct == 1){
+	if(override_cpuct < 4){
 	  boosted_node = search_->search_stats_->Helpers_preferred_child_node_;
 	  vector_of_moves_from_root_to_boosted_node = search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_;
 	  Node* best_child = search_->GetBestChildNoTemperature(boosted_node->GetParent(), vector_of_moves_from_root_to_boosted_node.size()).node();

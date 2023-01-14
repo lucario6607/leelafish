@@ -2842,8 +2842,8 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	}
 
 	if(override_cpuct == 6){ // 2C An interesting node somewhere in Leela's MiniMaxPV
-	      // 	      search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
-	      // return false;
+		      search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
+	      return false;
 
 	  if(vector_of_moves_from_root_to_some_interesting_minimax_node.size() > 0 && Leelas_minimax_PV_some_interesting_node->GetNInFlight() == 0){
 	    boosted_node = Leelas_minimax_PV_some_interesting_node;

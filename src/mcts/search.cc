@@ -1021,26 +1021,22 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	       // improve play in worse positions
 	       (search_stats_->helper_eval_of_leelas_preferred_child < -30 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 10) ||
 	       // improve play in better positions
-	       (search_stats_->helper_eval_of_leelas_preferred_child > 30 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 21) ||
+	       (search_stats_->helper_eval_of_leelas_preferred_child > 30 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 10) ||
 	       // save the win
-	       (search_stats_->helper_eval_of_root > 110 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 20) ||
+	       (search_stats_->helper_eval_of_root > 90 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 9) ||
 	       
 	       // save the draw
 	       // 90 110
-	       (search_stats_->helper_eval_of_leelas_preferred_child < -90 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 20) ||
+	       (search_stats_->helper_eval_of_leelas_preferred_child < -90 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 9) ||
 	       // save the win
-	       (search_stats_->helper_eval_of_root > 110 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 20) ||
+	       (search_stats_->helper_eval_of_root > 110 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 8) ||
 	       // 120 135
 	       // save the draw	       
-	       (search_stats_->helper_eval_of_leelas_preferred_child < -120 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 15) ||
+	       (search_stats_->helper_eval_of_leelas_preferred_child < -110 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 8) ||
 	       // save the win	       
-	       (search_stats_->helper_eval_of_root > 135 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 15) ||
+	       (search_stats_->helper_eval_of_root > 120 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 7) ||
 	       // 140 152
-	       (search_stats_->helper_eval_of_leelas_preferred_child < -140 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 12) ||
-	       (search_stats_->helper_eval_of_root > 152 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 12) ||
-	       // 150 160
-	       (search_stats_->helper_eval_of_leelas_preferred_child < -150 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 10) ||
-	       (search_stats_->helper_eval_of_root > 160 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 10)
+	       (search_stats_->helper_eval_of_leelas_preferred_child < -120 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 7)
 	       ){
 	      // print the move in rotated mode
 	      bool flip = played_history_.IsBlackToMove();
@@ -2842,8 +2838,8 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	}
 
 	if(override_cpuct == 6){ // 2C An interesting node somewhere in Leela's MiniMaxPV
-	  	      search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
-	      return false;
+	      // 	      search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
+	      // return false;
 
 	  if(vector_of_moves_from_root_to_some_interesting_minimax_node.size() > 0 && Leelas_minimax_PV_some_interesting_node->GetNInFlight() == 0){
 	    boosted_node = Leelas_minimax_PV_some_interesting_node;

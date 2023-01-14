@@ -2726,9 +2726,9 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	}
       }
 
-      if(override_cpuct == 2 || override_cpuct == 3){
-	collision_limit_one = 0;
-      }
+      // if(override_cpuct == 2 || override_cpuct == 3){
+      // 	collision_limit_one = 0;
+      // }
       
       // if(override_cpuct == 2){
       //       search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();

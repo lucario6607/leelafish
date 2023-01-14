@@ -2699,7 +2699,7 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 		LOGFILE << "Case 1: not celarly better Limiting the number of forced visits to match best child.";
 	      }
 	    }
-	    if(boosted_node->GetN() + collision_limit_one < best_child->GetN()){
+	    if(boosted_node->GetN() + collision_limit_one < best_child->GetN() && boosted_node->GetNInFlight() < 1000){
 	      // about equal, boost a lot
 	      // does collision_limit have to be less than the batch size?
 	      // collision_limit_one = std::floor(collision_limit * 4.0f/5.0f);

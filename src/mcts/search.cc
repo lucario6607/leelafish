@@ -2681,8 +2681,9 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	  } else {
 	    // roughly equal or clearly better
 	    if(roughly_equal){
-	      // don't boost the node if it is already best child, On the other hand. 
-	      if(boosted_node == best_child){
+	      // don't boost the node if it is already best child,
+	      // For some reason best_child is not always the child with highest N, which it should be. For now, check manually.
+	      if(boosted_node == best_child || boosted_node->GetN() > best_child->GetN()){
 		LOGFILE << "Case 1: not clearly better, already best child, this should not last for long, stop boosting here.";
 		search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
 		return false;

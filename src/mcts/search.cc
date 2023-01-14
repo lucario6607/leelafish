@@ -2614,7 +2614,7 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
        search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size() > 0 &&
        search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size() > 0 
        ){
-      if(override_cpuct == 1){
+      if(override_cpuct < 4){
 	LOGFILE << "Centipawn diff: " << centipawn_diff << " leelas_preferred_child: " << search_->search_stats_->helper_eval_of_leelas_preferred_child << " helpers_preferred_child: " << search_->search_stats_->helper_eval_of_helpers_preferred_child << " divergence at depth: " << search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size() - 1 ;
       }
 
@@ -2623,7 +2623,7 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 
       if(centipawn_diff < 10){
 	// helper is about equal, case B
-	if(override_cpuct == 1 && params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Case B helper eval of helper preferred line is about equal (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") to helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << ").";
+	if(override_cpuct < 4 && params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Case B helper eval of helper preferred line is about equal (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") to helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << ").";
 	collision_limit_one = std::max(0, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatio())));
 	roughly_equal = true;
       } else {
@@ -2631,10 +2631,10 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	  if(search_->search_stats_->helper_eval_of_leelas_preferred_child < search_->search_stats_->helper_eval_of_helpers_preferred_child){
 	    // helper is 'clearly' better
 	    collision_limit_one = std::max(0, static_cast<int>(std::floor(collision_limit * 1 / 3.0f)));	    
-	    if(override_cpuct == 1 && params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Case A1 found divergence at an even distance from root, so maximising helper eval, and helper eval of helper preferred line is higher (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "). This means the helper has found a better move for the side to move (Leela).";
+	    if(override_cpuct < 4 && params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Case A1 found divergence at an even distance from root, so maximising helper eval, and helper eval of helper preferred line is higher (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "). This means the helper has found a better move for the side to move (Leela).";
 	  } else {
 	    // Helper is 'clearly' worse, case C
-	    if(override_cpuct == 1 && params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Case C1 found divergence at an even distance from root, so maximising helper eval, and helper eval of helper preferred line is lower (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "), so Leela has found a better move for the side to move (Leela).";
+	    if(override_cpuct < 4 && params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Case C1 found divergence at an even distance from root, so maximising helper eval, and helper eval of helper preferred line is lower (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "), so Leela has found a better move for the side to move (Leela).";
 	    donate_visits = true;
 	    collision_limit_one = std::max(0, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatioInferiorLine())));
 	  }
@@ -2643,10 +2643,10 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	  if(search_->search_stats_->helper_eval_of_leelas_preferred_child > search_->search_stats_->helper_eval_of_helpers_preferred_child){
 	    collision_limit_one = std::max(0, static_cast<int>(std::floor(collision_limit * 1 / 3.0f)));
 	    // collision_limit_one = std::max(0, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatio())));
-	    if(override_cpuct == 1 && params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Case A2 found divergence at an odd distance from root, so minimising helper eval, and helper eval of helper preferred line is lower (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "). This means the helper has found a better move the for the opponent.";
+	    if(override_cpuct < 4 && params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Case A2 found divergence at an odd distance from root, so minimising helper eval, and helper eval of helper preferred line is lower (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "). This means the helper has found a better move the for the opponent.";
 	  } else {
 	    // Case C, helper even worse than Leela +0.05 when minimising
-	    if(override_cpuct == 1 && params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Case C2 found divergence at an odd distance from root, so minimising helper eval, and helper eval of helper preferred line is higher (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "), so Leela has found a better move for the opponent.";
+	    if(override_cpuct < 4 && params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Case C2 found divergence at an odd distance from root, so minimising helper eval, and helper eval of helper preferred line is higher (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "), so Leela has found a better move for the opponent.";
 	    donate_visits = true;
 	    collision_limit_one = std::max(0, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatioInferiorLine())));
 	  }
@@ -2716,78 +2716,78 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	    }
 	  }
 	}
-	if(override_cpuct == 2){
-	      search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
-	      return false;
+	// if(override_cpuct == 2){
+	//       search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
+	//       return false;
 	  
-	  // This is the second divergence, it is deeper and therefore less acute than the first divergence. (but it can help Leela realize that her mainline is a blunder).
-	  boosted_node = search_->search_stats_->Helpers_preferred_child_node_in_Leelas_PV_;
-	  vector_of_moves_from_root_to_boosted_node = search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_;
-	  Node* best_child = search_->GetBestChildNoTemperature(boosted_node->GetParent(), vector_of_moves_from_root_to_boosted_node.size()).node();
+	//   // This is the second divergence, it is deeper and therefore less acute than the first divergence. (but it can help Leela realize that her mainline is a blunder).
+	//   boosted_node = search_->search_stats_->Helpers_preferred_child_node_in_Leelas_PV_;
+	//   vector_of_moves_from_root_to_boosted_node = search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_;
+	//   Node* best_child = search_->GetBestChildNoTemperature(boosted_node->GetParent(), vector_of_moves_from_root_to_boosted_node.size()).node();
 
-	  if(roughly_equal || !donate_visits){
-	    // don't boost if node is already best child
-	    if(boosted_node == best_child){
-	      LOGFILE << "Case 2: not clearly better, already best child, boosting not needed";
-	      search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
-	      return false;
-	    }
-	    if(boosted_node->GetN() + collision_limit_one > best_child->GetN()){
-	      // Equal number of visits is OK, but not more
-	      if(boosted_node->GetN() < best_child->GetN()){
-		collision_limit_one = best_child->GetN() - boosted_node->GetN();
-		LOGFILE << "Case 2: Limiting the number of forced visits to match best child.";
-	      }
-	    }
-	  }
+	//   if(roughly_equal || !donate_visits){
+	//     // don't boost if node is already best child
+	//     if(boosted_node == best_child){
+	//       LOGFILE << "Case 2: not clearly better, already best child, boosting not needed";
+	//       search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
+	//       return false;
+	//     }
+	//     if(boosted_node->GetN() + collision_limit_one > best_child->GetN()){
+	//       // Equal number of visits is OK, but not more
+	//       if(boosted_node->GetN() < best_child->GetN()){
+	// 	collision_limit_one = best_child->GetN() - boosted_node->GetN();
+	// 	LOGFILE << "Case 2: Limiting the number of forced visits to match best child.";
+	//       }
+	//     }
+	//   }
 
-	  if(donate_visits){
-	    // This line is "clearly better" than the helpers main line, so OK to boost this. Note, however, that this is the entry point in the SECOND divergence, that is, NOT Leelas PV.
-	    // Boosting this a lot is an interesting way to let the helper influence Leela when Leelas PV is better than the root-exploring helper.
-	    // But since this is about the double the depth of the first divergence, don't overboost it.
-	    // Never give more than number of visits - visits in flight.
+	//   if(donate_visits){
+	//     // This line is "clearly better" than the helpers main line, so OK to boost this. Note, however, that this is the entry point in the SECOND divergence, that is, NOT Leelas PV.
+	//     // Boosting this a lot is an interesting way to let the helper influence Leela when Leelas PV is better than the root-exploring helper.
+	//     // But since this is about the double the depth of the first divergence, don't overboost it.
+	//     // Never give more than number of visits - visits in flight.
 
-	    collision_limit_one = std::min(static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatioSecondDivergence() * 1.5f)), static_cast<int32_t>(boosted_node->GetN() - boosted_node->GetNInFlight()));
+	//     collision_limit_one = std::min(static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatioSecondDivergence() * 1.5f)), static_cast<int32_t>(boosted_node->GetN() - boosted_node->GetNInFlight()));
 	    
-	    // if(centipawn_diff > 10){
-	    //   collision_limit_one = std::min(static_cast<int32_t>(collision_limit * 1 / 3), static_cast<int32_t>(boosted_node->GetN() - boosted_node->GetNInFlight()));
-	    // } else {
-	    //   // Centipawn diff is between 5 and 10, for now just treat this as roughly equal.
-	    //   collision_limit_one = std::max(0, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatioSecondDivergence())));	      
-	    // }
-	    // This can be a negative if the node has more visits in flight than visits. If that is the case, do nothing.
-	    if(collision_limit_one < 0){
-	      LOGFILE << "Not boosting a promising node, because it already has more visits in flight than visits.";
-	      search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
-	      return false;
-	    }
-	  } else {
-	    if(!roughly_equal){
-	      // This line is 'clearly worse' than the helper's preference at the first divergence, no forced visits
-	      search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
-	      return false;
-	    } else {
-	      // Normal, roughly equal
-	      collision_limit_one = std::max(0, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatioSecondDivergence())));
-	    }
-	  }
-	}
+	//     // if(centipawn_diff > 10){
+	//     //   collision_limit_one = std::min(static_cast<int32_t>(collision_limit * 1 / 3), static_cast<int32_t>(boosted_node->GetN() - boosted_node->GetNInFlight()));
+	//     // } else {
+	//     //   // Centipawn diff is between 5 and 10, for now just treat this as roughly equal.
+	//     //   collision_limit_one = std::max(0, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatioSecondDivergence())));	      
+	//     // }
+	//     // This can be a negative if the node has more visits in flight than visits. If that is the case, do nothing.
+	//     if(collision_limit_one < 0){
+	//       LOGFILE << "Not boosting a promising node, because it already has more visits in flight than visits.";
+	//       search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
+	//       return false;
+	//     }
+	//   } else {
+	//     if(!roughly_equal){
+	//       // This line is 'clearly worse' than the helper's preference at the first divergence, no forced visits
+	//       search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
+	//       return false;
+	//     } else {
+	//       // Normal, roughly equal
+	//       collision_limit_one = std::max(0, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatioSecondDivergence())));
+	//     }
+	//   }
+	// }
 
-	if(override_cpuct == 3){
-	  	      search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
-	      return false;
+	// if(override_cpuct == 3){
+	//   	      search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
+	//       return false;
 
-	  if(search_->search_stats_->vector_of_moves_from_root_to_first_minimax_divergence.size() > 0 && search_->search_stats_->Leelas_minimax_PV_first_divergence_node->GetNInFlight() == 0){
-	    boosted_node = search_->search_stats_->Leelas_minimax_PV_first_divergence_node;
-	    vector_of_moves_from_root_to_boosted_node = search_->search_stats_->vector_of_moves_from_root_to_first_minimax_divergence;
-	    // collision_limit_one = std::min(2, collision_limit); // This could be higher, but when working with small minibatch-sizes, better keep the fixed nodes low.
-	    // collision_limit_one = collision_limit * 1 / 2; // be greedy.
-	    collision_limit_one = collision_limit * params_.GetAuxEngineForceVisitsRatioMiniMax();
-	  } else {
-	    search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
-	    return false;
-	  }
-	}
+	//   if(search_->search_stats_->vector_of_moves_from_root_to_first_minimax_divergence.size() > 0 && search_->search_stats_->Leelas_minimax_PV_first_divergence_node->GetNInFlight() == 0){
+	//     boosted_node = search_->search_stats_->Leelas_minimax_PV_first_divergence_node;
+	//     vector_of_moves_from_root_to_boosted_node = search_->search_stats_->vector_of_moves_from_root_to_first_minimax_divergence;
+	//     // collision_limit_one = std::min(2, collision_limit); // This could be higher, but when working with small minibatch-sizes, better keep the fixed nodes low.
+	//     // collision_limit_one = collision_limit * 1 / 2; // be greedy.
+	//     collision_limit_one = collision_limit * params_.GetAuxEngineForceVisitsRatioMiniMax();
+	//   } else {
+	//     search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
+	//     return false;
+	//   }
+	// }
 
 	if(override_cpuct == 4){ // 2A An interesting node somewhere in the helper's preferred line, skip this if helper think this line is clearly worse
 	  // Also skip this if the node to explore has visits in flight

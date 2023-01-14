@@ -2683,11 +2683,13 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	    if(roughly_equal){
 	      // don't boost the node if it is already best child, On the other hand. 
 	      if(boosted_node == best_child){
-		LOGFILE << "Case 1: not clearly better, already best child, this should not last for long, boosting parent instead.";
-		boosted_node = search_->search_stats_->Helpers_preferred_child_node_->GetParent();
-		vector_of_moves_from_root_to_boosted_node.pop_back();
-		// Increase the boosting since this is a "safe" boost.
-		collision_limit_one = std::floor(collision_limit * 2.0f/4.0f);
+		LOGFILE << "Case 1: not clearly better, already best child, this should not last for long, stop boosting here.";
+		search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
+		return false;
+		// boosted_node = search_->search_stats_->Helpers_preferred_child_node_->GetParent();
+		// vector_of_moves_from_root_to_boosted_node.pop_back();
+		// // Increase the boosting since this is a "safe" boost.
+		// collision_limit_one = std::floor(collision_limit * 2.0f/4.0f);
 	      }
 	      if(boosted_node->GetN() + collision_limit_one > best_child->GetN()){
 		// Equal number of visits is OK, but not more
@@ -2698,7 +2700,7 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	      }
 	      if(boosted_node->GetN() + collision_limit_one < best_child->GetN()){
 		// about equal, boost a lot
-		collision_limit_one = std::floor(collision_limit * 3.0f/4.0f);		
+		collision_limit_one = std::floor(collision_limit * 4.0f/5.0f);
 	      }
 	    } else {
 	      // Clearly better,

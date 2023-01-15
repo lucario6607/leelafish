@@ -1796,6 +1796,7 @@ void SearchWorker::ExecuteOneIteration() {
   }
 
   // 4. Run NN computation.
+  LOGFILE << "Minibatch size: " << minibatch_.size();
   RunNNComputation();
   search_->backend_waiting_counter_.fetch_add(-1, std::memory_order_relaxed);
   if (params_.GetAuxEngineVerbosity() >= 10) LOGFILE << std::this_thread::get_id() << " RunNNComputation() finished in ExecuteOneIteration().";
@@ -2286,7 +2287,7 @@ void SearchWorker::GatherMinibatch2(int number_of_nodes_already_added) {
 
     int new_start = static_cast<int>(minibatch_.size());
 
-    if(iteration_counter < 6){
+    if(iteration_counter < 2){
       // First run is a custom run which may override CPUCT and force visits into a specific line.
       // Every other batch, this max_force_visits is used as is to force visits to the first divergence,
       // and every other batch, another parameter is used to force visits to the second divergence.
@@ -2584,38 +2585,25 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
     // There are two different types of boosting to make:
     // 1. Starting points of divergencies (force more visits to these)
        // A. The helper's prefererred line
-       // B. Leela's prefererred line
-       // C. The minimax divergence
     // 2. Successively deepened entry points (force less visits to these).
       // A. An interesting node somewhere in 1A
-      // B. An interesting node somewhere in 1B
-      // C. An interesting node somewhere in 1C
-
-    // For every iteration, force visits to the three large entry points and to all deepened entry points, but vary the number of visits to each class based on the evaluation (and possibly the depth)
-    // Apparently, we can only force visits to one node at a time, use an integer counter and a map to translate that integer to a node to boost. If boosting for that specific class isn't possible then just return early.
-    // 1 = 1A
-    // 2 = 1B
-    // 3 = 1C
-    // 4 = 2A
-    // 5 = 2B
-    // 6 = 2C
-
     // When/if the node to be boosted has as many visits as its competing sibling, stop boosting it, since Leela uses number of visits to decide "best child".
 
     int collision_limit_one; // the amount of visits we decide to use
 
     search_->search_stats_->best_move_candidates_mutex.lock(); // for reading search_stats_->winning_ and the other
 
-    int centipawn_diff = std::abs(search_->search_stats_->helper_eval_of_leelas_preferred_child - search_->search_stats_->helper_eval_of_helpers_preferred_child);
     search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.lock(); // for reading Helpers_preferred_child_node_ and vector_of_moves_from_root_to_Helpers_preferred_child_node_ and the other two.
     if(search_->search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child > 0 &&
        search_->search_stats_->Helpers_preferred_child_node_in_Leelas_PV_ != nullptr &&
        search_->search_stats_->Helpers_preferred_child_node_ != nullptr &&
        search_->search_stats_->Helpers_preferred_child_node_->GetN() > 0 &&
        search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size() > 0 &&
-       search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size() > 0 
+       search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size() > 0
        ){
-      if(override_cpuct < 4){
+
+      int centipawn_diff = std::abs(search_->search_stats_->helper_eval_of_leelas_preferred_child - search_->search_stats_->helper_eval_of_helpers_preferred_child);
+      if(override_cpuct == 1){
 	LOGFILE << "Centipawn diff: " << centipawn_diff << " leelas_preferred_child: " << search_->search_stats_->helper_eval_of_leelas_preferred_child << " helpers_preferred_child: " << search_->search_stats_->helper_eval_of_helpers_preferred_child << " divergence at depth: " << search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size() - 1 ;
       }
 
@@ -2624,7 +2612,7 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 
       if(centipawn_diff < 10){
 	// helper is about equal, case B
-	if(override_cpuct < 4 && params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Case B helper eval of helper preferred line is about equal (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") to helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << ").";
+	if(override_cpuct == 1 && params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Case B helper eval of helper preferred line is about equal (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") to helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << ").";
 	collision_limit_one = std::max(0, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatio())));
 	roughly_equal = true;
       } else {
@@ -2655,13 +2643,9 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
       }
 
       search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
-      // fetch the helper_PV_from_instance_two_explore_moves and helper_PV_from_instance_two_explore_node before changing locks
+      // fetch the helper_PV_from_instance_one_explore_moves and helper_PV_from_instance_two_explore_node before changing locks
       std::vector<Move> helper_PV_from_instance_two_explore_moves = search_->search_stats_->helper_PV_from_instance_two_explore_moves;
       Node* helper_PV_from_instance_two_explore_node = search_->search_stats_->helper_PV_from_instance_two_explore_node;
-      std::vector<Move> helper_PV_from_instance_one_explore_moves = search_->search_stats_->helper_PV_from_instance_one_explore_moves;
-      Node* helper_PV_from_instance_one_explore_node = search_->search_stats_->helper_PV_from_instance_one_explore_node;
-      std::vector<Move> vector_of_moves_from_root_to_some_interesting_minimax_node = search_->search_stats_->vector_of_moves_from_root_to_some_interesting_minimax_node;
-      Node* Leelas_minimax_PV_some_interesting_node = search_->search_stats_->Leelas_minimax_PV_some_interesting_node;
       search_->search_stats_->best_move_candidates_mutex.unlock();
       search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.lock();
 
@@ -2669,16 +2653,28 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
       std::vector<Move> vector_of_moves_from_root_to_boosted_node;
 
       // Need to define three things: (1) boosted_node, (2) vector_of_moves_from_root_to_boosted_node (3) collision_limit_one (i.e. the number of visits to force)
-      if(override_cpuct < 4){
+      if(override_cpuct == 1){
 	boosted_node = search_->search_stats_->Helpers_preferred_child_node_;
 	vector_of_moves_from_root_to_boosted_node = search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_;
 	Node* best_child = search_->GetBestChildNoTemperature(boosted_node->GetParent(), vector_of_moves_from_root_to_boosted_node.size()).node();
 	LOGFILE << "Depth: " << vector_of_moves_from_root_to_boosted_node.size() << " Visits for best child (cpuct=1): " << best_child->GetN() << " visits for boosted_node: " << boosted_node->GetN();
 	if(donate_visits){ // use the fact the helper and Leela agrees up to this point to boost the _parent_ of this node a lot.
+	  // (ToDo test if this is better than just letting Leela do her thing)
 	  boosted_node = search_->search_stats_->Helpers_preferred_child_node_->GetParent();
-	  vector_of_moves_from_root_to_boosted_node.pop_back();
-	  LOGFILE << "Case 1: clearly worse, boosting parent instead.";
-	  collision_limit_one = std::min(static_cast<uint32_t>(std::floor(collision_limit * 1.0f/4.0f)), boosted_node->GetN()); // avoid more spedning more visits than current number of visits
+	  if(boosted_node == search_->root_node_){
+	    // collision_limit_one = 0; // boosting root is pointless.
+	    // If not returning, then cpuct=2 will take place AFTER a normal picknodestoextend round, which is not safe.
+	    search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
+	    return false;
+	  } else {
+	    search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
+	    return false;
+	    
+	    vector_of_moves_from_root_to_boosted_node.pop_back();
+	    LOGFILE << "Case 1: clearly worse, boosting parent instead.";
+	    // avoid more spedning more visits than current number of visits	    
+	    collision_limit_one = std::min(static_cast<uint32_t>(std::floor(collision_limit * 1.0f/4.0f)), boosted_node->GetN()); 
+	  }
 	} else {
 	  // roughly equal or clearly better
 	  if(roughly_equal){
@@ -2727,84 +2723,7 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	}
       }
 
-      // if(override_cpuct == 2 || override_cpuct == 3){
-      // 	collision_limit_one = 0;
-      // }
-      
-      // if(override_cpuct == 2){
-      //       search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
-      //       return false;
-      
-      //   // This is the second divergence, it is deeper and therefore less acute than the first divergence. (but it can help Leela realize that her mainline is a blunder).
-      //   boosted_node = search_->search_stats_->Helpers_preferred_child_node_in_Leelas_PV_;
-      //   vector_of_moves_from_root_to_boosted_node = search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_;
-      //   Node* best_child = search_->GetBestChildNoTemperature(boosted_node->GetParent(), vector_of_moves_from_root_to_boosted_node.size()).node();
-      
-      //   if(roughly_equal || !donate_visits){
-      //     // don't boost if node is already best child
-      //     if(boosted_node == best_child){
-      //       LOGFILE << "Case 2: not clearly better, already best child, boosting not needed";
-      //       search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
-      //       return false;
-      //     }
-      //     if(boosted_node->GetN() + collision_limit_one > best_child->GetN()){
-      //       // Equal number of visits is OK, but not more
-      //       if(boosted_node->GetN() < best_child->GetN()){
-      // 	collision_limit_one = best_child->GetN() - boosted_node->GetN();
-      // 	LOGFILE << "Case 2: Limiting the number of forced visits to match best child.";
-      //       }
-      //     }
-      //   }
-      
-      //   if(donate_visits){
-      //     // This line is "clearly better" than the helpers main line, so OK to boost this. Note, however, that this is the entry point in the SECOND divergence, that is, NOT Leelas PV.
-      //     // Boosting this a lot is an interesting way to let the helper influence Leela when Leelas PV is better than the root-exploring helper.
-      //     // But since this is about the double the depth of the first divergence, don't overboost it.
-      //     // Never give more than number of visits - visits in flight.
-      
-      //     collision_limit_one = std::min(static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatioSecondDivergence() * 1.5f)), static_cast<int32_t>(boosted_node->GetN() - boosted_node->GetNInFlight()));
-      
-      //     // if(centipawn_diff > 10){
-      //     //   collision_limit_one = std::min(static_cast<int32_t>(collision_limit * 1 / 3), static_cast<int32_t>(boosted_node->GetN() - boosted_node->GetNInFlight()));
-      //     // } else {
-      //     //   // Centipawn diff is between 5 and 10, for now just treat this as roughly equal.
-      //     //   collision_limit_one = std::max(0, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatioSecondDivergence())));	      
-      //     // }
-      //     // This can be a negative if the node has more visits in flight than visits. If that is the case, do nothing.
-      //     if(collision_limit_one < 0){
-      //       LOGFILE << "Not boosting a promising node, because it already has more visits in flight than visits.";
-      //       search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
-      //       return false;
-      //     }
-      //   } else {
-      //     if(!roughly_equal){
-      //       // This line is 'clearly worse' than the helper's preference at the first divergence, no forced visits
-      //       search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
-      //       return false;
-      //     } else {
-      //       // Normal, roughly equal
-      //       collision_limit_one = std::max(0, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatioSecondDivergence())));
-      //     }
-      //   }
-      // }
-
-      // if(override_cpuct == 3){
-      //   	      search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
-      //       return false;
-      
-      //   if(search_->search_stats_->vector_of_moves_from_root_to_first_minimax_divergence.size() > 0 && search_->search_stats_->Leelas_minimax_PV_first_divergence_node->GetNInFlight() == 0){
-      //     boosted_node = search_->search_stats_->Leelas_minimax_PV_first_divergence_node;
-      //     vector_of_moves_from_root_to_boosted_node = search_->search_stats_->vector_of_moves_from_root_to_first_minimax_divergence;
-      //     // collision_limit_one = std::min(2, collision_limit); // This could be higher, but when working with small minibatch-sizes, better keep the fixed nodes low.
-      //     // collision_limit_one = collision_limit * 1 / 2; // be greedy.
-      //     collision_limit_one = collision_limit * params_.GetAuxEngineForceVisitsRatioMiniMax();
-      //   } else {
-      //     search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
-      //     return false;
-      //   }
-      // }
-
-      if(override_cpuct == 4){ // 2A An interesting node somewhere in the helper's preferred line, skip this if helper think this line is clearly worse
+      if(override_cpuct == 2){ // 2A An interesting node somewhere in the helper's preferred line, skip this if helper think this line is clearly worse
 	// Also skip this if the node to explore has visits in flight
 	if(helper_PV_from_instance_two_explore_moves.size() > 0 && helper_PV_from_instance_two_explore_node->GetNInFlight() == 0){
 	  boosted_node = helper_PV_from_instance_two_explore_node;
@@ -2832,46 +2751,6 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	} else {
 	  // Nothing to do (yet)
 	  search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
-	  return false;
-	}
-      }
-
-      if(override_cpuct == 5){ // 2B An interesting node somewhere in Leela's preferred line, skip this if the helper thinks this line is clearly worse
-	search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
-	return false;
-
-	if(helper_PV_from_instance_one_explore_moves.size() > 0 && helper_PV_from_instance_one_explore_node->GetNInFlight() == 0){
-	  boosted_node = helper_PV_from_instance_one_explore_node; // this is the first node in Leelas preferred PV after the first divergence.
-	  vector_of_moves_from_root_to_boosted_node = helper_PV_from_instance_one_explore_moves;
-	  if(!donate_visits && !roughly_equal){
-	    // Clearly worse, do not force anything
-	    search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
-	    return false;
-	  }
-	  if(roughly_equal){
-	    // About equal, give just a litte hint.
-	    collision_limit_one = std::min(2, static_cast<int32_t>(boosted_node->GetN() - boosted_node->GetNInFlight() * 0.5));
-	  } else {
-	    // Clearly better, boost more
-	    collision_limit_one = std::min(5, static_cast<int32_t>(boosted_node->GetN() - boosted_node->GetNInFlight() * 0.5));
-	  }
-	} else {
-	  // Nothing to do (yet)
-	  search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
-	  return false;
-	}
-      }
-
-      if(override_cpuct == 6){ // 2C An interesting node somewhere in Leela's MiniMaxPV
-	search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
-	return false;
-
-	if(vector_of_moves_from_root_to_some_interesting_minimax_node.size() > 0 && Leelas_minimax_PV_some_interesting_node->GetNInFlight() == 0){
-	  boosted_node = Leelas_minimax_PV_some_interesting_node;
-	  vector_of_moves_from_root_to_boosted_node = vector_of_moves_from_root_to_some_interesting_minimax_node;
-	  collision_limit_one = std::min(2, collision_limit);
-	} else {
-	  search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();	      
 	  return false;
 	}
       }
@@ -3542,7 +3421,6 @@ void SearchWorker::FetchMinibatchResults() {
     FetchSingleNodeResult(&node_to_process, *computation_, idx_in_computation);
     if (node_to_process.nn_queried) ++idx_in_computation;
   }
-  // LOGFILE << "SearchWorker::FetchMinibatchResults() finished";
 }
 
 template <typename Computation>

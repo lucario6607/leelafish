@@ -2611,7 +2611,6 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
     if(search_->search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child > 0 &&
        search_->search_stats_->Helpers_preferred_child_node_in_Leelas_PV_ != nullptr &&
        search_->search_stats_->Helpers_preferred_child_node_ != nullptr &&
-       search_->search_stats_->Helpers_preferred_child_node_->GetN() > 0 &&       
        search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size() > 0 &&
        search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size() > 0 
        ){
@@ -2667,6 +2666,12 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 
       Node* boosted_node;
       std::vector<Move> vector_of_moves_from_root_to_boosted_node;
+
+      // This is quick fix
+      if(search_->search_stats_->Helpers_preferred_child_node_->GetN() == 0){
+	search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
+	return false;
+      }
 
       // Need to define three things: (1) boosted_node, (2) vector_of_moves_from_root_to_boosted_node (3) collision_limit_one (i.e. the number of visits to force)
       if(override_cpuct < 4){

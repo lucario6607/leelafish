@@ -2287,12 +2287,13 @@ void SearchWorker::GatherMinibatch2(int number_of_nodes_already_added) {
 
     int new_start = static_cast<int>(minibatch_.size());
 
-    if(iteration_counter < 2){
-      // First run is a custom run which may override CPUCT and force visits into a specific line.
-      // Every other batch, this max_force_visits is used as is to force visits to the first divergence,
-      // and every other batch, another parameter is used to force visits to the second divergence.
-      // For the first divergence, we can compare two evals and reduce the number of forced visits if the helper prefers leelas line. Note, however, that the helper can still be wrong so forcing _some_ visits even to a line that the helper happens to find inferior might still be a good thing to do.
-      int max_force_visits = int((params_.GetMiniBatchSize() - number_of_nodes_already_added));
+    if(iteration_counter < 1){
+      // First two runs are custom runs which may override CPUCT and force visits into a specific line.
+      // int max_force_visits = int((params_.GetMiniBatchSize() - number_of_nodes_already_added));
+      // LOGFILE << " minibatch_size: " << minibatch_size << " number_out_of_order_: " << number_out_of_order_
+      // 	      << " params_.GetMaxOutOfOrderEvals(): " << params_.GetMaxOutOfOrderEvals();
+      int max_force_visits = std::min({collisions_left, params_.GetMiniBatchSize() - number_of_nodes_already_added - minibatch_size,
+	  params_.GetMaxOutOfOrderEvals() - number_out_of_order_});
       PickNodesToExtend(max_force_visits, iteration_counter+1);
     } else {
       // Normal run
@@ -2657,9 +2658,10 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	boosted_node = search_->search_stats_->Helpers_preferred_child_node_;
 	vector_of_moves_from_root_to_boosted_node = search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_;
 	Node* best_child = search_->GetBestChildNoTemperature(boosted_node->GetParent(), vector_of_moves_from_root_to_boosted_node.size()).node();
-	collision_limit_one = collision_limit - boosted_node->GetNInFlight(); // This is the default	
+	// collision_limit_one = collision_limit - boosted_node->GetNInFlight(); // This is the default
+	collision_limit_one = 2 * collision_limit; // This is the default
 	LOGFILE << "Depth: " << vector_of_moves_from_root_to_boosted_node.size() << " Visits for best child (cpuct=1): " << best_child->GetN() << " visits for boosted_node: " << boosted_node->GetN()
-		<< " visits in flight for boosted node: " << boosted_node->GetNInFlight();
+		<< " visits in flight for boosted node: " << boosted_node->GetNInFlight() << " collisions left: " << collision_limit;
 	if(donate_visits){ // use the fact the helper and Leela agrees up to this point to boost the _parent_ of this node a lot.
 	  collision_limit_one = 0;
 	} else {
@@ -2675,7 +2677,7 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	      // Equal number of visits is OK, but not more
 	      if(boosted_node->GetN() < best_child->GetN()){
 		collision_limit_one = best_child->GetN() - boosted_node->GetN();
-		LOGFILE << "Case 1: not celarly better Limiting the number of forced visits to match best child.";
+		LOGFILE << "Case 1: not clearly better Limiting the number of forced visits to match best child.";
 	      }
 	    }
 	  } else {
@@ -2685,44 +2687,13 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	      LOGFILE << "Case 1: Clearly better, even best child now (should not last for long, since best child means that the divergence will be detected further down the line).";
 	      // collision_limit_one = std::max(collision_limit * 1 / 3, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatio())));
 	      collision_limit_one = collision_limit * params_.GetAuxEngineForceVisitsRatio();
+	    } else {
+	      LOGFILE << "Case 1: Clearly better, and not yet best child.";	      
 	    }
 	  }
 	}
-      // }
 
-      // if(override_cpuct == 2){ // 2A An interesting node somewhere in the helper's preferred line, skip this if helper think this line is clearly worse
-      // 	// Also skip this if the node to explore has visits in flight
-      // 	if(helper_PV_from_instance_two_explore_moves.size() > 0 && helper_PV_from_instance_two_explore_node->GetNInFlight() == 0){
-      // 	  boosted_node = helper_PV_from_instance_two_explore_node;
-      // 	  vector_of_moves_from_root_to_boosted_node = helper_PV_from_instance_two_explore_moves;
-      // 	  if(donate_visits){
-      // 	    // Clearly worse, do not force anything
-      // 	    search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
-      // 	    return false;
-      // 	  }
-      // 	  if(roughly_equal){
-      // 	    collision_limit_one = std::min(2, collision_limit);
-      // 	  } else {
-      // 	    // Clearly better, boost more,
-      // 	    // collision_limit_one = collision_limit * (1.0f/4.0f + (10.0f/20.0f) * (std::min(20, centipawn_diff) - 5)/15.0f);
-      // 	    if(centipawn_diff > 20){
-      // 	      LOGFILE << "Case 4: Emerging blunder warning, but don't force more than half the number of visits.";
-      // 	      // Emerging blunder!
-      // 	      collision_limit_one = std::min(static_cast<int32_t>(collision_limit), static_cast<int32_t>(boosted_node->GetN() - boosted_node->GetNInFlight() * 0.5));
-      // 	    } else {
-      // 	      LOGFILE << "Case 4: Centipawn diff in the range 10-20, in favor of helpers PV, spend at most 10 visits deeper.";
-      // 	      // collision_limit_one = std::min(static_cast<int32_t>(collision_limit * 1 / 6), static_cast<int32_t>(boosted_node->GetN() - boosted_node->GetNInFlight() * 0.5));
-      // 	      collision_limit_one = std::min(collision_limit, std::min(10, static_cast<int32_t>(boosted_node->GetN() - boosted_node->GetNInFlight() * 0.5)));
-      // 	    }
-      // 	  }
-      // 	} else {
-      // 	  // Nothing to do (yet)
-      // 	  search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
-      // 	  return false;
-      // 	}
-      // }
-
-      if(collision_limit_one > 0){
+	if(collision_limit_one > 0){
 	// GetN() and GetNInFlight() might require a shared lock on nodes.
 	LOGFILE << "override_cpuct=" << override_cpuct << " depth: " << vector_of_moves_from_root_to_boosted_node.size()
 		<< " visits to force: " << collision_limit_one << " current visits: " << boosted_node->GetN()

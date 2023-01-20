@@ -2660,7 +2660,7 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	Node* best_child = search_->GetBestChildNoTemperature(boosted_node->GetParent(), vector_of_moves_from_root_to_boosted_node.size()).node();
 	// collision_limit_one = collision_limit - boosted_node->GetNInFlight(); // This is the default
 	// collision_limit_one = 2 * collision_limit; // This is the default
-	collision_limit_one = std::floor(512 / std::max(1.0f, vector_of_moves_from_root_to_boosted_node.size() / 2.0f)); // Try to catch up fast.
+	collision_limit_one = std::floor(1024 / std::max(1.0f, vector_of_moves_from_root_to_boosted_node.size() / 2.0f)); // Try to catch up fast.
 	LOGFILE << "Depth: " << vector_of_moves_from_root_to_boosted_node.size() << " Visits for best child (cpuct=1): " << best_child->GetN() << " visits for boosted_node: " << boosted_node->GetN()
 		<< " visits in flight for boosted node: " << boosted_node->GetNInFlight() << " collisions left: " << collision_limit;
 	if(donate_visits){

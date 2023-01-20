@@ -2659,10 +2659,11 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	vector_of_moves_from_root_to_boosted_node = search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_;
 	Node* best_child = search_->GetBestChildNoTemperature(boosted_node->GetParent(), vector_of_moves_from_root_to_boosted_node.size()).node();
 	// collision_limit_one = collision_limit - boosted_node->GetNInFlight(); // This is the default
-	collision_limit_one = 2 * collision_limit; // This is the default
+	// collision_limit_one = 2 * collision_limit; // This is the default
+	collision_limit_one = std::floor(1024 / std::max(1.0f, vector_of_moves_from_root_to_boosted_node.size() / 2.0f)); // Try to catch up fast.
 	LOGFILE << "Depth: " << vector_of_moves_from_root_to_boosted_node.size() << " Visits for best child (cpuct=1): " << best_child->GetN() << " visits for boosted_node: " << boosted_node->GetN()
 		<< " visits in flight for boosted node: " << boosted_node->GetNInFlight() << " collisions left: " << collision_limit;
-	if(donate_visits){ // use the fact the helper and Leela agrees up to this point to boost the _parent_ of this node a lot.
+	if(donate_visits){
 	  collision_limit_one = 0;
 	} else {
 	  // roughly equal or clearly better
@@ -2686,7 +2687,8 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	      // Continue to boost even when the node has more visits, but decrease the boost to let Leela have the final say.
 	      LOGFILE << "Case 1: Clearly better, even best child now (should not last for long, since best child means that the divergence will be detected further down the line).";
 	      // collision_limit_one = std::max(collision_limit * 1 / 3, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatio())));
-	      collision_limit_one = collision_limit * params_.GetAuxEngineForceVisitsRatio();
+	      // collision_limit_one = collision_limit * params_.GetAuxEngineForceVisitsRatio();
+	      // keep the default, all visits go here.
 	    } else {
 	      LOGFILE << "Case 1: Clearly better, and not yet best child.";	      
 	    }
@@ -2694,8 +2696,11 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	}
 
 	if(collision_limit_one > 0){
-	// GetN() and GetNInFlight() might require a shared lock on nodes.
-	LOGFILE << "override_cpuct=" << override_cpuct << " depth: " << vector_of_moves_from_root_to_boosted_node.size()
+	  // make sure we do not spend more visits than there are leaves
+	  collision_limit_one = std::min(static_cast<uint32_t>(collision_limit_one), boosted_node->GetN() - boosted_node->GetNInFlight());
+	  
+	  // GetN() and GetNInFlight() might require a shared lock on nodes.
+	  LOGFILE << "override_cpuct=" << override_cpuct << " depth: " << vector_of_moves_from_root_to_boosted_node.size()
 		<< " visits to force: " << collision_limit_one << " current visits: " << boosted_node->GetN()
 		<< " visits in flight: " << boosted_node->GetNInFlight();
 

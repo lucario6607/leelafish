@@ -2700,8 +2700,9 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	}
 
 	if(collision_limit_one > 0){
-	  // make sure we do not spend more visits than there are leaves
-	  collision_limit_one = std::min(static_cast<uint32_t>(collision_limit_one), boosted_node->GetN() - boosted_node->GetNInFlight());
+	  // make sure we do not spend more visits than there are leaves,
+	  // And never more than 1024-boosted_node->GetNInFlight()
+	  collision_limit_one = std::min(1024 - static_cast<uint32_t>(boosted_node->GetNInFlight()), std::min(static_cast<uint32_t>(collision_limit_one), boosted_node->GetN() - boosted_node->GetNInFlight()));
 	  
 	  // GetN() and GetNInFlight() might require a shared lock on nodes.
 	  LOGFILE << "override_cpuct=" << override_cpuct << " depth: " << vector_of_moves_from_root_to_boosted_node.size()

@@ -2262,6 +2262,8 @@ void SearchWorker::GatherMinibatch2(int number_of_nodes_already_added) {
 
   int iteration_counter = 0;
 
+  int stats_non_collisions;
+
   // Gather nodes to process in the current batch.
   // If we had too many nodes out of order, also interrupt the iteration so
   // that search can exit.
@@ -2287,18 +2289,13 @@ void SearchWorker::GatherMinibatch2(int number_of_nodes_already_added) {
 
     int new_start = static_cast<int>(minibatch_.size());
 
-    if(iteration_counter < 1){
-      // First two runs are custom runs which may override CPUCT and force visits into a specific line.
-      // int max_force_visits = int((params_.GetMiniBatchSize() - number_of_nodes_already_added));
-      // LOGFILE << " minibatch_size: " << minibatch_size << " number_out_of_order_: " << number_out_of_order_
-      // 	      << " params_.GetMaxOutOfOrderEvals(): " << params_.GetMaxOutOfOrderEvals();
+    if(iteration_counter < 10){
+      // First k runs are custom runs which may override CPUCT and force visits into a specific line.
       int max_force_visits = std::min({collisions_left, params_.GetMiniBatchSize() - number_of_nodes_already_added - minibatch_size,
 	  params_.GetMaxOutOfOrderEvals() - number_out_of_order_});
       PickNodesToExtend(max_force_visits, iteration_counter+1);
     } else {
       // Normal run
-      // if (params_.GetAuxEngineVerbosity() >= 4) LOGFILE << "Will call PickNodesToExtend() with collision_limit=" << std::min({collisions_left, params_.GetMiniBatchSize() - number_of_nodes_already_added - minibatch_size,
-      // 	    params_.GetMaxOutOfOrderEvals() - number_out_of_order_}) << " current minibatch size = " << (minibatch_size + number_of_nodes_already_added) << " real minibatch (including collions?)_size is " << minibatch_.size();
       PickNodesToExtend(
 			  std::min({collisions_left, params_.GetMiniBatchSize() - number_of_nodes_already_added - minibatch_size,
 			      params_.GetMaxOutOfOrderEvals() - number_out_of_order_}), 0);
@@ -2315,8 +2312,7 @@ void SearchWorker::GatherMinibatch2(int number_of_nodes_already_added) {
 	++non_collisions;
 	++minibatch_size;
       }
-
-      // if (params_.GetAuxEngineVerbosity() >= 2 && iteration_counter == 1 && size_before_picking < minibatch_.size()) LOGFILE << "GatherMinibatch2() did add nodes with override cpuct = true and found " << non_collisions << " non_collisions out of " << minibatch_.size() - size_before_picking << " tested nodes";
+      stats_non_collisions = non_collisions;
 
     bool needs_wait = false;
     int ppt_start = new_start;
@@ -2425,6 +2421,8 @@ void SearchWorker::GatherMinibatch2(int number_of_nodes_already_added) {
         if (search_->stop_.load(std::memory_order_acquire)) return;
       }
     }
+    // if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "GatherMinibatch2() iteration counter: " << iteration_counter << " collisions: " << stats_non_collisions << " out of " << minibatch_.size() - number_of_nodes_already_added << " tested nodes";
+
   }
 }
 
@@ -2581,7 +2579,9 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
   // TODO: pre-reserve visits_to_perform for expected depth and likely maximum
   // width. Maybe even do so outside of lock scope.
 
-  if(override_cpuct > 0){
+  int override_cpuct_number_of_times = 10; // only test if cpuct should be overriden the first k times when the function is called
+
+  if(override_cpuct > 0 && override_cpuct < override_cpuct_number_of_times){
 
     // There are two different types of boosting to make:
     // 1. Starting points of divergencies (force more visits to these)
@@ -2621,10 +2621,10 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	  if(search_->search_stats_->helper_eval_of_leelas_preferred_child < search_->search_stats_->helper_eval_of_helpers_preferred_child){
 	    // helper is 'clearly' better
 	    collision_limit_one = std::max(0, static_cast<int>(std::floor(collision_limit * 1 / 3.0f)));	    
-	    if(override_cpuct < 4 && params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Case A1 found divergence at an even distance from root, so maximising helper eval, and helper eval of helper preferred line is higher (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "). This means the helper has found a better move for the side to move (Leela).";
+	    if(override_cpuct == 1 && params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Case A1 found divergence at an even distance from root, so maximising helper eval, and helper eval of helper preferred line is higher (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "). This means the helper has found a better move for the side to move (Leela).";
 	  } else {
 	    // Helper is 'clearly' worse, case C
-	    if(override_cpuct < 4 && params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Case C1 found divergence at an even distance from root, so maximising helper eval, and helper eval of helper preferred line is lower (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "), so Leela has found a better move for the side to move (Leela).";
+	    if(override_cpuct == 1 && params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Case C1 found divergence at an even distance from root, so maximising helper eval, and helper eval of helper preferred line is lower (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "), so Leela has found a better move for the side to move (Leela).";
 	    donate_visits = true;
 	    collision_limit_one = std::max(0, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatioInferiorLine())));
 	  }
@@ -2633,10 +2633,10 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	  if(search_->search_stats_->helper_eval_of_leelas_preferred_child > search_->search_stats_->helper_eval_of_helpers_preferred_child){
 	    collision_limit_one = std::max(0, static_cast<int>(std::floor(collision_limit * 1 / 3.0f)));
 	    // collision_limit_one = std::max(0, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatio())));
-	    if(override_cpuct < 4 && params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Case A2 found divergence at an odd distance from root, so minimising helper eval, and helper eval of helper preferred line is lower (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "). This means the helper has found a better move the for the opponent.";
+	    if(override_cpuct == 1 && params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Case A2 found divergence at an odd distance from root, so minimising helper eval, and helper eval of helper preferred line is lower (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "). This means the helper has found a better move the for the opponent.";
 	  } else {
 	    // Case C, helper even worse than Leela +0.05 when minimising
-	    if(override_cpuct < 4 && params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Case C2 found divergence at an odd distance from root, so minimising helper eval, and helper eval of helper preferred line is higher (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "), so Leela has found a better move for the opponent.";
+	    if(override_cpuct == 1 && params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "SearchWorker::PickNodesToExtendTask() Case C2 found divergence at an odd distance from root, so minimising helper eval, and helper eval of helper preferred line is higher (" << search_->search_stats_->helper_eval_of_helpers_preferred_child << ") than helper eval of Leelas PV (" << search_->search_stats_->helper_eval_of_leelas_preferred_child << "), so Leela has found a better move for the opponent.";
 	    donate_visits = true;
 	    collision_limit_one = std::max(0, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatioInferiorLine())));
 	  }
@@ -2671,13 +2671,17 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	    // don't boost the node if it is already best child,
 	    // For some reason best_child is not always the child with highest N, which it should be. For now, check manually.
 	    if(boosted_node == best_child || boosted_node->GetN() > best_child->GetN()){
-	      LOGFILE << "Case 1: not clearly better, already best child, this should not last for long, stop boosting here.";
+	      if(boosted_node == best_child){
+		LOGFILE << "Case 1: not clearly better, already best child, this should not last for long, stop boosting here.";
+	      } else {
+		LOGFILE << "Case 1: not clearly better, more visits but not yet best child, this should not last for long, stop boosting here.";		
+	      }
 	      collision_limit_one = 0;
 	    }
 	    if(boosted_node->GetN() + collision_limit_one > best_child->GetN()){
 	      // Equal number of visits is OK, but not more
 	      if(boosted_node->GetN() < best_child->GetN()){
-		collision_limit_one = best_child->GetN() - boosted_node->GetN();
+		collision_limit_one = best_child->GetN() - boosted_node->GetN() - 1;
 		LOGFILE << "Case 1: not clearly better Limiting the number of forced visits to match best child.";
 	      }
 	    }

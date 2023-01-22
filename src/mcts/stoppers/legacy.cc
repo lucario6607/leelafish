@@ -72,7 +72,7 @@ class LegacyTimeManager : public TimeManager {
             params.GetOrDefault<float>("midpoint-move", 30.1f)),
         time_curve_steepness_(params.GetOrDefault<float>("steepness", 4.69f)),
         spend_saved_time_(params.GetOrDefault<float>("immediate-use", 0.55f)),
-        book_ply_bonus_(params.GetOrDefault<float>("book-ply-bonus", 0.25f)) {}
+        book_ply_bonus_(params.GetOrDefault<float>("book-ply-bonus", 0.4f)) {}
   std::unique_ptr<SearchStopper> GetStopper(const GoParams& params,
                                             const NodeTree& tree) override;
 

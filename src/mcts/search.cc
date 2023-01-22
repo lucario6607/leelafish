@@ -2279,7 +2279,7 @@ void SearchWorker::GatherMinibatch2(int number_of_nodes_already_added) {
     // early exit from every batch since there is never another search thread to
     // be keeping the backend busy. Which would mean that threads=1 has a
     // massive nps drop.
-    if (thread_count > 1 && minibatch_size > 0 &&
+    if (thread_count > 1 && minibatch_size > 50 &&
         computation_->GetCacheMisses() > params_.GetIdlingMinimumWork() &&
         thread_count - search_->backend_waiting_counter_.load(
                            std::memory_order_relaxed) >

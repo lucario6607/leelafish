@@ -2262,8 +2262,6 @@ void SearchWorker::GatherMinibatch2(int number_of_nodes_already_added) {
 
   int iteration_counter = 0;
 
-  int stats_non_collisions;
-
   // Gather nodes to process in the current batch.
   // If we had too many nodes out of order, also interrupt the iteration so
   // that search can exit.
@@ -2312,7 +2310,6 @@ void SearchWorker::GatherMinibatch2(int number_of_nodes_already_added) {
 	++non_collisions;
 	++minibatch_size;
       }
-      stats_non_collisions = non_collisions;
 
     bool needs_wait = false;
     int ppt_start = new_start;
@@ -2660,7 +2657,8 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	Node* best_child = search_->GetBestChildNoTemperature(boosted_node->GetParent(), vector_of_moves_from_root_to_boosted_node.size()).node();
 	// collision_limit_one = collision_limit - boosted_node->GetNInFlight(); // This is the default
 	// collision_limit_one = 2 * collision_limit; // This is the default
-	collision_limit_one = std::floor(1024 / std::max(1.0f, vector_of_moves_from_root_to_boosted_node.size() / 2.0f)); // Try to catch up fast.
+	// collision_limit_one = std::floor(1024 / std::max(1.0f, vector_of_moves_from_root_to_boosted_node.size() / 2.0f)); // Try to catch up fast.
+	collision_limit_one = std::max(static_cast<uint32_t>(collision_limit), 1024 - boosted_node->GetNInFlight()); // Try to catch up fast.	
 	LOGFILE << "Depth: " << vector_of_moves_from_root_to_boosted_node.size() << " Visits for best child (cpuct=1): " << best_child->GetN() << " visits for boosted_node: " << boosted_node->GetN()
 		<< " visits in flight for boosted node: " << boosted_node->GetNInFlight() << " collisions left: " << collision_limit;
 	if(donate_visits){
@@ -2678,10 +2676,10 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	      }
 	      collision_limit_one = 0;
 	    }
-	    if(boosted_node->GetN() + collision_limit_one > best_child->GetN()){
+	    if(boosted_node->GetN() + boosted_node->GetNInFlight() + collision_limit_one > best_child->GetN()){
 	      // Equal number of visits is OK, but not more
 	      if(boosted_node->GetN() < best_child->GetN()){
-		collision_limit_one = best_child->GetN() - boosted_node->GetN() - 1;
+		collision_limit_one = best_child->GetN() - boosted_node->GetN() - boosted_node->GetNInFlight() - 1;
 		LOGFILE << "Case 1: not clearly better Limiting the number of forced visits to match best child.";
 	      }
 	    }
@@ -2702,7 +2700,7 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	if(collision_limit_one > 0){
 	  // make sure we do not spend more visits than there are leaves,
 	  // And never more than 1024-boosted_node->GetNInFlight()
-	  collision_limit_one = std::max(static_cast<uint32_t>(0), std::min(static_cast<uint32_t>(1024) - boosted_node->GetNInFlight(), std::min(static_cast<uint32_t>(collision_limit_one), boosted_node->GetN() - boosted_node->GetNInFlight())));
+	  // collision_limit_one = std::max(static_cast<uint32_t>(0), std::min(static_cast<uint32_t>(1024) - boosted_node->GetNInFlight(), std::min(static_cast<uint32_t>(collision_limit_one), boosted_node->GetN() - boosted_node->GetNInFlight())));
 	  
 	  // GetN() and GetNInFlight() might require a shared lock on nodes.
 	  LOGFILE << "override_cpuct=" << override_cpuct << " depth: " << vector_of_moves_from_root_to_boosted_node.size()

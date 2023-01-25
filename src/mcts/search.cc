@@ -235,7 +235,7 @@ void ApplyDirichletNoise(Node* node, float eps, double alpha) {
 }
 }  // namespace
 
-void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
+void Search::SendUciInfo(bool only_check_if_Leelas_PV_was_changed) REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
   const auto max_pv = params_.GetMultiPv();
   const auto edges = GetBestChildrenNoTemperature(root_node_, max_pv, 0);
   const auto score_type = params_.GetScoreType();
@@ -439,7 +439,9 @@ void Search::SendUciInfo() REQUIRES(nodes_mutex_) REQUIRES(counters_mutex_) {
   if(max_pv > 1){
     std::reverse(uci_infos.begin(), uci_infos.end());
   }
-  uci_responder_->OutputThinkingInfo(&uci_infos);
+  if(!only_check_if_Leelas_PV_was_changed){
+    uci_responder_->OutputThinkingInfo(&uci_infos);
+  }
 }
 
 // Decides whether anything important changed in stats and new info should be
@@ -456,7 +458,7 @@ void Search::MaybeOutputInfo() {
        last_outputted_uci_info_.seldepth != max_depth_ ||
        last_outputted_uci_info_.time + kUciInfoMinimumFrequencyMs <
            GetTimeSinceStart())) {
-    SendUciInfo();
+    SendUciInfo(false);
     if (params_.GetLogLiveStats()) {
       SendMovesStats();
     }
@@ -1092,7 +1094,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
       LOGFILE << "Finished vetoing stuff";
     }
 
-    SendUciInfo();
+    SendUciInfo(false);
     EnsureBestMoveKnown();
     SendMovesStats();
     BestMoveInfo info(final_bestmove_, final_pondermove_);
@@ -1108,6 +1110,8 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
       search_stats_->stop_a_blunder_ = false;
     }
     search_stats_->best_move_candidates_mutex.unlock();    
+  } else {
+    SendUciInfo(true); // Just update Leelas PV, don't send any UCI info.
   }
 
   // Use a 0 visit cancel score update to clear out any cached best edge, as
@@ -1211,8 +1215,13 @@ std::vector<EdgeAndNode> Search::GetBestChildrenNoTemperature(Node* parent,
   const bool is_odd_depth = (depth % 2) == 1;
   bool vetoing_already_announced = false; // only print the message about vetoing once, not once per edge.
   const float draw_score = GetDrawScore(is_odd_depth);
-  const bool select_move_by_q = params_.GetQBasedMoveSelection() && (stop_.load(std::memory_order_acquire) || parent->GetN() > 10000); // GetBestChildrenNoTemperature is called by GetBestChildNotTemperature(), which in turn is called by PreExtend..() To enhance performance only do the beta calculations when needed.
-  const float beta_prior = pow(parent->GetN() + number_of_skipped_playouts, params_.GetMoveSelectionVisitsScalingPower());
+  const bool select_move_by_q = params_.GetQBasedMoveSelection() && (stop_.load(std::memory_order_acquire) || parent->GetN() > 10000); // GetBestChildrenNoTemperature is called by GetBestChildNoTemperature(), which in turn is called by PreExtend..() To enhance performance only do the beta calculations when needed.
+  // inactivating Q based best child when parent has 10000 visits. This can potentially be a large change in playing style.
+  // const bool select_move_by_q = params_.GetQBasedMoveSelection() && (stop_.load(std::memory_order_acquire)); // GetBestChildrenNoTemperature is called by GetBestChildNoTemperature(), which in turn is called by PreExtend..() To enhance performance only do the beta calculations when needed.  
+  float beta_prior; // only calculate a value for this when needed.
+  if(select_move_by_q){
+    beta_prior = pow(parent->GetN() + number_of_skipped_playouts, params_.GetMoveSelectionVisitsScalingPower());
+  }
   number_of_skipped_playouts = 0; // if search runs out of time, this is the correct number, and if search is stopped early this value will be overwritten.
   // Best child is selected using the following criteria:
   // * Prefer shorter terminal wins / avoid shorter terminal losses.
@@ -2592,12 +2601,17 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
     search_->search_stats_->best_move_candidates_mutex.lock(); // for reading search_stats_->winning_ and the other
 
     search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.lock(); // for reading Helpers_preferred_child_node_ and vector_of_moves_from_root_to_Helpers_preferred_child_node_ and the other two.
+    // if(search_->search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child > 0 &&
+    //    search_->search_stats_->Helpers_preferred_child_node_in_Leelas_PV_ != nullptr &&
+    //    search_->search_stats_->Helpers_preferred_child_node_ != nullptr &&
+    //    search_->search_stats_->Helpers_preferred_child_node_->GetN() > 0 &&
+    //    search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size() > 0 &&
+    //    search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size() > 0
+    //    ){
     if(search_->search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child > 0 &&
        search_->search_stats_->Helpers_preferred_child_node_in_Leelas_PV_ != nullptr &&
        search_->search_stats_->Helpers_preferred_child_node_ != nullptr &&
-       search_->search_stats_->Helpers_preferred_child_node_->GetN() > 0 &&
-       search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size() > 0 &&
-       search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size() > 0
+       search_->search_stats_->Helpers_preferred_child_node_->GetN() > 0
        ){
 
       int centipawn_diff = std::abs(search_->search_stats_->helper_eval_of_leelas_preferred_child - search_->search_stats_->helper_eval_of_helpers_preferred_child);
@@ -2658,9 +2672,17 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	// collision_limit_one = collision_limit - boosted_node->GetNInFlight(); // This is the default
 	// collision_limit_one = 2 * collision_limit; // This is the default
 	// collision_limit_one = std::floor(1024 / std::max(1.0f, vector_of_moves_from_root_to_boosted_node.size() / 2.0f)); // Try to catch up fast.
-	collision_limit_one = std::max(static_cast<uint32_t>(collision_limit), 1024 - boosted_node->GetNInFlight()); // Try to catch up fast.	
-	LOGFILE << "Depth: " << vector_of_moves_from_root_to_boosted_node.size() << " Visits for best child (cpuct=1): " << best_child->GetN() << " visits for boosted_node: " << boosted_node->GetN()
-		<< " visits in flight for boosted node: " << boosted_node->GetNInFlight() << " collisions left: " << collision_limit;
+	collision_limit_one = std::max(static_cast<uint32_t>(collision_limit), 1024 - boosted_node->GetNInFlight()); // Try to catch up fast.
+	if(boosted_node != best_child && boosted_node->GetN() + boosted_node->GetNInFlight() < best_child->GetN() + best_child->GetNInFlight()){
+	  LOGFILE << "Depth: " << vector_of_moves_from_root_to_boosted_node.size() << " Visits for best child (cpuct=1): "
+		  << best_child->GetN() << " Debug info for best child: " << best_child->DebugString() << " visits for boosted_node: " << boosted_node->GetN()
+		  << " visits in flight for boosted node: " << boosted_node->GetNInFlight() << " Debug info for boosted node: " << best_child->DebugString()
+		  << " collisions left: " << collision_limit;
+	} else {
+	  LOGFILE << "Depth: " << vector_of_moves_from_root_to_boosted_node.size() << " Already best child, visits for boosted_node: " << boosted_node->GetN()
+		  << " visits in flight for boosted node: " << boosted_node->GetNInFlight() << " Debug info for boosted node: " << best_child->DebugString()
+		  << " collisions left: " << collision_limit;
+	}
 	if(donate_visits){
 	  collision_limit_one = 0;
 	} else {
@@ -2668,31 +2690,32 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	  if(roughly_equal){
 	    // don't boost the node if it is already best child,
 	    // For some reason best_child is not always the child with highest N, which it should be. For now, check manually.
-	    if(boosted_node == best_child || boosted_node->GetN() > best_child->GetN()){
+	    if(boosted_node == best_child || boosted_node->GetN() + boosted_node->GetNInFlight() >= best_child->GetN() + best_child->GetNInFlight()){
 	      if(boosted_node == best_child){
-		LOGFILE << "Case 1: not clearly better, already best child, this should not last for long, stop boosting here.";
+		LOGFILE << "Case 1: not clearly better, already best child, stop boosting here.";
 	      } else {
-		LOGFILE << "Case 1: not clearly better, more visits but not yet best child, this should not last for long, stop boosting here.";		
+		LOGFILE << "Case 1: not clearly better, more visits but not yet best child, stop boosting here.";		
 	      }
 	      collision_limit_one = 0;
 	    }
-	    if(boosted_node->GetN() + boosted_node->GetNInFlight() + collision_limit_one > best_child->GetN()){
+	    if(boosted_node->GetN() + boosted_node->GetNInFlight() + collision_limit_one > best_child->GetN() + best_child->GetNInFlight()){
 	      // Equal number of visits is OK, but not more
-	      if(boosted_node->GetN() < best_child->GetN()){
-		collision_limit_one = best_child->GetN() - boosted_node->GetN() - boosted_node->GetNInFlight() - 1;
+	      if(boosted_node->GetN() + boosted_node->GetNInFlight() < best_child->GetN() + best_child->GetNInFlight()){
+		collision_limit_one = best_child->GetN() + best_child->GetNInFlight() - boosted_node->GetN() - boosted_node->GetNInFlight() - 1;
 		LOGFILE << "Case 1: not clearly better Limiting the number of forced visits to match best child.";
 	      }
 	    }
 	  } else {
 	    // Clearly better,
-	    if(boosted_node->GetN() > best_child->GetN() + collision_limit_one){
+	    if(boosted_node == best_child || boosted_node->GetN() + boosted_node->GetNInFlight() >= best_child->GetN() + best_child->GetNInFlight()){
+	    // if(boosted_node->GetN() > best_child->GetN() + collision_limit_one){
 	      // Continue to boost even when the node has more visits, but decrease the boost to let Leela have the final say.
-	      LOGFILE << "Case 1: Clearly better, even best child now (should not last for long, since best child means that the divergence will be detected further down the line).";
+	      LOGFILE << "Case 1: Clearly better, even best child (or most visits) now.";
 	      // collision_limit_one = std::max(collision_limit * 1 / 3, static_cast<int>(std::floor(collision_limit * params_.GetAuxEngineForceVisitsRatio())));
 	      // collision_limit_one = collision_limit * params_.GetAuxEngineForceVisitsRatio();
 	      // keep the default, all visits go here.
 	    } else {
-	      LOGFILE << "Case 1: Clearly better, and not yet best child.";	      
+	      LOGFILE << "Case 1: Clearly better, and not yet best child.";
 	    }
 	  }
 	}
@@ -2735,6 +2758,7 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
       } // End of collision_limit_one > 0
       else {
 	// HACK: collision_limit_one was zero, lock so that unlocking below works.
+	LOGFILE << " collision_limit for boosted node turned out to be zero.";
 	search_->search_stats_->best_move_candidates_mutex.lock();	      
       }
     } else { // End of "no reason to enforce visits".

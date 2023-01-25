@@ -218,7 +218,7 @@ class Search {
   // void MaybeTriggerStop(const IterationStats& stats, StoppersHints* hints);
   void MaybeTriggerStop(const IterationStats& stats, StoppersHints* hints, bool update_helper_stuff);
   void MaybeOutputInfo();
-  void SendUciInfo();  // Requires nodes_mutex_ to be held.
+  void SendUciInfo(bool only_check_if_Leelas_PV_was_changed);  // Requires nodes_mutex_ to be held.
   // Sets stop to true and notifies watchdog thread.
   void FireStopInternal();
 

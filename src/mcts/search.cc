@@ -430,16 +430,16 @@ void Search::SendUciInfo(bool only_check_if_Leelas_PV_was_changed) REQUIRES(node
     }
     search_stats_->auxengine_stopped_mutex_.unlock();
   }
-  
-  if (!uci_infos.empty()) last_outputted_uci_info_ = uci_infos.front();
-  if (current_best_edge_ && !edges.empty()) {
-    last_outputted_info_edge_ = current_best_edge_.edge();
-  }
-  // Cutechess treats each UCI-info line atomically, and if we send multiple lines we have to send the best line last for it to stay on top. This only matters if multipv is set (above one).
-  if(max_pv > 1){
-    std::reverse(uci_infos.begin(), uci_infos.end());
-  }
+
   if(!only_check_if_Leelas_PV_was_changed){
+    if (!uci_infos.empty()) last_outputted_uci_info_ = uci_infos.front();
+    if (current_best_edge_ && !edges.empty()) {
+      last_outputted_info_edge_ = current_best_edge_.edge();
+    }
+    // Cutechess treats each UCI-info line atomically, and if we send multiple lines we have to send the best line last for it to stay on top. This only matters if multipv is set (above one).
+    if(max_pv > 1){
+      std::reverse(uci_infos.begin(), uci_infos.end());
+    }
     uci_responder_->OutputThinkingInfo(&uci_infos);
   }
 }
@@ -1050,7 +1050,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	      Move m_leela;	      
 	      Move::ParseMove(&m_helper, search_stats_->winning_move_.as_string(), flip);
 	      Move::ParseMove(&m_leela, search_stats_->Leelas_PV[0].as_string(), flip);
-	      if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Trying to save a draw/win, helper eval of root: " << search_stats_->helper_eval_of_root << " helper recommended move " << m_helper.as_string() << ". Number of nodes in support for the root node eval: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_root << " The helper eval of leelas preferred move: " << search_stats_->helper_eval_of_leelas_preferred_child << " Leela prefers the move: " << m_leela.as_string() << ", nodes in support for the eval of leelas preferred move: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child << " helper eval of helpers preferred move: " << search_stats_->helper_eval_of_helpers_preferred_child << " centipawn diff between helpers and leelas line, according to the helper: " << search_stats_->helper_eval_of_helpers_preferred_child << ".";
+	      if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Trying to save a draw/win, helper eval of root: " << search_stats_->helper_eval_of_root << " helper recommended move " << m_helper.as_string() << ". Number of nodes in support for the root node eval: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_root << " The helper eval of leelas preferred move: " << search_stats_->helper_eval_of_leelas_preferred_child << " Leela prefers the move: " << m_leela.as_string() << ", nodes in support for the eval of leelas preferred move: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child << " helper eval of helpers preferred move: " << search_stats_->helper_eval_of_helpers_preferred_child << " centipawn diff between helpers and leelas line, according to the helper: " << std::abs(search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_helpers_preferred_child) << ".";
 	      search_stats_->stop_a_blunder_ = true;
 	      if(search_stats_->helper_eval_of_root > 140){
 		search_stats_->save_a_win_ = true;
@@ -1217,11 +1217,12 @@ std::vector<EdgeAndNode> Search::GetBestChildrenNoTemperature(Node* parent,
   const float draw_score = GetDrawScore(is_odd_depth);
   const bool select_move_by_q = params_.GetQBasedMoveSelection() && (stop_.load(std::memory_order_acquire) || parent->GetN() > 10000); // GetBestChildrenNoTemperature is called by GetBestChildNoTemperature(), which in turn is called by PreExtend..() To enhance performance only do the beta calculations when needed.
   // inactivating Q based best child when parent has 10000 visits. This can potentially be a large change in playing style.
-  // const bool select_move_by_q = params_.GetQBasedMoveSelection() && (stop_.load(std::memory_order_acquire)); // GetBestChildrenNoTemperature is called by GetBestChildNoTemperature(), which in turn is called by PreExtend..() To enhance performance only do the beta calculations when needed.  
-  float beta_prior; // only calculate a value for this when needed.
-  if(select_move_by_q){
-    beta_prior = pow(parent->GetN() + number_of_skipped_playouts, params_.GetMoveSelectionVisitsScalingPower());
-  }
+  // const bool select_move_by_q = params_.GetQBasedMoveSelection() && (stop_.load(std::memory_order_acquire)); // GetBestChildrenNoTemperature is called by GetBestChildNoTemperature(), which in turn is called by PreExtend..() To enhance performance only do the beta calculations when needed.
+  const float beta_prior = pow(parent->GetN() + number_of_skipped_playouts, params_.GetMoveSelectionVisitsScalingPower());
+  // float beta_prior; // only calculate a value for this when needed.
+  // if(select_move_by_q){
+  //   beta_prior = pow(parent->GetN() + number_of_skipped_playouts, params_.GetMoveSelectionVisitsScalingPower());
+  // }
   number_of_skipped_playouts = 0; // if search runs out of time, this is the correct number, and if search is stopped early this value will be overwritten.
   // Best child is selected using the following criteria:
   // * Prefer shorter terminal wins / avoid shorter terminal losses.
@@ -1250,7 +1251,7 @@ std::vector<EdgeAndNode> Search::GetBestChildrenNoTemperature(Node* parent,
   // function, and use that from SendUCI info, that way we always
   // display correct move ordering.
   if(stop_.load(std::memory_order_acquire)){
-    search_stats_->best_move_candidates_mutex.lock();
+    search_stats_->best_move_candidates_mutex.lock_shared();
     winning_ = search_stats_->winning_ || search_stats_->stop_a_blunder_;
     if (winning_){
       winning_move_ = search_stats_->winning_move_;
@@ -1263,7 +1264,7 @@ std::vector<EdgeAndNode> Search::GetBestChildrenNoTemperature(Node* parent,
       if (params_.GetAuxEngineVerbosity() >= 2 && parent == root_node_ && !vetoing_already_announced) LOGFILE << "The move: " << winning_move_.as_string() << " will override Q and N based comparisons, since the helper claims it " << state << "." ;
       vetoing_already_announced = true;
     }
-    search_stats_->best_move_candidates_mutex.unlock();
+    search_stats_->best_move_candidates_mutex.unlock_shared();
   }
   
   std::partial_sort(
@@ -2598,9 +2599,9 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 
     int collision_limit_one; // the amount of visits we decide to use
 
-    search_->search_stats_->best_move_candidates_mutex.lock(); // for reading search_stats_->winning_ and the other
-
+    search_->search_stats_->best_move_candidates_mutex.lock_shared(); // for _reading_ search_stats_->winning_ and others
     search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.lock(); // for reading Helpers_preferred_child_node_ and vector_of_moves_from_root_to_Helpers_preferred_child_node_ and the other two.
+    
     // if(search_->search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child > 0 &&
     //    search_->search_stats_->Helpers_preferred_child_node_in_Leelas_PV_ != nullptr &&
     //    search_->search_stats_->Helpers_preferred_child_node_ != nullptr &&
@@ -2611,7 +2612,8 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
     if(search_->search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child > 0 &&
        search_->search_stats_->Helpers_preferred_child_node_in_Leelas_PV_ != nullptr &&
        search_->search_stats_->Helpers_preferred_child_node_ != nullptr &&
-       search_->search_stats_->Helpers_preferred_child_node_->GetN() > 0
+       search_->search_stats_->Helpers_preferred_child_node_->GetN() > 0 &&
+       search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_.size() > 0       
        ){
 
       int centipawn_diff = std::abs(search_->search_stats_->helper_eval_of_leelas_preferred_child - search_->search_stats_->helper_eval_of_helpers_preferred_child);
@@ -2654,12 +2656,14 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	}
       }
 
-      search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
+      // search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
       // fetch the helper_PV_from_instance_one_explore_moves and helper_PV_from_instance_two_explore_node before changing locks
       // std::vector<Move> helper_PV_from_instance_two_explore_moves = search_->search_stats_->helper_PV_from_instance_two_explore_moves;
       // Node* helper_PV_from_instance_two_explore_node = search_->search_stats_->helper_PV_from_instance_two_explore_node;
-      search_->search_stats_->best_move_candidates_mutex.unlock();
-      search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.lock();
+      // Instance one:
+      
+      // search_->search_stats_->best_move_candidates_mutex.unlock();
+      // search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.lock();
 
       Node* boosted_node;
       std::vector<Move> vector_of_moves_from_root_to_boosted_node;
@@ -2668,23 +2672,31 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
       // if(override_cpuct == 1){
 	boosted_node = search_->search_stats_->Helpers_preferred_child_node_;
 	vector_of_moves_from_root_to_boosted_node = search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_;
+
 	Node* best_child = search_->GetBestChildNoTemperature(boosted_node->GetParent(), vector_of_moves_from_root_to_boosted_node.size()).node();
 	// collision_limit_one = collision_limit - boosted_node->GetNInFlight(); // This is the default
 	// collision_limit_one = 2 * collision_limit; // This is the default
 	// collision_limit_one = std::floor(1024 / std::max(1.0f, vector_of_moves_from_root_to_boosted_node.size() / 2.0f)); // Try to catch up fast.
 	collision_limit_one = std::max(static_cast<uint32_t>(collision_limit), 1024 - boosted_node->GetNInFlight()); // Try to catch up fast.
-	if(boosted_node != best_child && boosted_node->GetN() + boosted_node->GetNInFlight() < best_child->GetN() + best_child->GetNInFlight()){
-	  LOGFILE << "Depth: " << vector_of_moves_from_root_to_boosted_node.size() << " Visits for best child (cpuct=1): "
-		  << best_child->GetN() << " Debug info for best child: " << best_child->DebugString() << " visits for boosted_node: " << boosted_node->GetN()
-		  << " visits in flight for boosted node: " << boosted_node->GetNInFlight() << " Debug info for boosted node: " << best_child->DebugString()
-		  << " collisions left: " << collision_limit;
-	} else {
-	  LOGFILE << "Depth: " << vector_of_moves_from_root_to_boosted_node.size() << " Already best child, visits for boosted_node: " << boosted_node->GetN()
-		  << " visits in flight for boosted node: " << boosted_node->GetNInFlight() << " Debug info for boosted node: " << best_child->DebugString()
-		  << " collisions left: " << collision_limit;
-	}
 	if(donate_visits){
-	  collision_limit_one = 0;
+	  // collision_limit_one = 0;
+	  // // Do something useful with the information that both Leela and the helper agree up to the point of the second divergence. It should be rather low risk to boost that node, but no need to through ALL visits there.
+	  // // Potentially, this node is very deep, and the game may never end up in that state. Perhaps it is useful to express the amount of boosting to spend there relative to that nodes current number of visits?
+	  // // Say, std::min(std::max(2, 10% of its current visits), 50% of the available visits in this batch)?
+
+	  // If this is root, then do not bother
+	  boosted_node = search_->search_stats_->Helpers_preferred_child_node_in_Leelas_PV_;
+	  if(boosted_node == search_->root_node_ || search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_.size() == 0){
+	    collision_limit_one = 0;
+	    LOGFILE << "Anomaly detected: The second divergence is root node or the vector of moves up to it is of length zero.";
+	  } else {
+	    // Lets try something greedy!
+	    collision_limit_one = std::max(static_cast<uint32_t>(collision_limit), 1024 - boosted_node->GetNInFlight());
+	    // collision_limit_one = std::max(0, static_cast<int>(1024-boosted_node->GetNInFlight()));
+	    // Promising
+	    // collision_limit_one = std::min(std::max(static_cast<uint32_t>(2), static_cast<uint32_t>(std::trunc(0.1f * boosted_node->GetN()))), static_cast<uint32_t>(std::trunc(0.5f * collision_limit)));
+	    vector_of_moves_from_root_to_boosted_node = search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_;
+	  }
 	} else {
 	  // roughly equal or clearly better
 	  if(roughly_equal){
@@ -2721,46 +2733,55 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	}
 
 	if(collision_limit_one > 0){
-	  // make sure we do not spend more visits than there are leaves,
-	  // And never more than 1024-boosted_node->GetNInFlight()
-	  // collision_limit_one = std::max(static_cast<uint32_t>(0), std::min(static_cast<uint32_t>(1024) - boosted_node->GetNInFlight(), std::min(static_cast<uint32_t>(collision_limit_one), boosted_node->GetN() - boosted_node->GetNInFlight())));
+
+	  search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
+	  search_->search_stats_->best_move_candidates_mutex.unlock_shared();
 	  
-	  // GetN() and GetNInFlight() might require a shared lock on nodes.
-	  LOGFILE << "override_cpuct=" << override_cpuct << " depth: " << vector_of_moves_from_root_to_boosted_node.size()
-		<< " visits to force: " << collision_limit_one << " current visits: " << boosted_node->GetN()
-		<< " visits in flight: " << boosted_node->GetNInFlight();
+	  // This is irrelevant when boosting the second divergence
+	  if(donate_visits){
+	    if(vector_of_moves_from_root_to_boosted_node.size() == 0){
+	      LOGFILE << "This should never happen. Second divergence is at depth 1, so parent of that node is root, stop boosting here.";
+	    } else {
+	      LOGFILE << "Second divergence is at depth: " << vector_of_moves_from_root_to_boosted_node.size()
+		      << " Forcing " << collision_limit_one << " visits at that node, which has "
+		      << boosted_node->GetN() << " visits and " << boosted_node->GetNInFlight() << " visits in flight.";
+	    }
+	  } else {
+	    if(boosted_node != best_child && boosted_node->GetN() + boosted_node->GetNInFlight() < best_child->GetN() + best_child->GetNInFlight()){
+	      LOGFILE << "Depth: " << vector_of_moves_from_root_to_boosted_node.size() << " Visits for best child (cpuct=1): "
+		      << best_child->GetN() << " visits for boosted_node: " << boosted_node->GetN()
+		      << " visits in flight for boosted node: " << boosted_node->GetNInFlight()
+		      << " collisions left: " << collision_limit;
+	    } else {
+	      LOGFILE << "Depth: " << vector_of_moves_from_root_to_boosted_node.size() << " Already best child, visits for boosted_node: " << boosted_node->GetN()
+		      << " visits in flight for boosted node: " << boosted_node->GetNInFlight() << " collisions left: " << collision_limit;
+	    }
+	  }
 
-	{
+	  {
 
-	  Mutex::Lock lock(picking_tasks_mutex_);
-	  picking_tasks_.emplace_back(
-				      boosted_node,
-				      vector_of_moves_from_root_to_boosted_node.size(),
-				      vector_of_moves_from_root_to_boosted_node,
-				      collision_limit_one, probability_of_best_path, distance_from_best_path);
-	  task_count_.fetch_add(1, std::memory_order_acq_rel);
-	  task_added_.notify_all();
+	    Mutex::Lock lock(picking_tasks_mutex_);
+	    picking_tasks_.emplace_back(
+					boosted_node,
+					vector_of_moves_from_root_to_boosted_node.size(),
+					vector_of_moves_from_root_to_boosted_node,
+					collision_limit_one, probability_of_best_path, distance_from_best_path);
+	    task_count_.fetch_add(1, std::memory_order_acq_rel);
+	    task_added_.notify_all();
+	  }
+	  WaitForTasks();	  
+
+	  // Add a VisitInFlight for every non_collision
+	  for(Node * n = boosted_node; n != search_->root_node_; n = n->GetParent()){
+	    n->IncrementNInFlight(collision_limit_one);
+	  }
+	  // // The loop above stops just before root, so fix root too. // TODO fix this ugly off-by-one hack. (perhaps test for n != nullptr)
+	  search_->root_node_->IncrementNInFlight(collision_limit_one);
+	  return true;
+	} // End of collision_limit_one > 0
+	else {
+	  LOGFILE << " collision_limit for boosted node turned out to be zero.";
 	}
-	WaitForTasks();	  
-
-	// Add a VisitInFlight for every non_collision
-	// search_->nodes_mutex_.unlock_shared();
-	// search_->nodes_mutex_.lock();
-	for(Node * n = boosted_node; n != search_->root_node_; n = n->GetParent()){
-	  n->IncrementNInFlight(collision_limit_one);
-	}
-	// // The loop above stops just before root, so fix root too. // TODO fix this ugly off-by-one hack. (perhaps test for n != nullptr)
-	search_->root_node_->IncrementNInFlight(collision_limit_one);
-	// search_->nodes_mutex_.unlock();
-	// search_->nodes_mutex_.lock_shared();
-	search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
-	return true;
-      } // End of collision_limit_one > 0
-      else {
-	// HACK: collision_limit_one was zero, lock so that unlocking below works.
-	LOGFILE << " collision_limit for boosted node turned out to be zero.";
-	search_->search_stats_->best_move_candidates_mutex.lock();	      
-      }
     } else { // End of "no reason to enforce visits".
       // Don't spam the log when autopilot is on.
       if(override_cpuct == 1 && !search_->search_stats_->winning_){
@@ -2775,7 +2796,7 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
       }
     }
     search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_mutex_.unlock();
-    search_->search_stats_->best_move_candidates_mutex.unlock();
+    search_->search_stats_->best_move_candidates_mutex.unlock_shared();
   } // end of override CPUCT
   
   auto& vtp_buffer = workspace->vtp_buffer;

@@ -1022,27 +1022,28 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	  }
 	  if(search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child > 1000000 &&
 	     search_stats_->number_of_nodes_in_support_for_helper_eval_of_helpers_preferred_child > 1000000){
+	    int centipawn_diff = search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child;
 	    if(
 	       // improve play
 	       // improve play in worse positions
-	       (search_stats_->helper_eval_of_leelas_preferred_child < -30 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 10) ||
+	       (search_stats_->helper_eval_of_leelas_preferred_child < -30 && centipawn_diff > 10) ||
 	       // improve play in better positions
-	       (search_stats_->helper_eval_of_leelas_preferred_child > 30 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 10) ||
+	       (search_stats_->helper_eval_of_leelas_preferred_child > 30 && centipawn_diff > 10) ||
 	       // save the win
-	       (search_stats_->helper_eval_of_root > 90 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 9) ||
+	       (search_stats_->helper_eval_of_root > 90 && centipawn_diff > 9) ||
 	       
 	       // save the draw
 	       // 90 110
-	       (search_stats_->helper_eval_of_leelas_preferred_child < -90 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 9) ||
+	       (search_stats_->helper_eval_of_leelas_preferred_child < -90 && centipawn_diff > 9) ||
 	       // save the win
-	       (search_stats_->helper_eval_of_root > 110 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 8) ||
+	       (search_stats_->helper_eval_of_root > 110 && centipawn_diff > 8) ||
 	       // 120 135
 	       // save the draw	       
-	       (search_stats_->helper_eval_of_leelas_preferred_child < -110 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 8) ||
+	       (search_stats_->helper_eval_of_leelas_preferred_child < -110 && centipawn_diff > 8) ||
 	       // save the win	       
-	       (search_stats_->helper_eval_of_root > 120 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 7) ||
+	       (search_stats_->helper_eval_of_root > 120 && centipawn_diff > 7) ||
 	       // 140 152
-	       (search_stats_->helper_eval_of_leelas_preferred_child < -120 && search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child > 7)
+	       (search_stats_->helper_eval_of_leelas_preferred_child < -120 && centipawn_diff > 7)
 	       ){
 	      // print the move in rotated mode
 	      bool flip = played_history_.IsBlackToMove();
@@ -1050,7 +1051,7 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	      Move m_leela;	      
 	      Move::ParseMove(&m_helper, search_stats_->winning_move_.as_string(), flip);
 	      Move::ParseMove(&m_leela, search_stats_->Leelas_PV[0].as_string(), flip);
-	      if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Trying to save a draw/win, helper eval of root: " << search_stats_->helper_eval_of_root << " helper recommended move " << m_helper.as_string() << ". Number of nodes in support for the root node eval: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_root << " The helper eval of leelas preferred move: " << search_stats_->helper_eval_of_leelas_preferred_child << " Leela prefers the move: " << m_leela.as_string() << ", nodes in support for the eval of leelas preferred move: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child << " helper eval of helpers preferred move: " << search_stats_->helper_eval_of_helpers_preferred_child << " centipawn diff between helpers and leelas line, according to the helper: " << std::abs(search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_helpers_preferred_child) << ".";
+	      if (params_.GetAuxEngineVerbosity() >= 2) LOGFILE << "Trying to save a draw/win, helper eval of root: " << search_stats_->helper_eval_of_root << " helper recommended move " << m_helper.as_string() << ". Number of nodes in support for the root node eval: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_root << " The helper eval of leelas preferred move: " << search_stats_->helper_eval_of_leelas_preferred_child << " Leela prefers the move: " << m_leela.as_string() << ", nodes in support for the eval of leelas preferred move: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_leelas_preferred_child << " helper eval of helpers preferred move: " << search_stats_->helper_eval_of_helpers_preferred_child << " Number of nodes in support for helpers preferred child: " << search_stats_->number_of_nodes_in_support_for_helper_eval_of_helpers_preferred_child << " centipawn diff between helpers and leelas line, according to the helper: " << std::abs(search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child) << ".";
 	      search_stats_->stop_a_blunder_ = true;
 	      if(search_stats_->helper_eval_of_root > 140){
 		search_stats_->save_a_win_ = true;
@@ -1059,7 +1060,6 @@ void Search::MaybeTriggerStop(const IterationStats& stats,
 	      }
 	    } else {
 	      // Too small differences, but which one had the better move (according to the helper)
-	      int centipawn_diff = search_stats_->helper_eval_of_helpers_preferred_child - search_stats_->helper_eval_of_leelas_preferred_child;
 	      if(centipawn_diff > 0){
 		LOGFILE << "Helper had the better move by " << centipawn_diff << " cp (according to itself).";
 	      } 
@@ -2690,12 +2690,31 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	    collision_limit_one = 0;
 	    LOGFILE << "Anomaly detected: The second divergence is root node or the vector of moves up to it is of length zero.";
 	  } else {
-	    // Lets try something greedy!
-	    collision_limit_one = std::max(static_cast<uint32_t>(collision_limit), 1024 - boosted_node->GetNInFlight());
-	    // collision_limit_one = std::max(0, static_cast<int>(1024-boosted_node->GetNInFlight()));
-	    // Promising
-	    // collision_limit_one = std::min(std::max(static_cast<uint32_t>(2), static_cast<uint32_t>(std::trunc(0.1f * boosted_node->GetN()))), static_cast<uint32_t>(std::trunc(0.5f * collision_limit)));
-	    vector_of_moves_from_root_to_boosted_node = search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_;
+	    // // Lets try something greedy!
+	    // collision_limit_one = std::max(static_cast<uint32_t>(collision_limit), 1024 - boosted_node->GetNInFlight());
+	    // // The greedy approach isn't too bad, -13 Elo, but perhaps it is better to only make sure that the helper's recommendation gets as many visits as the best child?
+
+	    // Need to redefine best_child since we have changed boosted_node.
+	    vector_of_moves_from_root_to_boosted_node = search_->search_stats_->vector_of_moves_from_root_to_Helpers_preferred_child_node_in_Leelas_PV_;	    
+	    best_child = search_->GetBestChildNoTemperature(boosted_node->GetParent(), vector_of_moves_from_root_to_boosted_node.size()).node();
+
+	    // Copy code from `roughly_equal`
+	    if(boosted_node == best_child || boosted_node->GetN() + boosted_node->GetNInFlight() >= best_child->GetN() + best_child->GetNInFlight()){
+	      if(boosted_node == best_child){
+		LOGFILE << "Second divergence: already best child, stop boosting here.";
+	      } else {
+		LOGFILE << "Second divergence: more visits but not yet best child, stop boosting here.";		
+	      }
+	      collision_limit_one = 0;
+	    }
+	    if(boosted_node->GetN() + boosted_node->GetNInFlight() + collision_limit_one > best_child->GetN() + best_child->GetNInFlight()){
+	      // Equal number of visits is OK, but not more
+	      if(boosted_node->GetN() + boosted_node->GetNInFlight() < best_child->GetN() + best_child->GetNInFlight()){
+		collision_limit_one = best_child->GetN() + best_child->GetNInFlight() - boosted_node->GetN() - boosted_node->GetNInFlight() - 1;
+		LOGFILE << "Second divergence: Limiting the number of forced visits to match best child.";
+	      }
+	    }
+
 	  }
 	} else {
 	  // roughly equal or clearly better

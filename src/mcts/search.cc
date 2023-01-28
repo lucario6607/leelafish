@@ -2667,6 +2667,7 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 
       Node* boosted_node;
       std::vector<Move> vector_of_moves_from_root_to_boosted_node;
+      int hard_max_minibatch_size = 980; // 1024 if you have enough RAM on the GPU.
 
       // Need to define three things: (1) boosted_node, (2) vector_of_moves_from_root_to_boosted_node (3) collision_limit_one (i.e. the number of visits to force)
       // if(override_cpuct == 1){
@@ -2677,7 +2678,7 @@ bool SearchWorker::PickNodesToExtendTask(Node* node, int base_depth,
 	// collision_limit_one = collision_limit - boosted_node->GetNInFlight(); // This is the default
 	// collision_limit_one = 2 * collision_limit; // This is the default
 	// collision_limit_one = std::floor(1024 / std::max(1.0f, vector_of_moves_from_root_to_boosted_node.size() / 2.0f)); // Try to catch up fast.
-	collision_limit_one = std::max(static_cast<uint32_t>(collision_limit), 1024 - boosted_node->GetNInFlight()); // Try to catch up fast.
+	collision_limit_one = std::max(static_cast<uint32_t>(collision_limit), hard_max_minibatch_size - boosted_node->GetNInFlight()); // Try to catch up fast.
 	if(donate_visits){
 	  // collision_limit_one = 0;
 	  // // Do something useful with the information that both Leela and the helper agree up to the point of the second divergence. It should be rather low risk to boost that node, but no need to through ALL visits there.

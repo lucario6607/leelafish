@@ -27,12 +27,14 @@
 
 #pragma once
 
+#include <boost/process.hpp>
 #include <array>
 #include <condition_variable>
 #include <functional>
 #include <optional>
 #include <shared_mutex>
 #include <thread>
+#include <queue>
 
 #include "chess/callbacks.h"
 #include "chess/uciloop.h"
